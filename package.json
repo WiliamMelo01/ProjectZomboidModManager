@@ -1,0 +1,14 @@
+{
+  "name": "zomboid-server-mod-manager",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}

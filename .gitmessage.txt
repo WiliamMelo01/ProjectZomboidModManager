@@ -1,0 +1,11 @@
+<type>(<scope>): <short summary>
+
+Longer description (wrap at 72 characters). Explain the motivation
+and approach. Use the body to provide additional context when needed.
+
+BREAKING CHANGE: Describe any breaking API or config changes.
+
+Examples:
+feat(server): add automatic detection for multiple instances
+fix(scanner): handle missing workshopmanifest.json gracefully
+chore: update Tauri scaffold and basic assets

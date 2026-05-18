@@ -1,0 +1,15 @@
+{
+  "package": {
+    "productName": "Zomboid Server Mod Manager",
+    "version": "0.0.1"
+  },
+  "tauri": {
+    "windows": [
+      {
+        "title": "Zomboid Server Mod Manager",
+        "width": 1200,
+        "height": 800
+      }
+    ]
+  }
+}

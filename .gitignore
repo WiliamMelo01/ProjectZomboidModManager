@@ -1,0 +1,10 @@
+node_modules/
+dist/
+build/
+target/
+src-tauri/target/
+/.idea/
+/.vscode/
+*.log
+codex.md
+gemini.md

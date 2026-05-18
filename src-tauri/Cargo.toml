@@ -1,0 +1,7 @@
+[package]
+name = "zomboid_server_mod_manager"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tauri = { version = "1.4.4", features = ["api-all"] }

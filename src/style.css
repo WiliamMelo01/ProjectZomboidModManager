@@ -1,0 +1,14 @@
+:root{
+  --bg:#141414;
+  --panel:#1e1e1e;
+  --muted:#9a9a9a;
+  --accent:#d9732b; /* rust/orange */
+}
+html,body,#app{height:100%;}
+body{margin:0;background:var(--bg);color:#eaeaea;font-family:Segoe UI,Roboto,Arial,sans-serif}
+.app-header{padding:16px 20px;border-bottom:1px solid #232323;background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent)}
+main{display:flex;height:calc(100% - 72px)}
+.sidebar{width:320px;padding:12px;background:var(--panel);border-right:1px solid #222}
+.content{flex:1;padding:16px}
+input{width:100%;padding:8px;border-radius:6px;border:1px solid #2a2a2a;background:#111;color:var(--muted)}
+.placeholder{padding:24px;color:var(--muted)}

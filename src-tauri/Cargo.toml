@@ -3,5 +3,8 @@ name = "zomboid_server_mod_manager"
 version = "0.1.0"
 edition = "2021"
 
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
 [dependencies]
-tauri = { version = "1.4.4", features = ["api-all"] }
+tauri = { version = "2", features = [] }

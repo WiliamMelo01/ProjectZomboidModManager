@@ -1,9 +1,15 @@
 {
-  "package": {
-    "productName": "Zomboid Server Mod Manager",
-    "version": "0.0.1"
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Zomboid Server Mod Manager",
+  "version": "0.0.1",
+  "identifier": "com.wiliammelo.zomboidservermodmanager",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
   },
-  "tauri": {
+  "app": {
     "windows": [
       {
         "title": "Zomboid Server Mod Manager",

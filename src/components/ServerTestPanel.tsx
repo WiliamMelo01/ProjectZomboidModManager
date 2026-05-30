@@ -3,25 +3,9 @@ import { useEffect, useRef, useState } from "react"
 import { listen } from "@tauri-apps/api/event"
 
 import type { AppNotification } from "@/components/AppHeader"
-
-type ServerTestResult = {
-  status: "passed" | "failed" | "setup_error"
-  summary: string
-  durationSeconds: number
-  batPath: string
-  command: string
-  warningCount: number
-  criticalCount: number
-  logLines: string[]
-}
-
-type ServerTestEvent = {
-  serverId: string
-  event: "started" | "line" | "finished" | "error"
-  line: string | null
-  result: ServerTestResult | null
-  error: string | null
-}
+import { ServerTestCompactCard } from "@/components/server-test/ServerTestCompactCard"
+import { formatDuration, getLogLineClassName, getServerTestStatusLabel, getServerTestStatusStyle } from "@/lib/serverTest"
+import type { ServerTestEvent, ServerTestResult } from "@/types/serverTest"
 
 type ServerTestPanelProps = {
   hasDownloadProgressCard?: boolean
@@ -188,33 +172,15 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
 
   if (isMinimized) {
     return (
-      <button
-        onClick={() => setIsMinimized(false)}
-        className={`fixed right-6 z-40 w-80 rounded-2xl border border-white/10 bg-[#22272b] p-4 text-left shadow-2xl shadow-black/50 transition-all hover:bg-[#293036] ${
-          hasDownloadProgressCard ? "bottom-[144px]" : "bottom-6"
-        }`}
-      >
-        <div className="flex items-center gap-3">
-          <div className={`shrink-0 rounded-xl p-2 ${statusStyle.iconBg}`}>
-            {isTesting ? (
-              <RefreshCw size={18} className="animate-spin text-orange-400" />
-            ) : result?.status === "passed" ? (
-              <CheckCircle2 size={18} className="text-green-400" />
-            ) : result?.status === "failed" ? (
-              <XCircle size={18} className="text-red-400" />
-            ) : (
-              <AlertTriangle size={18} className="text-orange-400" />
-            )}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-black text-white">Teste do servidor</p>
-            <p className="mt-1 truncate text-xs text-gray-400">
-              {serverId ?? "perfil"} · {formatDuration(elapsedSeconds)} · {logLines.length} linhas
-            </p>
-          </div>
-          <Maximize2 size={16} className="text-gray-500" />
-        </div>
-      </button>
+      <ServerTestCompactCard
+        serverId={serverId}
+        isTesting={isTesting}
+        result={result}
+        elapsedSeconds={elapsedSeconds}
+        logLineCount={logLines.length}
+        hasDownloadProgressCard={hasDownloadProgressCard}
+        onExpand={() => setIsMinimized(false)}
+      />
     )
   }
 
@@ -360,84 +326,4 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
       </div>
     </div>
   )
-}
-
-function getServerTestStatusLabel(status: ServerTestResult["status"]) {
-  switch (status) {
-    case "passed":
-      return "Sem falhas criticas"
-    case "failed":
-      return "Falhas encontradas"
-    case "setup_error":
-      return "Configuracao incompleta"
-  }
-}
-
-function getServerTestStatusStyle(status: ServerTestResult["status"] | undefined, isTesting: boolean) {
-  if (isTesting) {
-    return {
-      iconBg: "bg-orange-500/10",
-      panel: "border-orange-500/20 bg-orange-500/10",
-    }
-  }
-
-  switch (status) {
-    case "passed":
-      return {
-        iconBg: "bg-green-500/10",
-        panel: "border-green-500/20 bg-green-500/10",
-      }
-    case "failed":
-      return {
-        iconBg: "bg-red-500/10",
-        panel: "border-red-500/20 bg-red-500/10",
-      }
-    default:
-      return {
-        iconBg: "bg-orange-500/10",
-        panel: "border-orange-500/20 bg-orange-500/10",
-      }
-  }
-}
-
-function formatDuration(totalSeconds: number) {
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
-}
-
-function getLogLineClassName(line: string) {
-  const normalizedLine = line.toLowerCase()
-
-  if (
-    normalizedLine.includes("*** server started") ||
-    normalizedLine.includes("server is listening on port") ||
-    normalizedLine.includes("raknet.startup() return code: 0")
-  ) {
-    return "text-green-300"
-  }
-
-  if (
-    normalizedLine.includes("error") ||
-    normalizedLine.includes("exception") ||
-    normalizedLine.includes("java.lang") ||
-    normalizedLine.includes("failed") ||
-    normalizedLine.includes("required mod") ||
-    normalizedLine.includes("workshop item") ||
-    normalizedLine.includes("missing mod") ||
-    normalizedLine.includes("missing required")
-  ) {
-    return "text-red-300"
-  }
-
-  if (normalizedLine.includes("warn")) {
-    return "text-yellow-300"
-  }
-
-  if (normalizedLine.includes("log")) {
-    return "text-gray-300"
-  }
-
-  return "text-gray-400"
 }

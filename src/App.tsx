@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { listen } from "@tauri-apps/api/event"
-import { Box, Download, RefreshCw, Server, Settings } from "lucide-react"
+import { Box, Download, Server, Settings } from "lucide-react"
 
 import { AppHeader, type AppNotification } from "@/components/AppHeader"
 import { AppSidebar } from "@/components/AppSidebar"
@@ -8,12 +8,16 @@ import { CreateServerModal } from "@/components/CreateServerModal"
 import { Dashboard } from "@/components/Dashboard"
 import { DownloadMods } from "@/components/DownloadMods"
 import { DownloadProgressCard } from "@/components/DownloadProgressCard"
+import { LoadingModsPanel } from "@/components/LoadingModsPanel"
 import { ModsList } from "@/components/ModsList"
 import { ServerDetail } from "@/components/ServerDetail"
 import { ServerTestPanel } from "@/components/ServerTestPanel"
 import { Settings as SettingsView } from "@/components/Settings"
 import { WorkshopWindow } from "@/components/WorkshopWindow"
+import { useModsLibrary } from "@/hooks/useModsLibrary"
 import { useWorkshopDownloadManager } from "@/hooks/useWorkshopDownloadManager"
+import { getErrorMessage } from "@/lib/errors"
+import { getActiveDependencyChain, getWorkshopIdsForModIds } from "@/lib/serverMods"
 import { invokeTauri } from "@/lib/tauri"
 import type { ZomboidMod } from "@/types/mod"
 import type { ZomboidServer } from "@/types/server"
@@ -34,16 +38,22 @@ function App() {
   const [servers, setServers] = useState<ZomboidServer[]>([])
   const [serversError, setServersError] = useState<string | null>(null)
   const [isLoadingServers, setIsLoadingServers] = useState(true)
-  const [mods, setMods] = useState<ZomboidMod[]>([])
-  const [modsCount, setModsCount] = useState(0)
-  const [modsError, setModsError] = useState<string | null>(null)
-  const [isLoadingMods, setIsLoadingMods] = useState(false)
-  const [isInstallingAllMods, setIsInstallingAllMods] = useState(false)
-  const [hasLoadedMods, setHasLoadedMods] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [runningServerTestId, setRunningServerTestId] = useState<string | null>(null)
-  const modsLoadPromiseRef = useRef<Promise<ZomboidMod[]> | null>(null)
+  const {
+    mods,
+    modsCount,
+    modsError,
+    isLoadingMods,
+    isInstallingAllMods,
+    hasLoadedMods,
+    loadMods,
+    ensureModsLoaded,
+    installMods,
+    installAllUninstalledMods,
+    loadModsInBackground,
+  } = useModsLibrary()
   const navItems = useMemo(
     () => [
       { id: "dashboard", label: "Servidores", icon: Server },
@@ -78,112 +88,9 @@ function App() {
     }
   }
 
-  async function loadMods() {
-    if (modsLoadPromiseRef.current) {
-      return modsLoadPromiseRef.current
-    }
-
-    const loadPromise = (async () => {
-      setIsLoadingMods(true)
-      setModsError(null)
-
-      try {
-        const foundMods = await invokeTauri<ZomboidMod[]>("list_zomboid_mods")
-        setMods(foundMods)
-        setModsCount(foundMods.length)
-        setHasLoadedMods(true)
-        return foundMods
-      } catch (error) {
-        const message = getErrorMessage(error)
-        setModsError(message)
-        setMods([])
-        return []
-      } finally {
-        setIsLoadingMods(false)
-        modsLoadPromiseRef.current = null
-      }
-    })()
-
-    modsLoadPromiseRef.current = loadPromise
-    return loadPromise
-  }
-
-  async function loadModsCount() {
-    setModsError(null)
-
-    try {
-      const foundModsCount = await invokeTauri<number>("count_zomboid_mods")
-      setModsCount(foundModsCount)
-    } catch (error) {
-      setModsError(getErrorMessage(error))
-      setModsCount(0)
-    }
-  }
-
-  async function ensureModsLoaded() {
-    if (hasLoadedMods || isLoadingMods) {
-      return
-    }
-
-    await loadMods()
-  }
-
-  async function installMods(modsToInstall: ZomboidMod[]) {
-    setModsError(null)
-
-    try {
-      const modsToMove = modsToInstall.filter((mod) => !mod.isInstalled && mod.source !== "local")
-
-      for (const mod of modsToMove) {
-        await invokeTauri<void>("install_zomboid_mod", {
-          modPath: mod.path,
-          modId: mod.id,
-          workshopId: mod.workshopId,
-        })
-      }
-      const installedModIds = new Set(modsToMove.map((mod) => mod.id.toLowerCase()))
-
-      setMods((currentMods) =>
-        currentMods.map((mod) =>
-          installedModIds.has(mod.id.toLowerCase())
-            ? {
-                ...mod,
-                isInstalled: true,
-                source: mod.source === "steam" ? "local" : mod.source,
-              }
-            : mod,
-        ),
-      )
-    } catch (error) {
-      setModsError(getErrorMessage(error))
-      throw error
-    }
-  }
-
-  async function installAllUninstalledMods() {
-    if (isInstallingAllMods) {
-      return
-    }
-
-    setIsInstallingAllMods(true)
-
-    try {
-      const availableMods = hasLoadedMods ? mods : await loadMods()
-      const modsToInstall = availableMods.filter((mod) => !mod.isInstalled && mod.source !== "local")
-
-      if (modsToInstall.length === 0) {
-        return
-      }
-
-      await installMods(modsToInstall)
-    } finally {
-      setIsInstallingAllMods(false)
-    }
-  }
-
   async function updateServerMods(server: ZomboidServer, activeModIds: string[]) {
     setServersError(null)
-    const workshopIds = getWorkshopIdsForModIds(activeModIds)
+    const workshopIds = getWorkshopIdsForModIds(activeModIds, mods)
 
     await invokeTauri<void>("update_zomboid_server_mods", {
       serverId: server.id,
@@ -245,50 +152,6 @@ function App() {
     }
   }
 
-  function getActiveDependencyChain(
-    mod: ZomboidMod,
-    modsById: Map<string, ZomboidMod>,
-    activeModIds: Set<string>,
-  ) {
-    const orderedModIds: string[] = []
-    const visitingModIds = new Set<string>()
-    const visitedModIds = new Set<string>()
-
-    function visit(currentMod: ZomboidMod) {
-      const currentModId = currentMod.id.toLowerCase()
-
-      if (visitedModIds.has(currentModId) || visitingModIds.has(currentModId)) {
-        return
-      }
-
-      visitingModIds.add(currentModId)
-
-      for (const dependencyId of currentMod.dependencies ?? []) {
-        const normalizedDependencyId = dependencyId.toLowerCase()
-
-        if (!activeModIds.has(normalizedDependencyId)) {
-          continue
-        }
-
-        const dependency = modsById.get(normalizedDependencyId)
-
-        if (dependency) {
-          visit(dependency)
-        }
-      }
-
-      visitingModIds.delete(currentModId)
-      visitedModIds.add(currentModId)
-
-      if (activeModIds.has(currentModId)) {
-        orderedModIds.push(currentMod.id)
-      }
-    }
-
-    visit(mod)
-    return orderedModIds
-  }
-
   async function activateServerMods(server: ZomboidServer, modsToActivate: ZomboidMod[]) {
     const nextActiveModIds = [...(server.activeModIds ?? [])]
     const activeModIdsSet = new Set(nextActiveModIds.map((modId) => modId.toLowerCase()))
@@ -310,8 +173,7 @@ function App() {
   }
 
   async function createServer(data: { name: string; modIds: string[] }) {
-    const selectedModIds = new Set(data.modIds.map((modId) => modId.toLowerCase()))
-    const workshopIds = getWorkshopIdsForModIds(data.modIds)
+    const workshopIds = getWorkshopIdsForModIds(data.modIds, mods)
     const createdServer = await invokeTauri<ZomboidServer>("create_zomboid_server", {
       name: data.name,
       modIds: data.modIds,
@@ -325,33 +187,6 @@ function App() {
     )
     setSelectedServer(createdServer)
     setActiveTab("dashboard")
-  }
-
-  function getWorkshopIdsForModIds(modIds: string[]) {
-    const selectedModIds = new Set(modIds.map((modId) => modId.toLowerCase()))
-    const seenWorkshopIds = new Set<string>()
-
-    return modIds.flatMap((modId) => {
-      const mod = mods.find((item) => item.id.toLowerCase() === modId.toLowerCase())
-      const workshopId = mod?.workshopId?.trim()
-
-      if (!workshopId) {
-        return []
-      }
-
-      const normalizedWorkshopId = workshopId.toLowerCase()
-
-      if (seenWorkshopIds.has(normalizedWorkshopId)) {
-        return []
-      }
-
-      if (!selectedModIds.has(modId.toLowerCase())) {
-        return []
-      }
-
-      seenWorkshopIds.add(normalizedWorkshopId)
-      return [workshopId]
-    })
   }
 
   async function installDownloadedDependencyForServer(server: ZomboidServer, dependencyId: string) {
@@ -385,12 +220,6 @@ function App() {
   async function loadInitialData() {
     await loadServers()
     void loadModsInBackground()
-  }
-
-  async function loadModsInBackground() {
-    setIsLoadingMods(true)
-    await loadModsCount()
-    await loadMods()
   }
 
   function addNotification(notification: Omit<AppNotification, "id" | "createdAt" | "isRead">) {
@@ -615,61 +444,6 @@ function App() {
       )}
     </main>
   );
-}
-
-function getErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  if (typeof error === "string") {
-    return error
-  }
-
-  if (error) {
-    return JSON.stringify(error)
-  }
-
-  return "Nao foi possivel buscar os servidores."
-}
-
-function LoadingModsPanel({
-  error,
-  isLoading,
-  onRetry,
-}: {
-  error: string | null
-  isLoading: boolean
-  onRetry: () => Promise<void>
-}) {
-  return (
-    <div className="h-full bg-[#22272b] p-8 text-white">
-      <div className="rounded-3xl border border-white/5 bg-[#2b3238] p-6 text-gray-300">
-        <div className="flex items-center gap-3">
-          <RefreshCw size={20} className={isLoading ? "animate-spin text-orange-400" : "text-gray-500"} />
-          <div>
-            <p className="font-bold text-white">Carregando mods</p>
-            <p className="text-sm text-gray-400">A lista completa so e carregada quando ela for necessaria.</p>
-          </div>
-        </div>
-
-        {error && (
-          <div className="mt-5 rounded-2xl border border-red-500/20 bg-red-500/10 px-5 py-4 text-sm text-red-300">
-            {error}
-          </div>
-        )}
-
-        {error && (
-          <button
-            onClick={() => void onRetry()}
-            className="mt-5 rounded-xl bg-orange-500 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-orange-600"
-          >
-            Tentar novamente
-          </button>
-        )}
-      </div>
-    </div>
-  )
 }
 
 export default App

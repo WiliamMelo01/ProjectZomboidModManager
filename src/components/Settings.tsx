@@ -1,8 +1,10 @@
-import { CheckCircle2, Cpu, Folder, FolderOpen, FolderPlus, Monitor, RefreshCw, Save, Search, XCircle } from "lucide-react"
+import { Cpu, Folder, RefreshCw, Save } from "lucide-react"
 import { useEffect, useState } from "react"
 
-import { RamDropdown } from "@/components/settings/RamDropdown"
+import { GamePerformanceSection } from "@/components/settings/GamePerformanceSection"
+import { ModLocationsSection } from "@/components/settings/ModLocationsSection"
 import { RamTips } from "@/components/settings/RamTips"
+import { SteamCmdSettingsSection } from "@/components/settings/SteamCmdSettingsSection"
 import { invokeTauri } from "@/lib/tauri"
 import type { AppSettings, ModLocation, ZomboidInstallationStatus } from "@/types/settings"
 
@@ -260,275 +262,38 @@ export function Settings() {
             <div className="space-y-6">
               {activeTab === "mods" && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  <section className="bg-[#2b3238] rounded-3xl border border-white/5 p-8 shadow-xl relative group">
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/5 blur-3xl rounded-full -mr-16 -mt-16 transition-all group-hover:bg-orange-500/10" />
-
-                    <div className="flex items-center gap-3 mb-6 relative z-10">
-                      <div className="w-10 h-10 rounded-2xl bg-orange-500/10 flex items-center justify-center text-orange-400 border border-orange-500/20">
-                        <Folder size={20} />
-                      </div>
-                      <div>
-                        <h3 className="text-xl font-bold text-white">Integracao SteamCMD</h3>
-                        <p className="text-xs text-gray-500">Usado para baixar itens da Workshop do Project Zomboid.</p>
-                      </div>
-                    </div>
-
-                    <div className="mb-6 rounded-2xl border border-white/5 bg-[#1e2327] p-4 relative z-10">
-                      <div className="flex items-start gap-3">
-                        {isConfigured ? (
-                          <CheckCircle2 size={20} className="text-green-400 shrink-0 mt-0.5" />
-                        ) : (
-                          <XCircle size={20} className="text-red-400 shrink-0 mt-0.5" />
-                        )}
-                        <div className="min-w-0">
-                          <p className="text-sm font-bold text-white">
-                            {isConfigured ? "SteamCMD configurado" : "SteamCMD nao configurado"}
-                          </p>
-                          <p className="text-xs text-gray-500 break-all">
-                            {resolvedPath || "Informe o caminho do steamcmd.exe ou use a deteccao automatica."}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3 relative z-10">
-                      <label htmlFor="steamcmd-path" className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">
-                        Caminho do executavel
-                      </label>
-                      <div className="flex flex-col gap-3 md:flex-row">
-                        <div className="relative flex-1 group/input">
-                          <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within/input:text-orange-400 transition-colors">
-                            <Folder size={18} />
-                          </div>
-                          <input
-                            id="steamcmd-path"
-                            type="text"
-                            value={steamCmdPath}
-                            onChange={(event) => setSteamCmdPath(event.target.value)}
-                            placeholder="C:\steamcmd\steamcmd.exe"
-                            className="w-full bg-[#1e2327] border border-white/5 rounded-2xl py-3.5 pl-12 pr-4 text-sm focus:outline-none focus:border-orange-400/50 focus:ring-1 focus:ring-orange-400/20 transition-all placeholder:text-gray-700"
-                          />
-                        </div>
-                        <button
-                          className="flex items-center justify-center gap-2 bg-[#2b3238] hover:bg-[#323a41] border border-white/10 px-5 py-3.5 rounded-2xl text-sm font-bold transition-all hover:border-orange-500/30 active:scale-95"
-                          onClick={() => void browseSteamCmd()}
-                        >
-                          <Folder size={18} />
-                          Procurar
-                        </button>
-                        <button
-                          className="flex items-center justify-center gap-2 bg-[#2b3238] hover:bg-[#323a41] border border-white/10 px-5 py-3.5 rounded-2xl text-sm font-bold transition-all hover:border-orange-500/30 active:scale-95"
-                          onClick={() => void detectSteamCmd()}
-                        >
-                          <Search size={18} />
-                          Detectar
-                        </button>
-                      </div>
-
-                      <p className="text-xs text-gray-500">
-                        Ao salvar vazio, o app tenta encontrar pelo STEAMCMD_PATH, PATH e locais comuns como C:\steamcmd.
-                      </p>
-                    </div>
-                  </section>
-
-                  <section className="bg-[#2b3238] rounded-3xl border border-white/5 p-8 shadow-xl relative group">
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/5 blur-3xl rounded-full -mr-16 -mt-16 transition-all group-hover:bg-orange-500/10" />
-
-                    <div className="flex items-center justify-between mb-6 relative z-10">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-2xl bg-orange-500/10 flex items-center justify-center text-orange-400 border border-orange-500/20">
-                          <FolderPlus size={20} />
-                        </div>
-                        <div>
-                          <h3 className="text-xl font-bold text-white">Bibliotecas de Mods</h3>
-                          <p className="text-xs text-gray-500">Locais padrao salvos no arquivo settings.ini.</p>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap justify-end gap-2">
-                        <button
-                          disabled={isAddingFolder}
-                          onClick={() => void addModFolder()}
-                          className="flex items-center gap-2 bg-orange-500/10 text-orange-400 hover:bg-orange-500 hover:text-white disabled:opacity-60 px-4 py-2 rounded-xl transition-all font-bold text-sm border border-orange-500/20 active:scale-95"
-                        >
-                          {isAddingFolder ? <RefreshCw size={18} className="animate-spin" /> : <FolderPlus size={18} />}
-                          <span>Adicionar pasta</span>
-                        </button>
-                        <button
-                          onClick={() => void refreshModLocations()}
-                          className="flex items-center gap-2 bg-orange-500/10 text-orange-400 hover:bg-orange-500 hover:text-white px-4 py-2 rounded-xl transition-all font-bold text-sm border border-orange-500/20 active:scale-95"
-                        >
-                          <RefreshCw size={18} />
-                          <span>Recarregar lista</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3 relative z-10">
-                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">
-                        Locais salvos
-                      </label>
-                      <div className="grid gap-2">
-                        {modLocations.length === 0 ? (
-                          <div className="bg-[#1e2327] border border-dashed border-white/5 rounded-2xl p-8 text-center">
-                            <p className="text-sm text-gray-600">Nenhum local de mods salvo.</p>
-                          </div>
-                        ) : (
-                          modLocations.map((location) => (
-                            <div key={`${location.kind}:${location.path}`} className="group/path flex items-center gap-3 bg-[#1e2327] border border-white/5 rounded-2xl p-3 pl-4 transition-all hover:border-orange-500/20">
-                              <Folder size={18} className="text-gray-500 group-hover/path:text-orange-400 transition-colors shrink-0" />
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="text-sm font-bold text-white">{location.label}</span>
-                                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${
-                                    location.exists
-                                      ? "border-green-500/20 bg-green-500/10 text-green-300"
-                                      : "border-red-500/20 bg-red-500/10 text-red-300"
-                                  }`}>
-                                    {location.exists ? "Encontrado" : "Nao existe"}
-                                  </span>
-                                </div>
-                                <p className="mt-1 truncate font-mono text-xs text-gray-400">{location.path}</p>
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </section>
+                  <SteamCmdSettingsSection
+                    path={steamCmdPath}
+                    resolvedPath={resolvedPath}
+                    isConfigured={isConfigured}
+                    onPathChange={setSteamCmdPath}
+                    onBrowse={() => void browseSteamCmd()}
+                    onDetect={() => void detectSteamCmd()}
+                  />
+                  <ModLocationsSection
+                    locations={modLocations}
+                    isAddingFolder={isAddingFolder}
+                    onAddFolder={() => void addModFolder()}
+                    onRefresh={() => void refreshModLocations()}
+                  />
                 </div>
               )}
 
               {activeTab === "ram" && (
-                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  <section className="bg-[#2b3238] rounded-3xl border border-white/5 p-8 shadow-xl relative group">
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/5 blur-3xl rounded-full -mr-16 -mt-16 transition-all group-hover:bg-orange-500/10" />
-
-                    <div className="flex items-center gap-3 mb-6 relative z-10">
-                      <div className="w-10 h-10 rounded-2xl bg-orange-500/10 flex items-center justify-center text-orange-400 border border-orange-500/20">
-                        <Monitor size={20} />
-                      </div>
-                      <div>
-                        <h3 className="text-xl font-bold text-white">Configuracao do Jogo</h3>
-                        <p className="text-xs text-gray-500">Defina o executavel e a memoria alocada para o client.</p>
-                      </div>
-                    </div>
-
-                    <div className="space-y-4 relative z-10">
-                      <div className="rounded-2xl border border-white/5 bg-[#1e2327] p-4">
-                        <div className="flex items-start gap-3">
-                          {isScanningZomboid ? (
-                            <RefreshCw size={20} className="text-orange-400 shrink-0 mt-0.5 animate-spin" />
-                          ) : zomboidStatus?.isExecutableFound && zomboidStatus?.isClientConfigFound ? (
-                            <CheckCircle2 size={20} className="text-green-400 shrink-0 mt-0.5" />
-                          ) : (
-                            <XCircle size={20} className="text-red-400 shrink-0 mt-0.5" />
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                              <p className="text-sm font-bold text-white">
-                                {zomboidStatus?.isExecutableFound && zomboidStatus?.isClientConfigFound
-                                  ? "Project Zomboid configurado"
-                                  : "Project Zomboid nao configurado"}
-                              </p>
-                              <button
-                                type="button"
-                                onClick={() => void scanZomboidInstallation()}
-                                className="flex items-center gap-2 rounded-xl border border-orange-500/20 bg-orange-500/10 px-3 py-1.5 text-xs font-bold text-orange-400 transition-all hover:bg-orange-500 hover:text-white"
-                              >
-                                <RefreshCw size={14} className={isScanningZomboid ? "animate-spin" : ""} />
-                                Escanear
-                              </button>
-                            </div>
-                            <p className="mt-1 text-xs text-gray-500 break-all">
-                              {zomboidStatus?.detectedExecutablePath ||
-                                "O app tenta usar a pasta padrao da Steam e localizar ProjectZomboid64.exe automaticamente."}
-                            </p>
-                            <div className="mt-3 grid gap-2 text-[11px] text-gray-500 md:grid-cols-3">
-                              <span className={zomboidStatus?.isGameDirFound ? "text-green-300" : "text-red-300"}>
-                                Pasta Steam: {zomboidStatus?.isGameDirFound ? "encontrada" : "nao encontrada"}
-                              </span>
-                              <span className={zomboidStatus?.isClientConfigFound ? "text-green-300" : "text-red-300"}>
-                                Launcher: {zomboidStatus?.isClientConfigFound ? "ok" : "pendente"}
-                              </span>
-                              <span className={zomboidStatus?.isServerConfigFound ? "text-green-300" : "text-yellow-300"}>
-                                Servidor: {zomboidStatus?.isServerConfigFound ? "ok" : "nao encontrado"}
-                              </span>
-                            </div>
-                            <p className="mt-2 text-[11px] text-gray-600 break-all">
-                              Pasta padrao: {zomboidStatus?.defaultGameDir || "C:\\Program Files (x86)\\Steam\\steamapps\\common\\ProjectZomboid"}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        <label htmlFor="game-path" className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">
-                          Executavel do Jogo (.exe)
-                        </label>
-                        <div className="flex flex-col gap-3 md:flex-row">
-                          <div className="relative flex-1 group/input">
-                            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within/input:text-orange-400 transition-colors">
-                              <Folder size={18} />
-                            </div>
-                            <input
-                              id="game-path"
-                              type="text"
-                              value={gameExecutablePath}
-                              onChange={(event) => setGameExecutablePath(event.target.value)}
-                              placeholder="C:\\SteamLibrary\\steamapps\\common\\ProjectZomboid\\ProjectZomboid64.exe"
-                              className="w-full bg-[#1e2327] border border-white/5 rounded-2xl py-3.5 pl-12 pr-4 text-sm focus:outline-none focus:border-orange-400/50 focus:ring-1 focus:ring-orange-400/20 transition-all placeholder:text-gray-700"
-                            />
-                          </div>
-                          <button
-                            className="flex items-center justify-center gap-2 bg-[#2b3238] hover:bg-[#323a41] border border-white/10 px-5 py-3.5 rounded-2xl text-sm font-bold transition-all hover:border-orange-500/30 active:scale-95"
-                            onClick={() => void browseGameExecutable()}
-                          >
-                            <Folder size={18} />
-                            Procurar
-                          </button>
-                          <button
-                            className="flex items-center justify-center gap-2 bg-[#2b3238] hover:bg-[#323a41] border border-white/10 px-5 py-3.5 rounded-2xl text-sm font-bold transition-all hover:border-orange-500/30 active:scale-95"
-                            onClick={() => void openSteamZomboidFolder()}
-                          >
-                            <FolderOpen size={18} />
-                            Abrir pasta
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-                        <div className="space-y-3">
-                          <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">
-                            RAM do Client (Jogo)
-                          </label>
-                          <RamDropdown
-                            value={clientRam}
-                            onChange={setClientRam}
-                            options={ramOptions}
-                          />
-                        </div>
-
-                        <div className="space-y-3">
-                          <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">
-                            RAM do Servidor
-                          </label>
-                          <RamDropdown
-                            value={serverRam}
-                            onChange={setServerRam}
-                            options={ramOptions}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </section>
-
-                  <div className="p-4 bg-orange-400/5 border border-orange-400/10 rounded-2xl flex gap-3">
-                    <Search size={20} className="text-orange-400 shrink-0 mt-0.5" />
-                    <p className="text-[11px] text-gray-400 leading-relaxed italic">
-                      O app usará o executável selecionado para localizar o arquivo de configuração e ajustar as flags de memória (-Xms e -Xmx). Certifique-se de selecionar o executável correto da versão que você utiliza (geralmente 64 bits).
-                    </p>
-                  </div>
-                </div>
+                <GamePerformanceSection
+                  path={gameExecutablePath}
+                  clientRam={clientRam}
+                  serverRam={serverRam}
+                  ramOptions={ramOptions}
+                  status={zomboidStatus}
+                  isScanning={isScanningZomboid}
+                  onPathChange={setGameExecutablePath}
+                  onClientRamChange={setClientRam}
+                  onServerRamChange={setServerRam}
+                  onBrowse={() => void browseGameExecutable()}
+                  onOpenFolder={() => void openSteamZomboidFolder()}
+                  onScan={() => void scanZomboidInstallation()}
+                />
               )}
 
               {error && (

@@ -1,7 +1,16 @@
-import { AlertCircle, AlertTriangle, ArrowLeft, Check, CheckCircle2, Info, Play, PlusCircle, RefreshCw, Search, Server, Trash2, X } from "lucide-react"
+import { ArrowLeft, Play, RefreshCw, Search, Server } from "lucide-react"
 import { useState } from "react"
 
 import { MissingDependencyModal } from "@/components/MissingDependencyModal"
+import {
+  DeactivateModModal,
+  DependencyWarningModal,
+  MoveModWarningModal,
+  PendingActivationModal,
+  type MoveModRequest,
+  type PendingActivation,
+} from "@/components/server/ServerDetailModals"
+import { ServerModContextMenu } from "@/components/server/ServerModContextMenu"
 import { ServerModList } from "@/components/server/ServerModList"
 import { ServerPortConflictModal } from "@/components/server/ServerPortConflictModal"
 import { buildActivationDependencyPlan, isLocalMod, normalizeModId } from "@/lib/modDependencies"
@@ -22,13 +31,6 @@ type ServerDetailProps = {
   onDependencyDownloaded?: (dependencyId: string) => Promise<void>
   onOpenSettings?: () => void
   runningServerTestId?: string | null
-}
-
-type PendingActivation = {
-  mod: ZomboidMod
-  dependenciesToInstall: ZomboidMod[]
-  dependenciesToActivate: ZomboidMod[]
-  modNeedsInstall: boolean
 }
 
 const MOVE_MOD_WARNING_KEY = "pzmm_move_mod_warning_modal_seen"
@@ -65,7 +67,7 @@ export function ServerDetail({
   const [missingDependency, setMissingDependency] = useState<{ mod: ZomboidMod; dependencyId: string } | null>(null)
   const [pendingActivation, setPendingActivation] = useState<PendingActivation | null>(null)
   const [contextMenu, setContextMenu] = useState<{ mod: ZomboidMod; x: number; y: number } | null>(null)
-  const [showMoveWarning, setShowMoveWarning] = useState<{ mod: ZomboidMod; position: "start" | "end" } | null>(null)
+  const [showMoveWarning, setShowMoveWarning] = useState<MoveModRequest | null>(null)
   const [dontShowAgainMove, setDontShowAgainMove] = useState(false)
   const [isTestingServer, setIsTestingServer] = useState(false)
   const [portConflictCheck, setPortConflictCheck] = useState<ServerPortCheck | null>(null)
@@ -354,50 +356,14 @@ export function ServerDetail({
       </div>
 
       {contextMenu && (
-        <div className="fixed inset-0 z-50" onClick={() => setContextMenu(null)} onContextMenu={(event) => event.preventDefault()}>
-          <div
-            className="absolute w-56 overflow-hidden rounded-xl border border-white/10 bg-[#1e2327] py-2 shadow-2xl shadow-black/40"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {(() => {
-              const dependents = getActiveDependents(contextMenu.mod)
-              const cannotMoveToEnd = dependents.length > 0
-
-              return (
-                <>
-            <div className="border-b border-white/5 px-4 pb-2 pt-1">
-              <p className="truncate text-xs font-bold text-white">{contextMenu.mod.name}</p>
-              <p className="truncate text-[10px] font-mono text-gray-500">{contextMenu.mod.id}</p>
-            </div>
-            <button
-              onClick={() => void moveActiveMod("start")}
-              className="w-full px-4 py-2.5 text-left text-sm font-medium text-gray-300 transition-colors hover:bg-orange-500/10 hover:text-orange-300"
-            >
-              Colocar no inicio
-            </button>
-            <button
-              onClick={() => void moveActiveMod("end")}
-                    disabled={cannotMoveToEnd}
-                    title={cannotMoveToEnd ? `Este mod e dependencia de ${dependents.length} mod(s) ativo(s).` : undefined}
-                    className={`w-full px-4 py-2.5 text-left text-sm font-medium transition-colors ${
-                      cannotMoveToEnd
-                        ? "cursor-not-allowed text-gray-600"
-                        : "text-gray-300 hover:bg-orange-500/10 hover:text-orange-300"
-                    }`}
-            >
-              Colocar no final
-            </button>
-                  {cannotMoveToEnd && (
-                    <p className="border-t border-white/5 px-4 py-2 text-[10px] leading-relaxed text-orange-300/80">
-                      Este mod precisa carregar antes de outros mods ativos.
-                    </p>
-                  )}
-                </>
-              )
-            })()}
-          </div>
-        </div>
+        <ServerModContextMenu
+          mod={contextMenu.mod}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          dependents={getActiveDependents(contextMenu.mod)}
+          onClose={() => setContextMenu(null)}
+          onMove={(position) => void moveActiveMod(position)}
+        />
       )}
 
       {portConflictCheck && (
@@ -411,223 +377,46 @@ export function ServerDetail({
 
       {/* Confirmation Modal */}
       {confirmDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-[#22272b] border border-white/10 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 p-6 text-center">
-            <div className="w-16 h-16 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Trash2 size={32} />
-            </div>
-            <h3 className="text-xl font-bold text-white mb-2">Desativar Mod?</h3>
-            <p className="text-gray-400 text-sm mb-6">
-              Tem certeza que deseja desativar o mod <span className="text-white font-bold">{confirmDelete.name}</span> deste servidor?
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => {
-                  void onToggleMod(confirmDelete, "deactivate")
-                  setConfirmDelete(null)
-                }}
-                className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl transition-all"
-              >
-                Sim, Desativar
-              </button>
-              <button
-                onClick={() => setConfirmDelete(null)}
-                className="flex-1 py-3 bg-transparent border border-white/10 text-gray-400 hover:text-white hover:bg-white/5 font-bold rounded-xl transition-all"
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
+        <DeactivateModModal
+          mod={confirmDelete}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            void onToggleMod(confirmDelete, "deactivate")
+            setConfirmDelete(null)
+          }}
+        />
       )}
 
       {/* Dependency Alert Modal (Active Dependents) */}
       {dependencyWarning && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-[#22272b] border border-orange-500/20 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300">
-            <div className="p-6 bg-orange-500/10 border-b border-orange-500/10 flex items-center gap-3">
-              <AlertTriangle className="text-orange-500" size={28} />
-              <h3 className="text-xl font-bold text-white">Alerta de Dependência</h3>
-            </div>
-            <div className="p-6">
-              <p className="text-gray-300 text-sm mb-4 leading-relaxed">
-                O mod <span className="text-orange-400 font-bold">{dependencyWarning.mod.name}</span> não pode ser desativado sozinho pois é uma dependência direta de:
-              </p>
-
-              <div className="space-y-2 mb-6">
-                {dependencyWarning.dependents.map(dep => (
-                  <div key={dep.id} className="flex items-center gap-2 p-3 bg-[#1e2327] rounded-xl border border-white/5">
-                    <div className="w-2 h-2 rounded-full bg-orange-500" />
-                    <span className="text-sm font-medium text-white">{dep.name}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="p-4 bg-orange-500/5 rounded-2xl border border-orange-500/10 flex gap-3 mb-6">
-                <Info size={20} className="text-orange-400 shrink-0 mt-0.5" />
-                <p className="text-[11px] text-gray-400 italic">
-                  Para remover este mod, você deve primeiro desativar os mods listados acima.
-                </p>
-              </div>
-
-              <button
-                onClick={() => setDependencyWarning(null)}
-                className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl transition-all shadow-lg shadow-orange-500/20"
-              >
-                Entendido
-              </button>
-            </div>
-          </div>
-        </div>
+        <DependencyWarningModal
+          mod={dependencyWarning.mod}
+          dependents={dependencyWarning.dependents}
+          onClose={() => setDependencyWarning(null)}
+        />
       )}
 
       {/* Dependency Activation Modal */}
       {pendingActivation && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="bg-[#22272b] border border-white/10 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300">
-            <div className="p-6 border-b border-white/5 flex justify-between items-center">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-orange-500/20 text-orange-400 rounded-xl">
-                  <AlertCircle size={24} />
-                </div>
-                <h3 className="text-xl font-bold text-white">Dependencias pendentes</h3>
-              </div>
-              <button
-                onClick={() => setPendingActivation(null)}
-                className="p-2 hover:bg-white/5 rounded-full text-gray-400 transition-colors"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="p-6">
-              <p className="text-gray-400 text-sm mb-4">
-                O mod <span className="text-white font-bold">{pendingActivation.mod.name}</span> precisa ser preparado
-                antes de ser ativado:
-              </p>
-
-              <div className="space-y-3 mb-6 max-h-56 overflow-y-auto custom-scrollbar pr-2">
-                {pendingActivation.modNeedsInstall && (
-                  <div className="flex items-center gap-3 p-3 bg-[#2b3238] border border-white/5 rounded-xl">
-                    <div className="w-10 h-10 rounded-lg bg-[#1e2327] overflow-hidden shrink-0">
-                      {pendingActivation.mod.imageUrl ? (
-                        <img src={pendingActivation.mod.imageUrl} alt={pendingActivation.mod.name} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-white/10">
-                          <PlusCircle size={16} />
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold text-white truncate">{pendingActivation.mod.name}</p>
-                      <p className="text-[10px] text-gray-500 font-mono truncate">{pendingActivation.mod.id}</p>
-                    </div>
-                    <span className="text-[10px] font-bold text-orange-300 bg-orange-500/10 border border-orange-500/10 rounded-full px-2 py-0.5 shrink-0">
-                      Trazer
-                    </span>
-                  </div>
-                )}
-                {pendingActivation.dependenciesToActivate.map((dep) => {
-                  const willInstall = pendingActivation.dependenciesToInstall.some(
-                    (installDep) => normalizeModId(installDep.id) === normalizeModId(dep.id),
-                  )
-
-                  return (
-                    <div key={dep.id} className="flex items-center gap-3 p-3 bg-[#2b3238] border border-white/5 rounded-xl">
-                      <div className="w-10 h-10 rounded-lg bg-[#1e2327] overflow-hidden shrink-0">
-                        {dep.imageUrl ? (
-                          <img src={dep.imageUrl} alt={dep.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-white/10">
-                            <PlusCircle size={16} />
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-white truncate">{dep.name}</p>
-                        <p className="text-[10px] text-gray-500 font-mono truncate">{dep.id}</p>
-                      </div>
-                      <span className="text-[10px] font-bold text-orange-300 bg-orange-500/10 border border-orange-500/10 rounded-full px-2 py-0.5 shrink-0">
-                        {willInstall ? "Trazer" : "Ativar"}
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-
-              <div className="flex flex-col gap-3">
-                <button
-                  onClick={confirmActivationWithDependencies}
-                  className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl transition-all shadow-lg shadow-orange-500/20 flex items-center justify-center gap-2"
-                >
-                  <CheckCircle2 size={18} />
-                  Trazer para local e ativar
-                </button>
-                <button
-                  onClick={() => setPendingActivation(null)}
-                  className="w-full py-3 bg-transparent border border-white/10 text-gray-400 hover:text-white hover:bg-white/5 font-bold rounded-xl transition-all"
-                >
-                  Cancelar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <PendingActivationModal
+          activation={pendingActivation}
+          onCancel={() => setPendingActivation(null)}
+          onConfirm={() => void confirmActivationWithDependencies()}
+        />
       )}
 
       {/* Move Mod Warning Modal */}
       {showMoveWarning && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-[#22272b] border border-orange-500/20 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300">
-            <div className="p-6 bg-orange-500/10 border-b border-orange-500/10 flex items-center gap-3">
-              <AlertTriangle className="text-orange-500" size={28} />
-              <h3 className="text-xl font-bold text-white">Aviso de Segurança</h3>
-            </div>
-            <div className="p-6">
-              <p className="text-gray-300 text-sm mb-6 leading-relaxed">
-                Alterar a ordem de carregamento pode quebrar o funcionamento de alguns mods.
-                Mova <span className="text-orange-400 font-bold">{showMoveWarning.mod.name}</span> apenas se tiver certeza de que ele deve carregar
-                {showMoveWarning.position === "start" ? " no início " : " no final "} da lista.
-              </p>
-
-              <button
-                onClick={() => void confirmMoveMod()}
-                className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl transition-all shadow-lg shadow-orange-500/20 mb-4 flex items-center justify-center gap-2"
-              >
-                <Check size={18} />
-                Confirmar Movimentação
-              </button>
-
-              <button
-                onClick={() => setDontShowAgainMove(!dontShowAgainMove)}
-                className="mb-4 flex items-center gap-2 text-left group"
-              >
-                <span
-                  className={`flex h-5 w-5 items-center justify-center rounded border transition-all ${
-                    dontShowAgainMove
-                      ? "border-orange-500 bg-orange-500"
-                      : "border-white/20 bg-transparent group-hover:border-white/40"
-                  }`}
-                >
-                  {dontShowAgainMove && <Check size={12} className="text-white" />}
-                </span>
-                <span className="text-xs text-gray-400 transition-colors group-hover:text-gray-300">
-                  NÃ£o mostrar este alerta novamente
-                </span>
-              </button>
-
-              <button
-                onClick={() => {
-                  setShowMoveWarning(null)
-                  setDontShowAgainMove(false)
-                }}
-                className="w-full py-3 bg-transparent border border-white/10 text-gray-400 hover:text-white hover:bg-white/5 font-bold rounded-xl transition-all"
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
+        <MoveModWarningModal
+          request={showMoveWarning}
+          dontShowAgain={dontShowAgainMove}
+          onToggleDontShowAgain={() => setDontShowAgainMove(!dontShowAgainMove)}
+          onCancel={() => {
+            setShowMoveWarning(null)
+            setDontShowAgainMove(false)
+          }}
+          onConfirm={() => void confirmMoveMod()}
+        />
       )}
 
       {/* Missing Dependency Modal (Not in Library) */}

@@ -1,17 +1,25 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { getErrorMessage } from "@/lib/errors"
+import { readModsLibraryCache, writeModsLibraryCache } from "@/lib/modsCache"
 import { invokeTauri } from "@/lib/tauri"
 import type { ZomboidMod } from "@/types/mod"
 
 export function useModsLibrary() {
-  const [mods, setMods] = useState<ZomboidMod[]>([])
-  const [modsCount, setModsCount] = useState(0)
+  const [cachedMods] = useState(readModsLibraryCache)
+  const [mods, setMods] = useState<ZomboidMod[]>(cachedMods ?? [])
+  const [modsCount, setModsCount] = useState(cachedMods?.length ?? 0)
   const [modsError, setModsError] = useState<string | null>(null)
   const [isLoadingMods, setIsLoadingMods] = useState(false)
   const [isInstallingAllMods, setIsInstallingAllMods] = useState(false)
-  const [hasLoadedMods, setHasLoadedMods] = useState(false)
+  const [hasLoadedMods, setHasLoadedMods] = useState(cachedMods !== null)
   const modsLoadPromiseRef = useRef<Promise<ZomboidMod[]> | null>(null)
+
+  useEffect(() => {
+    if (hasLoadedMods) {
+      writeModsLibraryCache(mods)
+    }
+  }, [hasLoadedMods, mods])
 
   async function loadMods() {
     if (modsLoadPromiseRef.current) {
@@ -30,7 +38,6 @@ export function useModsLibrary() {
         return foundMods
       } catch (error) {
         setModsError(getErrorMessage(error))
-        setMods([])
         return []
       } finally {
         setIsLoadingMods(false)
@@ -40,17 +47,6 @@ export function useModsLibrary() {
 
     modsLoadPromiseRef.current = loadPromise
     return loadPromise
-  }
-
-  async function loadModsCount() {
-    setModsError(null)
-
-    try {
-      setModsCount(await invokeTauri<number>("count_zomboid_mods"))
-    } catch (error) {
-      setModsError(getErrorMessage(error))
-      setModsCount(0)
-    }
   }
 
   async function ensureModsLoaded() {
@@ -107,8 +103,6 @@ export function useModsLibrary() {
   }
 
   async function loadModsInBackground() {
-    setIsLoadingMods(true)
-    await loadModsCount()
     await loadMods()
   }
 

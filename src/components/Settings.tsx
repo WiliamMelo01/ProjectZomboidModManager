@@ -1,32 +1,10 @@
-import { CheckCircle2, ChevronDown, Cpu, Folder, FolderOpen, FolderPlus, Lightbulb, Monitor, RefreshCw, Save, Search, XCircle } from "lucide-react"
+import { CheckCircle2, Cpu, Folder, FolderOpen, FolderPlus, Monitor, RefreshCw, Save, Search, XCircle } from "lucide-react"
 import { useEffect, useState } from "react"
 
+import { RamDropdown } from "@/components/settings/RamDropdown"
+import { RamTips } from "@/components/settings/RamTips"
 import { invokeTauri } from "@/lib/tauri"
-
-type AppSettings = {
-  steamcmdPath: string
-  resolvedSteamcmdPath: string | null
-  isSteamcmdConfigured: boolean
-  gameExecutablePath: string
-  clientRam: string
-  serverRam: string
-}
-
-type ModLocation = {
-  label: string
-  path: string
-  kind: string
-  exists: boolean
-}
-
-type ZomboidInstallationStatus = {
-  defaultGameDir: string
-  detectedExecutablePath: string | null
-  isGameDirFound: boolean
-  isExecutableFound: boolean
-  isClientConfigFound: boolean
-  isServerConfigFound: boolean
-}
+import type { AppSettings, ModLocation, ZomboidInstallationStatus } from "@/types/settings"
 
 export function Settings() {
   const [activeTab, setActiveTab] = useState<"mods" | "ram">("mods")
@@ -523,7 +501,7 @@ export function Settings() {
                           <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">
                             RAM do Client (Jogo)
                           </label>
-                          <CustomDropdown
+                          <RamDropdown
                             value={clientRam}
                             onChange={setClientRam}
                             options={ramOptions}
@@ -534,7 +512,7 @@ export function Settings() {
                           <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">
                             RAM do Servidor
                           </label>
-                          <CustomDropdown
+                          <RamDropdown
                             value={serverRam}
                             onChange={setServerRam}
                             options={ramOptions}
@@ -587,68 +565,7 @@ export function Settings() {
 
         {/* Tips Sidebar */}
         {activeTab === "ram" && (
-          <div className="hidden lg:block absolute top-24 right-0 w-72 animate-in fade-in slide-in-from-right-4 duration-500">
-            <section className="bg-[#2b3238] rounded-3xl border border-orange-400/20 p-6 shadow-xl relative overflow-hidden group">
-              <div className="absolute top-0 right-0 w-24 h-24 bg-orange-500/5 blur-3xl rounded-full -mr-12 -mt-12" />
-
-              <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 bg-orange-500/10 text-orange-400 rounded-lg">
-                  <Lightbulb size={20} />
-                </div>
-                <h3 className="font-bold text-white tracking-tight text-sm uppercase italic">Dicas de Alocação</h3>
-              </div>
-
-              <div className="space-y-6">
-                <div>
-                  <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-3">Client (Jogo)</p>
-                  <ul className="space-y-3">
-                    <li className="flex gap-2">
-                      <div className="w-1 h-1 rounded-full bg-orange-500 mt-1.5 shrink-0" />
-                      <p className="text-[11px] text-gray-400"><span className="text-white font-bold">Vanilla:</span> 2GB a 4GB é o suficiente.</p>
-                    </li>
-                    <li className="flex gap-2">
-                      <div className="w-1 h-1 rounded-full bg-orange-500 mt-1.5 shrink-0" />
-                      <p className="text-[11px] text-gray-400"><span className="text-white font-bold">Alguns Mods:</span> 4GB a 6GB recomendado.</p>
-                    </li>
-                    <li className="flex gap-2">
-                      <div className="w-1 h-1 rounded-full bg-orange-500 mt-1.5 shrink-0" />
-                      <p className="text-[11px] text-gray-400"><span className="text-white font-bold">Muitos Mods:</span> 8GB+ para estabilidade.</p>
-                    </li>
-                  </ul>
-                </div>
-
-                <div className="h-px bg-white/5" />
-
-                <div>
-                  <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-3">Servidor</p>
-                  <ul className="space-y-3">
-                    <li className="flex gap-2">
-                      <div className="w-1 h-1 rounded-full bg-orange-500 mt-1.5 shrink-0" />
-                      <p className="text-[11px] text-gray-400"><span className="text-white font-bold">Pequeno:</span> 2GB a 4GB dão conta.</p>
-                    </li>
-                    <li className="flex gap-2">
-                      <div className="w-1 h-1 rounded-full bg-orange-500 mt-1.5 shrink-0" />
-                      <p className="text-[11px] text-gray-400"><span className="text-white font-bold">Médio + Mods:</span> 6GB a 8GB recomendados.</p>
-                    </li>
-                    <li className="flex gap-2">
-                      <div className="w-1 h-1 rounded-full bg-orange-500 mt-1.5 shrink-0" />
-                      <p className="text-[11px] text-gray-400"><span className="text-white font-bold">Grandes:</span> 12GB+ para mapas extensos.</p>
-                    </li>
-                  </ul>
-                </div>
-
-                <div className="bg-[#1e2327] rounded-2xl p-4 border border-white/5">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Lightbulb size={12} className="text-orange-400" />
-                    <span className="text-[9px] font-bold text-white uppercase italic">Atenção</span>
-                  </div>
-                  <p className="text-[10px] text-gray-500 leading-relaxed italic">
-                    Deixe sempre 2-4GB livres para o seu Windows funcionar sem travar.
-                  </p>
-                </div>
-              </div>
-            </section>
-          </div>
+          <RamTips />
         )}
       </div>
     </div>
@@ -665,51 +582,4 @@ function getErrorMessage(error: unknown) {
   }
 
   return "Nao foi possivel carregar as configuracoes."
-}
-
-function CustomDropdown({ value, onChange, options }: { value: string; onChange: (val: string) => void; options: string[] }) {
-  const [isOpen, setIsOpen] = useState(false)
-
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className={`w-full bg-[#1e2327] border rounded-2xl py-4 px-5 text-sm font-medium transition-all flex items-center justify-between text-white group ${
-          isOpen ? "border-orange-400/50 ring-1 ring-orange-400/20" : "border-white/5 hover:border-white/10"
-        }`}
-      >
-        <span>{value} GB</span>
-        <ChevronDown
-          size={18}
-          className={`text-gray-500 group-hover:text-orange-400 transition-all ${isOpen ? "rotate-180 text-orange-400" : ""}`}
-        />
-      </button>
-
-      {isOpen && (
-        <>
-          <div className="fixed inset-0 z-[60]" onClick={() => setIsOpen(false)} />
-          <div className="absolute top-full left-0 right-0 mt-2 bg-[#1e2327] border border-white/10 rounded-2xl overflow-hidden shadow-2xl z-[70] animate-in fade-in zoom-in-95 duration-200">
-            <div className="max-h-60 overflow-y-auto custom-scrollbar">
-              {options.map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => {
-                    onChange(opt)
-                    setIsOpen(false)
-                  }}
-                  className={`w-full text-left px-5 py-3 text-sm transition-colors hover:bg-orange-500/10 hover:text-orange-400 ${
-                    value === opt ? "text-orange-400 bg-orange-500/5 font-bold" : "text-gray-400"
-                  }`}
-                >
-                  {opt} GB
-                </button>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  )
 }

@@ -1,10 +1,14 @@
-import { AlertCircle, AlertTriangle, ArrowLeft, Check, CheckCircle2, ChevronRight, Info, MinusCircle, Play, PlusCircle, RefreshCw, Search, Server, Trash2, X, XCircle } from "lucide-react"
+import { AlertCircle, AlertTriangle, ArrowLeft, Check, CheckCircle2, Info, Play, PlusCircle, RefreshCw, Search, Server, Trash2, X } from "lucide-react"
 import { useState } from "react"
 
 import { MissingDependencyModal } from "@/components/MissingDependencyModal"
+import { ServerModList } from "@/components/server/ServerModList"
+import { ServerPortConflictModal } from "@/components/server/ServerPortConflictModal"
+import { buildActivationDependencyPlan, isLocalMod, normalizeModId } from "@/lib/modDependencies"
 import { invokeTauri } from "@/lib/tauri"
 import type { ZomboidMod } from "@/types/mod"
 import type { ZomboidServer } from "@/types/server"
+import type { ServerPortCheck } from "@/components/server/ServerPortConflictModal"
 
 type ServerDetailProps = {
   server: ZomboidServer | null
@@ -27,18 +31,6 @@ type PendingActivation = {
   modNeedsInstall: boolean
 }
 
-type PortUsage = {
-  port: number
-  protocol: string
-  pid: number
-  processName: string
-}
-
-type ServerPortCheck = {
-  ports: number[]
-  usages: PortUsage[]
-}
-
 const MOVE_MOD_WARNING_KEY = "pzmm_move_mod_warning_modal_seen"
 
 function matchesSearch(mod: ZomboidMod, search: string) {
@@ -52,76 +44,6 @@ function matchesSearch(mod: ZomboidMod, search: string) {
     String(mod.name ?? "").toLowerCase().includes(normalizedSearch) ||
     String(mod.id ?? "").toLowerCase().includes(normalizedSearch)
   )
-}
-
-function normalizeModId(modId: string) {
-  return String(modId ?? "").trim().toLowerCase()
-}
-
-function isLocalMod(mod: ZomboidMod) {
-  return mod.isInstalled || mod.source === "local"
-}
-
-function buildActivationDependencyPlan(
-  mod: ZomboidMod,
-  allMods: ZomboidMod[],
-  activeModIds: Set<string>,
-) {
-  const modsById = new Map(allMods.filter((item) => item.id).map((item) => [normalizeModId(item.id), item]))
-  const dependenciesToInstall: ZomboidMod[] = []
-  const dependenciesToActivate: ZomboidMod[] = []
-  const installIds = new Set<string>()
-  const activateIds = new Set<string>()
-  const visitingIds = new Set<string>()
-  const visitedIds = new Set<string>()
-  let missingDependencyId: string | null = null
-
-  const visitDependencies = (currentMod: ZomboidMod) => {
-    const currentId = normalizeModId(currentMod.id)
-
-    if (visitedIds.has(currentId) || visitingIds.has(currentId) || missingDependencyId) {
-      return
-    }
-
-    visitingIds.add(currentId)
-
-    for (const dependencyId of currentMod.dependencies ?? []) {
-      const normalizedDependencyId = normalizeModId(dependencyId)
-      const dependency = modsById.get(normalizedDependencyId)
-
-      if (!dependency) {
-        missingDependencyId = dependencyId
-        break
-      }
-
-      visitDependencies(dependency)
-
-      if (missingDependencyId) {
-        break
-      }
-
-      if (!isLocalMod(dependency) && !installIds.has(normalizedDependencyId)) {
-        dependenciesToInstall.push(dependency)
-        installIds.add(normalizedDependencyId)
-      }
-
-      if (!activeModIds.has(normalizedDependencyId) && !activateIds.has(normalizedDependencyId)) {
-        dependenciesToActivate.push(dependency)
-        activateIds.add(normalizedDependencyId)
-      }
-    }
-
-    visitingIds.delete(currentId)
-    visitedIds.add(currentId)
-  }
-
-  visitDependencies(mod)
-
-  return {
-    missingDependencyId,
-    dependenciesToInstall,
-    dependenciesToActivate,
-  }
 }
 
 export function ServerDetail({
@@ -409,91 +331,26 @@ export function ServerDetail({
       {/* Lists */}
       <div className="flex flex-col gap-6 pb-10">
 
-        {/* Activated Mods */}
-        <section className="flex flex-col">
-          <button
-            onClick={() => setIsActivatedExpanded(!isActivatedExpanded)}
-            className="flex items-center gap-3 mb-4 px-2 py-2 hover:bg-white/5 rounded-xl transition-colors w-full text-left group"
-          >
-            <h3 className="text-lg font-bold text-white uppercase tracking-tighter">Mods Ativados</h3>
-            <div className="h-px flex-1 bg-white/5" />
-            <span className="text-xs font-mono text-gray-500 bg-[#2b3238] px-2 py-0.5 rounded-full">{filteredActivated.length}</span>
-            <ChevronRight
-              size={20}
-              className={`text-gray-500 transition-transform duration-300 ${isActivatedExpanded ? "rotate-90" : ""}`}
-            />
-          </button>
+        <ServerModList
+          title="Mods Ativados"
+          mods={filteredActivated}
+          emptyMessage="Nenhum mod ativado encontrado."
+          isExpanded={isActivatedExpanded}
+          action="deactivate"
+          onToggleExpanded={() => setIsActivatedExpanded(!isActivatedExpanded)}
+          onAction={handleDeactivateClick}
+          onContextMenu={handleActiveModContextMenu}
+        />
 
-          <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 transition-all duration-300 origin-top ${
-            isActivatedExpanded ? "opacity-100 scale-y-100 h-auto" : "opacity-0 scale-y-0 h-0 overflow-hidden"
-          }`}>
-            {filteredActivated.map(mod => (
-              <div
-                key={mod.id}
-                onContextMenu={(event) => handleActiveModContextMenu(event, mod)}
-                className="group bg-[#2b3238] border border-orange-400/20 rounded-2xl p-4 flex items-center justify-between hover:bg-[#353c42] transition-all"
-              >
-                <div className="flex items-center gap-4 min-w-0">
-                   <div className="w-20 h-20 rounded-xl bg-[#1e2327] overflow-hidden shrink-0 border border-white/5 shadow-lg">
-                     {mod.imageUrl ? <img src={mod.imageUrl} alt={mod.name} className="w-full h-full object-cover transition-transform group-hover:scale-110" /> : <div className="w-full h-full flex items-center justify-center text-white/5 font-black text-xs uppercase">Sem Imagem</div>}
-                   </div>
-                   <div className="min-w-0">
-                     <p className="font-bold text-white truncate">{mod.name}</p>
-                     <p className="text-[10px] text-gray-500 font-mono truncate uppercase tracking-tighter">ID: {mod.id}</p>
-                   </div>
-                </div>
-                <button
-                  onClick={() => handleDeactivateClick(mod)}
-                  className="p-2 text-red-400/50 hover:text-red-400 hover:bg-red-400/10 rounded-xl transition-all"
-                >
-                  <MinusCircle size={22} />
-                </button>
-              </div>
-            ))}
-            {filteredActivated.length === 0 && <p className="text-center text-gray-600 py-4 italic text-sm col-span-full">Nenhum mod ativado encontrado.</p>}
-          </div>
-        </section>
-
-        {/* Available Mods */}
-        <section className="flex flex-col">
-          <button
-            onClick={() => setIsAvailableExpanded(!isAvailableExpanded)}
-            className="flex items-center gap-3 mb-4 px-2 py-2 hover:bg-white/5 rounded-xl transition-colors w-full text-left group"
-          >
-            <h3 className="text-lg font-bold text-white uppercase tracking-tighter">Mods Disponíveis</h3>
-            <div className="h-px flex-1 bg-white/5" />
-            <span className="text-xs font-mono text-gray-500 bg-[#2b3238] px-2 py-0.5 rounded-full">{filteredAvailable.length}</span>
-            <ChevronRight
-              size={20}
-              className={`text-gray-500 transition-transform duration-300 ${isAvailableExpanded ? "rotate-90" : ""}`}
-            />
-          </button>
-
-          <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 transition-all duration-300 origin-top ${
-            isAvailableExpanded ? "opacity-100 scale-y-100 h-auto" : "opacity-0 scale-y-0 h-0 overflow-hidden"
-          }`}>
-            {filteredAvailable.map(mod => (
-              <div key={mod.id} className="group bg-[#2b3238]/50 border border-white/5 rounded-2xl p-4 flex items-center justify-between hover:bg-[#2b3238] transition-all">
-                <div className="flex items-center gap-4 min-w-0 opacity-70 group-hover:opacity-100 transition-opacity">
-                   <div className="w-20 h-20 rounded-xl bg-[#1e2327] overflow-hidden shrink-0 border border-white/5 shadow-lg">
-                     {mod.imageUrl ? <img src={mod.imageUrl} alt={mod.name} className="w-full h-full object-cover transition-transform group-hover:scale-110" /> : <div className="w-full h-full flex items-center justify-center text-white/5 font-black text-xs uppercase">Sem Imagem</div>}
-                   </div>
-                   <div className="min-w-0">
-                     <p className="font-bold text-white truncate">{mod.name}</p>
-                     <p className="text-[10px] text-gray-500 font-mono truncate uppercase tracking-tighter">ID: {mod.id}</p>
-                   </div>
-                </div>
-                <button
-                  onClick={() => handleActivateClick(mod)}
-                  className="p-2 text-green-400/50 hover:text-green-400 hover:bg-green-400/10 rounded-xl transition-all"
-                >
-                  <PlusCircle size={22} />
-                </button>
-              </div>
-            ))}
-            {filteredAvailable.length === 0 && <p className="text-center text-gray-600 py-4 italic text-sm col-span-full">Nenhum mod disponivel encontrado.</p>}
-          </div>
-        </section>
+        <ServerModList
+          title="Mods Disponíveis"
+          mods={filteredAvailable}
+          emptyMessage="Nenhum mod disponivel encontrado."
+          isExpanded={isAvailableExpanded}
+          action="activate"
+          onToggleExpanded={() => setIsAvailableExpanded(!isAvailableExpanded)}
+          onAction={handleActivateClick}
+        />
       </div>
 
       {contextMenu && (
@@ -544,58 +401,12 @@ export function ServerDetail({
       )}
 
       {portConflictCheck && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-orange-500/20 bg-[#22272b] shadow-2xl animate-in zoom-in-95 duration-300">
-            <div className="border-b border-orange-500/10 bg-orange-500/10 p-6">
-              <div className="flex items-start gap-3">
-                <AlertTriangle size={28} className="mt-0.5 shrink-0 text-orange-400" />
-                <div>
-                  <h3 className="text-xl font-black text-white">Portas em uso</h3>
-                  <p className="mt-1 text-sm text-gray-400">
-                    O teste precisa das portas {portConflictCheck.ports.join(", ")}. Encerre os processos abaixo antes de iniciar.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="max-h-72 overflow-y-auto p-6 custom-scrollbar">
-              <div className="space-y-3">
-                {portConflictCheck.usages.map((usage) => (
-                  <div key={`${usage.protocol}:${usage.port}:${usage.pid}`} className="rounded-2xl border border-white/5 bg-[#1e2327] p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="font-bold text-white">{usage.processName}</p>
-                        <p className="mt-1 font-mono text-xs text-gray-500">PID {usage.pid}</p>
-                      </div>
-                      <div className="rounded-xl border border-orange-500/20 bg-orange-500/10 px-3 py-2 text-right">
-                        <p className="text-[10px] font-black text-orange-300">{usage.protocol}</p>
-                        <p className="font-mono text-sm font-bold text-white">{usage.port}</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 border-t border-white/5 p-6 sm:flex-row sm:justify-end">
-              <button
-                onClick={() => setPortConflictCheck(null)}
-                disabled={isKillingPorts}
-                className="rounded-xl border border-white/10 px-5 py-3 text-sm font-bold text-gray-400 transition-colors hover:bg-white/5 hover:text-white disabled:opacity-50"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={() => void killPortConflictsAndTest()}
-                disabled={isKillingPorts}
-                className="flex items-center justify-center gap-2 rounded-xl bg-red-500 px-5 py-3 text-sm font-black text-white transition-colors hover:bg-red-600 disabled:opacity-60"
-              >
-                {isKillingPorts ? <RefreshCw size={18} className="animate-spin" /> : <XCircle size={18} />}
-                Encerrar processos e testar
-              </button>
-            </div>
-          </div>
-        </div>
+        <ServerPortConflictModal
+          check={portConflictCheck}
+          isKilling={isKillingPorts}
+          onCancel={() => setPortConflictCheck(null)}
+          onConfirm={() => void killPortConflictsAndTest()}
+        />
       )}
 
       {/* Confirmation Modal */}

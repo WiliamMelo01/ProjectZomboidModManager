@@ -1,6 +1,5 @@
 use crate::game::{apply_performance_settings, normalize_ram_gb, validate_game_executable_path};
 use crate::models::{AppSettings, ModLocation};
-use crate::util::*;
 use crate::{
     app_settings_path, ensure_managed_steamcmd, find_steamcmd_path, read_config_value,
     read_configured_steamcmd_path, read_saved_custom_mod_locations, read_saved_mod_locations,

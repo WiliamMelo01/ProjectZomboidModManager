@@ -1,6 +1,7 @@
 use crate::models::{WorkshopDownloadEvent, WorkshopDownloadFailedItem, WorkshopDownloadResult};
+use crate::mods::normalize_server_values;
 use crate::server_test::{kill_process_tree, spawn_output_reader};
-use crate::{ensure_managed_steamcmd, find_steamcmd_path, normalize_server_values, run_blocking};
+use crate::{ensure_managed_steamcmd, find_steamcmd_path, run_blocking};
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},

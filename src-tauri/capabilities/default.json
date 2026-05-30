@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default permissions for application windows.",
+  "windows": ["main", "steam-workshop"],
+  "permissions": ["core:default"]
+}

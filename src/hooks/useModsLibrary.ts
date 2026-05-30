@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react"
 
 import { getErrorMessage } from "@/lib/errors"
-import { readModsLibraryCache, writeModsLibraryCache } from "@/lib/modsCache"
+import {
+  hydrateModsLibraryImages,
+  readModsLibraryCache,
+  writeModsLibraryCache,
+  writeModsLibraryImagesCache,
+} from "@/lib/modsCache"
 import { invokeTauri } from "@/lib/tauri"
 import type { ZomboidMod } from "@/types/mod"
 
@@ -21,6 +26,24 @@ export function useModsLibrary() {
     }
   }, [hasLoadedMods, mods])
 
+  useEffect(() => {
+    if (!cachedMods) {
+      return
+    }
+
+    void hydrateModsLibraryImages(cachedMods).then((hydratedMods) => {
+      const cachedImages = new Map(
+        hydratedMods.filter((mod) => mod.imageUrl).map((mod) => [mod.path, mod.imageUrl]),
+      )
+
+      if (cachedImages.size > 0) {
+        setMods((currentMods) =>
+          currentMods.map((mod) => mod.imageUrl ? mod : { ...mod, imageUrl: cachedImages.get(mod.path) }),
+        )
+      }
+    })
+  }, [cachedMods])
+
   async function loadMods() {
     if (modsLoadPromiseRef.current) {
       return modsLoadPromiseRef.current
@@ -35,6 +58,7 @@ export function useModsLibrary() {
         setMods(foundMods)
         setModsCount(foundMods.length)
         setHasLoadedMods(true)
+        void writeModsLibraryImagesCache(foundMods)
         return foundMods
       } catch (error) {
         setModsError(getErrorMessage(error))

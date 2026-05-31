@@ -11,4 +11,5 @@ export type ZomboidMod = {
   path: string
   imageUrl?: string
   dependencies?: string[]
+  mapNames?: string[]
 }

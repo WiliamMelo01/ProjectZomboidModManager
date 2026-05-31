@@ -1,4 +1,4 @@
-import { AlertCircle, AlertTriangle, Check, CheckCircle2, Info, PlusCircle, Trash2, X } from "lucide-react"
+import { AlertCircle, AlertTriangle, Check, CheckCircle2, Info, MapPinned, PlusCircle, Trash2, X } from "lucide-react"
 
 import { normalizeModId } from "@/lib/modDependencies"
 import type { ZomboidMod } from "@/types/mod"
@@ -13,6 +13,42 @@ export type PendingActivation = {
 export type MoveModRequest = {
   mod: ZomboidMod
   position: "start" | "end"
+}
+
+type MapInstallConfirmationModalProps = {
+  mod: ZomboidMod
+  onCancel: () => void
+  onConfirm: () => void
+}
+
+export function MapInstallConfirmationModal({ mod, onCancel, onConfirm }: MapInstallConfirmationModalProps) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md animate-in fade-in duration-300">
+      <div className="w-full max-w-md overflow-hidden rounded-3xl border border-orange-500/20 bg-[#22272b] shadow-2xl animate-in zoom-in-95 duration-300">
+        <div className="flex items-center gap-3 border-b border-orange-500/10 bg-orange-500/10 p-6">
+          <MapPinned className="text-orange-400" size={28} />
+          <h3 className="text-xl font-bold text-white">Adicionar mod como mapa?</h3>
+        </div>
+        <div className="p-6">
+          <p className="mb-4 text-sm leading-relaxed text-gray-300">
+            O mod <span className="font-bold text-orange-300">{mod.name}</span> sera ativado e seus mapas serao adicionados ao perfil do servidor.
+          </p>
+          <div className="mb-6 rounded-2xl border border-white/5 bg-[#1e2327] p-4">
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-gray-500">Mapas encontrados</p>
+            <p className="text-sm text-white">{mod.mapNames?.join(", ")}</p>
+          </div>
+          <div className="flex gap-3">
+            <button onClick={onConfirm} className="flex-1 rounded-xl bg-orange-500 py-3 font-bold text-white transition-all hover:bg-orange-600">
+              Adicionar mapa
+            </button>
+            <button onClick={onCancel} className="flex-1 rounded-xl border border-white/10 bg-transparent py-3 font-bold text-gray-400 transition-all hover:bg-white/5 hover:text-white">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 type DeactivateModModalProps = {

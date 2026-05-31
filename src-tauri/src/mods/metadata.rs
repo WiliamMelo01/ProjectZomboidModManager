@@ -83,6 +83,7 @@ pub(super) fn add_mod_from_info(
     let dependencies = parse_mod_dependencies(content.as_ref());
     let mod_dir = mod_info_path.parent().unwrap_or(mod_info_path);
     let image_url = find_mod_image_url(content.as_ref(), mod_dir);
+    let map_names = find_mod_map_names(mod_dir);
 
     mods.push(ZomboidMod {
         id: mod_id,
@@ -97,9 +98,27 @@ pub(super) fn add_mod_from_info(
         path: mod_dir.display().to_string(),
         image_url,
         dependencies,
+        map_names,
     });
 
     Ok(Some(normalized_mod_id))
+}
+
+fn find_mod_map_names(mod_dir: &Path) -> Vec<String> {
+    let maps_dir = mod_dir.join("media").join("maps");
+    let Ok(entries) = fs::read_dir(maps_dir) else {
+        return Vec::new();
+    };
+    let mut map_names = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir() && path.join("map.info").is_file())
+        .filter_map(|path| path.file_name()?.to_str().map(ToString::to_string))
+        .collect::<Vec<_>>();
+
+    map_names.sort_by_key(|name| name.to_lowercase());
+    map_names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    map_names
 }
 
 fn parse_mod_dependencies(content: &str) -> Vec<String> {
@@ -154,4 +173,29 @@ fn image_file_to_data_url(path: &Path) -> Option<String> {
     let encoded = general_purpose::STANDARD.encode(bytes);
 
     Some(format!("data:{mime_type};base64,{encoded}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn identifies_map_names_for_catalog_badges() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let mod_dir = std::env::temp_dir().join(format!("pzmm-catalog-map-test-{timestamp}"));
+        let map_dir = mod_dir.join("media").join("maps").join("RavenCreek");
+
+        fs::create_dir_all(&map_dir).expect("map directory should be created");
+        fs::write(map_dir.join("map.info"), "title=Raven Creek")
+            .expect("map.info should be created");
+
+        let map_names = find_mod_map_names(&mod_dir);
+        let _ = fs::remove_dir_all(mod_dir);
+
+        assert_eq!(map_names, vec!["RavenCreek".to_string()]);
+    }
 }

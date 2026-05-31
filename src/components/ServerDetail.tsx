@@ -5,6 +5,7 @@ import { MissingDependencyModal } from "@/components/MissingDependencyModal"
 import {
   DeactivateModModal,
   DependencyWarningModal,
+  MapInstallConfirmationModal,
   MoveModWarningModal,
   PendingActivationModal,
   type MoveModRequest,
@@ -74,6 +75,7 @@ export function ServerDetail({
   const [isCheckingPorts, setIsCheckingPorts] = useState(false)
   const [isKillingPorts, setIsKillingPorts] = useState(false)
   const [mapInstallError, setMapInstallError] = useState<string | null>(null)
+  const [pendingMapInstall, setPendingMapInstall] = useState<ZomboidMod | null>(null)
 
   const [isActivatedExpanded, setIsActivatedExpanded] = useState(true)
   const [isAvailableExpanded, setIsAvailableExpanded] = useState(true)
@@ -203,7 +205,7 @@ export function ServerDetail({
     setPendingActivation(null)
   }
 
-  const handleInstallMapClick = async (mod: ZomboidMod) => {
+  const installMap = async (mod: ZomboidMod) => {
     const dependencyPlan = buildActivationDependencyPlan(mod, safeMods, activatedModIds)
 
     if (dependencyPlan.missingDependencyId) {
@@ -227,6 +229,7 @@ export function ServerDetail({
         modPath: mod.path,
       })
       await onActivateMods([...dependencyPlan.dependenciesToActivate, mod])
+      setPendingMapInstall(null)
     } catch (error) {
       setMapInstallError(getErrorMessage(error))
     }
@@ -387,7 +390,7 @@ export function ServerDetail({
           action="activate"
           onToggleExpanded={() => setIsAvailableExpanded(!isAvailableExpanded)}
           onAction={handleActivateClick}
-          onInstallMap={(mod) => void handleInstallMapClick(mod)}
+          onInstallMap={setPendingMapInstall}
         />
       </div>
 
@@ -452,6 +455,14 @@ export function ServerDetail({
             setDontShowAgainMove(false)
           }}
           onConfirm={() => void confirmMoveMod()}
+        />
+      )}
+
+      {pendingMapInstall && (
+        <MapInstallConfirmationModal
+          mod={pendingMapInstall}
+          onCancel={() => setPendingMapInstall(null)}
+          onConfirm={() => void installMap(pendingMapInstall)}
         />
       )}
 

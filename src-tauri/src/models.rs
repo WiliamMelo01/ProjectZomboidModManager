@@ -29,6 +29,7 @@ pub(crate) struct ZomboidMod {
     pub(crate) path: String,
     pub(crate) image_url: Option<String>,
     pub(crate) dependencies: Vec<String>,
+    pub(crate) map_names: Vec<String>,
 }
 
 #[derive(Serialize)]

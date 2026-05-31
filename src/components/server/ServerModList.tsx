@@ -1,7 +1,6 @@
 import { ChevronRight, MapPinned, MinusCircle, PlusCircle } from "lucide-react"
 import type { MouseEvent } from "react"
 
-import { ModBadges } from "@/components/mods/ModBadges"
 import type { ZomboidMod } from "@/types/mod"
 
 type ServerModListProps = {
@@ -68,11 +67,16 @@ export function ServerModList({
                 )}
               </div>
               <div className="min-w-0">
-                <p className="font-bold text-white truncate">{mod.name}</p>
-                <p className="text-[10px] text-gray-500 font-mono truncate uppercase tracking-tighter">ID: {mod.id}</p>
-                <div className="mt-2">
-                  <ModBadges badges={mod.badges} />
+                <div className="flex items-center gap-2">
+                  <p className="font-bold text-white truncate">{mod.name}</p>
+                  {mod.mapNames && mod.mapNames.length > 0 && (
+                    <span className="flex shrink-0 items-center gap-1 rounded-full border border-orange-400/20 bg-orange-400/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-orange-300">
+                      <MapPinned size={11} />
+                      Mapa
+                    </span>
+                  )}
                 </div>
+                <p className="text-[10px] text-gray-500 font-mono truncate uppercase tracking-tighter">ID: {mod.id}</p>
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1">

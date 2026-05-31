@@ -38,8 +38,7 @@ function isCachedMod(value: unknown): value is ZomboidMod {
     typeof mod.path === "string" &&
     (mod.imageUrl === undefined || typeof mod.imageUrl === "string") &&
     (mod.dependencies === undefined || isStringArray(mod.dependencies)) &&
-    (mod.mapNames === undefined || isStringArray(mod.mapNames)) &&
-    (mod.badges === undefined || isStringArray(mod.badges))
+    (mod.mapNames === undefined || isStringArray(mod.mapNames))
   )
 }
 

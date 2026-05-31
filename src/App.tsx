@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { listen } from "@tauri-apps/api/event"
 import { Box, Download, Server, Settings } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 import { AppHeader, type AppNotification } from "@/components/AppHeader"
 import { AppSidebar } from "@/components/AppSidebar"
@@ -17,6 +18,7 @@ import { WorkshopWindow } from "@/components/WorkshopWindow"
 import { useModsLibrary } from "@/hooks/useModsLibrary"
 import { useWorkshopDownloadManager } from "@/hooks/useWorkshopDownloadManager"
 import { getErrorMessage } from "@/lib/errors"
+import { findModForServerId, resolveModForBuild } from "@/lib/modBuilds"
 import { getActiveDependencyChain, getWorkshopIdsForModIds } from "@/lib/serverMods"
 import { invokeTauri } from "@/lib/tauri"
 import type { ZomboidMod } from "@/types/mod"
@@ -41,6 +43,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("")
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [runningServerTestId, setRunningServerTestId] = useState<string | null>(null)
+  const { t } = useTranslation()
   const {
     mods,
     modsCount,
@@ -56,12 +59,12 @@ function App() {
   } = useModsLibrary()
   const navItems = useMemo(
     () => [
-      { id: "dashboard", label: "Servidores", icon: Server },
+      { id: "dashboard", label: t("nav.servers"), icon: Server },
       { id: "mods", label: "Mods", icon: Box, badge: String(modsCount) },
-      { id: "download", label: "Baixar", icon: Download },
-      { id: "settings", label: "Settings", icon: Settings },
+      { id: "download", label: t("nav.download"), icon: Download },
+      { id: "settings", label: t("nav.settings"), icon: Settings },
     ],
-    [modsCount],
+    [modsCount, t],
   )
   const downloadManager = useWorkshopDownloadManager({
     isDownloadScreenActive: activeTab === "download",
@@ -90,7 +93,7 @@ function App() {
 
   async function updateServerMods(server: ZomboidServer, activeModIds: string[]) {
     setServersError(null)
-    const workshopIds = getWorkshopIdsForModIds(activeModIds, mods)
+    const workshopIds = getWorkshopIdsForModIds(activeModIds, mods, server.gameBuild)
 
     await invokeTauri<void>("update_zomboid_server_mods", {
       serverId: server.id,
@@ -112,12 +115,14 @@ function App() {
 
   async function toggleServerMod(server: ZomboidServer, mod: ZomboidMod, action: "activate" | "deactivate") {
     const activeModIds = server.activeModIds ?? []
-    const normalizedModId = mod.id.toLowerCase()
+    const resolvedMod = action === "deactivate" ? mod : resolveModForBuild(mod, server.gameBuild)
+    if (!resolvedMod) return
+    const normalizedModId = resolvedMod.id.toLowerCase()
     const nextActiveModIds =
       action === "activate"
         ? activeModIds.some((modId) => modId.toLowerCase() === normalizedModId)
           ? activeModIds
-          : [...activeModIds, mod.id]
+          : [...activeModIds, resolvedMod.id]
         : activeModIds.filter((modId) => modId.toLowerCase() !== normalizedModId)
 
     try {
@@ -128,14 +133,21 @@ function App() {
   }
 
   async function moveServerMod(server: ZomboidServer, mod: ZomboidMod, position: "start" | "end") {
-    const normalizedModId = mod.id.toLowerCase()
+    const resolvedMod = resolveModForBuild(mod, server.gameBuild)
+    if (!resolvedMod) return
+    const normalizedModId = resolvedMod.id.toLowerCase()
     const activeModIds = server.activeModIds ?? []
     const activeModIdKeys = new Set(activeModIds.map((modId) => modId.toLowerCase()))
-    const modsById = new Map(mods.filter((item) => item.id).map((item) => [item.id.toLowerCase(), item]))
+    const modsById = new Map(
+      mods.flatMap((item) => item.variants.map((variant) => [
+        variant.id.toLowerCase(),
+        { ...item, id: variant.id, path: variant.path, dependencies: variant.dependencies, mapNames: variant.mapNames },
+      ] as const)),
+    )
     const moveModIds =
       position === "start"
         ? getActiveDependencyChain(mod, modsById, activeModIdKeys)
-        : [mod.id]
+        : [resolvedMod.id]
     const moveModIdKeys = new Set(moveModIds.map((modId) => modId.toLowerCase()))
     const remainingModIds = activeModIds.filter((modId) => !moveModIdKeys.has(modId.toLowerCase()))
 
@@ -143,7 +155,7 @@ function App() {
       return
     }
 
-    const nextActiveModIds = position === "start" ? [...moveModIds, ...remainingModIds] : [...remainingModIds, mod.id]
+    const nextActiveModIds = position === "start" ? [...moveModIds, ...remainingModIds] : [...remainingModIds, resolvedMod.id]
 
     try {
       await updateServerMods(server, nextActiveModIds)
@@ -157,10 +169,12 @@ function App() {
     const activeModIdsSet = new Set(nextActiveModIds.map((modId) => modId.toLowerCase()))
 
     for (const mod of modsToActivate) {
-      const normalizedModId = mod.id.toLowerCase()
+      const resolvedMod = resolveModForBuild(mod, server.gameBuild)
+      if (!resolvedMod) continue
+      const normalizedModId = resolvedMod.id.toLowerCase()
 
       if (!activeModIdsSet.has(normalizedModId)) {
-        nextActiveModIds.push(mod.id)
+        nextActiveModIds.push(resolvedMod.id)
         activeModIdsSet.add(normalizedModId)
       }
     }
@@ -172,12 +186,18 @@ function App() {
     }
   }
 
-  async function createServer(data: { name: string; modIds: string[] }) {
-    const workshopIds = getWorkshopIdsForModIds(data.modIds, mods)
+  async function createServer(data: { name: string; modIds: string[]; gameBuild: "b41" | "b42" }) {
+    const resolvedModIds = data.modIds.flatMap((modId) => {
+      const mod = mods.find((item) => item.id === modId)
+      const resolved = mod ? resolveModForBuild(mod, data.gameBuild) : findModForServerId(mods, modId, data.gameBuild)
+      return resolved ? [resolved.id] : []
+    })
+    const workshopIds = getWorkshopIdsForModIds(resolvedModIds, mods, data.gameBuild)
     const createdServer = await invokeTauri<ZomboidServer>("create_zomboid_server", {
       name: data.name,
-      modIds: data.modIds,
+      modIds: resolvedModIds,
       workshopIds,
+      gameBuild: data.gameBuild,
     })
 
     setServers((currentServers) =>
@@ -192,10 +212,10 @@ function App() {
   async function installDownloadedDependencyForServer(server: ZomboidServer, dependencyId: string) {
     const refreshedMods = await loadMods()
     const normalizedDependencyId = dependencyId.trim().toLowerCase()
-    const dependency = refreshedMods.find((mod) => mod.id.toLowerCase() === normalizedDependencyId)
+    const dependency = findModForServerId(refreshedMods, normalizedDependencyId, server.gameBuild)
 
     if (!dependency) {
-      throw new Error(`Dependencia '${dependencyId}' baixada, mas ainda nao apareceu na biblioteca. Atualize os mods e tente novamente.`)
+      throw new Error(t("dependency.downloadedMissing", { id: dependencyId }))
     }
 
     if (!dependency.isInstalled) {
@@ -209,6 +229,13 @@ function App() {
         source: dependency.source === "steam" ? "local" : dependency.source,
       },
     ])
+  }
+
+  async function changeServerBuild(server: ZomboidServer, gameBuild: "b41" | "b42") {
+    await invokeTauri<void>("update_zomboid_server_build", { serverId: server.id, gameBuild })
+    const updatedServer = { ...server, gameBuild }
+    setSelectedServer(updatedServer)
+    setServers((currentServers) => currentServers.map((item) => item.id === server.id ? updatedServer : item))
   }
 
   async function scanData() {
@@ -377,6 +404,7 @@ function App() {
                   onDependencyDownloaded={(dependencyId) => installDownloadedDependencyForServer(selectedServer, dependencyId)}
                   onOpenSettings={() => setActiveTab("settings")}
                   runningServerTestId={runningServerTestId}
+                  onChangeBuild={(gameBuild) => changeServerBuild(selectedServer, gameBuild)}
                 />
               )
             ) : (

@@ -1,20 +1,25 @@
 import { Box, ChevronLeft, ChevronRight, Copy, Plus, Save, Server, X } from "lucide-react"
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 
 import type { ZomboidMod } from "@/types/mod"
-import type { ZomboidServer } from "@/types/server"
+import type { GameBuild, ZomboidServer } from "@/types/server"
+import { supportsBuild } from "@/lib/modBuilds"
+import { i18n } from "@/i18n"
 
 type CreateServerModalProps = {
   isOpen: boolean
   onClose: () => void
   existingServers: ZomboidServer[]
   availableMods: ZomboidMod[]
-  onCreate?: (data: { name: string; modIds: string[] }) => Promise<void> | void
+  onCreate?: (data: { name: string; modIds: string[]; gameBuild: GameBuild }) => Promise<void> | void
 }
 
 export function CreateServerModal({ isOpen, onClose, existingServers, availableMods, onCreate }: CreateServerModalProps) {
+  const { t } = useTranslation()
   const [step, setStep] = useState(1)
   const [serverName, setServerName] = useState("")
+  const [gameBuild, setGameBuild] = useState<GameBuild>("b41")
   const [modSelectionMode, setModSelectionMode] = useState<"checklist" | "clone">("checklist")
   const [selectedModIds, setSelectedModIds] = useState<Set<string>>(new Set())
   const [cloneSourceId, setCloneSourceId] = useState<string>("")
@@ -25,6 +30,17 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
 
   const handleNext = () => setStep(2)
   const handleBack = () => setStep(1)
+
+  const selectModSelectionMode = (mode: "checklist" | "clone") => {
+    setModSelectionMode(mode)
+    setError(null)
+
+    if (mode === "clone") {
+      setSelectedModIds(new Set())
+    } else {
+      setCloneSourceId("")
+    }
+  }
 
   const toggleMod = (id: string) => {
     const next = new Set(selectedModIds)
@@ -47,11 +63,12 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
     setError(null)
 
     try {
-      await onCreate?.({ name: serverName, modIds: finalModIds })
+      await onCreate?.({ name: serverName, modIds: finalModIds, gameBuild })
       setStep(1)
       setServerName("")
       setSelectedModIds(new Set())
       setCloneSourceId("")
+      setGameBuild("b41")
       onClose()
     } catch (createError) {
       setError(getErrorMessage(createError))
@@ -70,8 +87,8 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
               <Plus size={24} />
             </div>
             <div>
-              <h3 className="text-xl font-bold text-white uppercase italic">Novo Servidor</h3>
-              <p className="text-xs text-gray-400">Passo {step} de 2</p>
+              <h3 className="text-xl font-bold text-white uppercase italic">{t("createServer.title")}</h3>
+              <p className="text-xs text-gray-400">{t("createServer.step", { current: step })}</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full text-gray-400 transition-colors">
@@ -85,7 +102,7 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
             <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
               <div className="space-y-3">
                 <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">
-                  Nome do Servidor
+                  {t("createServer.name")}
                 </label>
                 <div className="relative group/input">
                   <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within/input:text-orange-400 transition-colors">
@@ -96,7 +113,7 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
                     type="text"
                     value={serverName}
                     onChange={(e) => setServerName(e.target.value)}
-                    placeholder="Ex: Meu Servidor de Sobrevivência"
+                    placeholder={t("createServer.placeholder")}
                     className="w-full bg-[#1e2327] border border-white/5 rounded-2xl py-4 pl-12 pr-4 text-lg focus:outline-none focus:border-orange-400/50 focus:ring-1 focus:ring-orange-400/20 transition-all placeholder:text-gray-700"
                   />
                 </div>
@@ -104,42 +121,67 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
 
               <div className="p-4 bg-orange-400/5 border border-orange-400/10 rounded-2xl">
                 <p className="text-xs text-gray-400 leading-relaxed">
-                  Dica: Use nomes curtos e sem caracteres especiais para evitar problemas com os arquivos de configuração do Project Zomboid.
+                  {t("createServer.tip")}
                 </p>
+              </div>
+              <div className="space-y-3">
+                <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">
+                  {t("createServer.build")}
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  {(["b41", "b42"] as GameBuild[]).map((build) => (
+                    <button
+                      key={build}
+                      type="button"
+                      onClick={() => {
+                        setGameBuild(build)
+                        setSelectedModIds(new Set())
+                        setCloneSourceId("")
+                      }}
+                      className={`rounded-xl border px-4 py-3 text-sm font-bold uppercase ${
+                        gameBuild === build ? "border-orange-400/40 bg-orange-400/10 text-orange-300" : "border-white/5 bg-[#1e2327] text-gray-400"
+                      }`}
+                    >
+                      {build}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           ) : (
             <div className="space-y-8 animate-in slide-in-from-right-4 duration-300">
               <div className="flex gap-4 p-1 bg-[#1e2327] rounded-2xl border border-white/5">
                 <button
-                  onClick={() => setModSelectionMode("checklist")}
+                  type="button"
+                  onClick={() => selectModSelectionMode("checklist")}
                   className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all ${
                     modSelectionMode === "checklist" ? "bg-[#2b3238] text-orange-400 shadow-lg" : "text-gray-500 hover:text-gray-300"
                   }`}
                 >
                   <Box size={18} />
-                  Lista de Mods
+                  {t("createServer.modList")}
                 </button>
                 <button
-                  onClick={() => setModSelectionMode("clone")}
+                  type="button"
+                  onClick={() => selectModSelectionMode("clone")}
                   className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all ${
                     modSelectionMode === "clone" ? "bg-[#2b3238] text-orange-400 shadow-lg" : "text-gray-500 hover:text-gray-300"
                   }`}
                 >
                   <Copy size={18} />
-                  Clonar Existente
+                  {t("createServer.clone")}
                 </button>
               </div>
 
               {modSelectionMode === "checklist" ? (
-                <div className="space-y-4">
+                <div key="checklist" className="space-y-4">
                   <div className="flex justify-between items-center">
                     <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">
-                      Selecionar Mods ({selectedModIds.size})
+                      {t("createServer.selectMods", { count: selectedModIds.size })}
                     </label>
                   </div>
                   <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                    {availableMods.map((mod) => (
+                    {availableMods.filter((mod) => supportsBuild(mod, gameBuild)).map((mod) => (
                       <label
                         key={mod.id}
                         className={`flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer ${
@@ -166,19 +208,20 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
                   </div>
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div key="clone" className="space-y-4">
                   <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">
-                    Servidor de Origem
+                    {t("createServer.source")}
                   </label>
-                  <div className="grid gap-2">
+                  <div className="grid max-h-[300px] gap-2 overflow-y-auto pr-2 custom-scrollbar">
                     {existingServers.map((server) => (
                       <button
                         key={server.id}
+                        disabled={server.gameBuild !== gameBuild}
                         onClick={() => setCloneSourceId(server.id)}
                         className={`flex items-center gap-3 p-4 rounded-2xl border transition-all text-left ${
                           cloneSourceId === server.id
                             ? "bg-orange-400/10 border-orange-400/30 ring-1 ring-orange-400/20"
-                            : "bg-[#1e2327] border-white/5 hover:border-white/10"
+                            : "bg-[#1e2327] border-white/5 hover:border-white/10 disabled:cursor-not-allowed disabled:opacity-40"
                         }`}
                       >
                         <div className={`p-2 rounded-xl ${cloneSourceId === server.id ? "bg-orange-500 text-white" : "bg-[#2b3238] text-gray-500"}`}>
@@ -186,7 +229,7 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className={`font-bold text-sm ${cloneSourceId === server.id ? "text-white" : "text-gray-300"}`}>{server.name}</p>
-                          <p className="text-xs text-gray-500">{server.modsCount} mods ativos</p>
+                          <p className="text-xs text-gray-500">{t("createServer.activeMods", { count: server.modsCount, build: server.gameBuild.toUpperCase() })}</p>
                         </div>
                       </button>
                     ))}
@@ -209,10 +252,10 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
             onClick={step === 1 ? onClose : handleBack}
             className="flex items-center gap-2 px-6 py-3 text-sm font-bold text-gray-400 hover:text-white transition-colors"
           >
-            {step === 1 ? "Cancelar" : (
+            {step === 1 ? t("createServer.cancel") : (
               <>
                 <ChevronLeft size={18} />
-                Voltar
+                {t("createServer.back")}
               </>
             )}
           </button>
@@ -223,7 +266,7 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
               onClick={handleNext}
               className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-700 disabled:text-gray-500 text-white px-8 py-3 rounded-2xl font-black uppercase italic tracking-wider transition-all shadow-lg shadow-orange-500/20 active:scale-95"
             >
-              <span>Próximo</span>
+              <span>{t("createServer.next")}</span>
               <ChevronRight size={18} />
             </button>
           ) : (
@@ -233,7 +276,7 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
               className="flex items-center gap-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-400 hover:to-orange-500 text-white px-8 py-3 rounded-2xl font-black uppercase italic tracking-wider transition-all shadow-lg shadow-orange-500/20 active:scale-95"
             >
               <Save size={18} />
-              <span>{isCreating ? "Criando" : "Criar Servidor"}</span>
+              <span>{isCreating ? t("createServer.creating") : t("createServer.create")}</span>
             </button>
           )}
         </div>
@@ -251,5 +294,5 @@ function getErrorMessage(error: unknown) {
     return error
   }
 
-  return "Nao foi possivel criar o servidor."
+  return i18n.t("createServer.createError")
 }

@@ -1,3 +1,4 @@
+use crate::i18n::text;
 use std::{
     collections::HashSet,
     io::{BufRead, BufReader},
@@ -32,7 +33,15 @@ pub(crate) fn kill_process_tree(pid: u32) -> Result<(), String> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
-        .map_err(|error| format!("Nao foi possivel encerrar o processo do teste: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "{}: {error}",
+                text(
+                    "Could not stop the test process",
+                    "Nao foi possivel encerrar o processo do teste"
+                )
+            )
+        })?;
 
     Ok(())
 }

@@ -1,8 +1,17 @@
-use crate::models::ZomboidServer;
-use crate::mods::{normalize_server_values, resolve_server_workshop_ids};
+use crate::i18n::text;
+use crate::models::{ZomboidServer, BUILD_41, BUILD_42};
+use crate::mods::{
+    normalize_server_values, parse_server_mod_ids, resolve_server_workshop_ids,
+    serialize_server_mod_ids,
+};
 use crate::util::*;
-use crate::{run_blocking, server_example_dir, zomboid_server_dir};
-use std::{fs, path::Path};
+use crate::workshop::open_file_external;
+use crate::{app_config_dir, run_blocking, server_example_dir, zomboid_server_dir};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+};
 #[tauri::command]
 pub(crate) async fn list_zomboid_servers() -> Result<Vec<ZomboidServer>, String> {
     run_blocking(list_zomboid_servers_impl).await
@@ -15,8 +24,13 @@ fn list_zomboid_servers_impl() -> Result<Vec<ZomboidServer>, String> {
         return Ok(Vec::new());
     }
 
-    let entries = fs::read_dir(&server_dir)
-        .map_err(|error| format!("Nao foi possivel ler {}: {error}", server_dir.display()))?;
+    let entries = fs::read_dir(&server_dir).map_err(|error| {
+        format!(
+            "{} {}: {error}",
+            text("Could not read", "Nao foi possivel ler"),
+            server_dir.display()
+        )
+    })?;
 
     let mut servers = Vec::new();
 
@@ -34,6 +48,44 @@ fn list_zomboid_servers_impl() -> Result<Vec<ZomboidServer>, String> {
     servers.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
 
     Ok(servers)
+}
+
+#[tauri::command]
+pub(crate) fn open_zomboid_server_file(server_id: String) -> Result<(), String> {
+    let server_dir = zomboid_server_dir()?;
+    let server_path = server_dir.join(format!("{server_id}.ini"));
+
+    if !server_path.exists() || !server_path.is_file() {
+        return Err(format!(
+            "{}: {}",
+            text(
+                "Server file not found",
+                "Arquivo do servidor nao encontrado"
+            ),
+            server_path.display()
+        ));
+    }
+
+    let canonical_server_dir = server_dir.canonicalize().map_err(|error| {
+        format!(
+            "{} {}: {error}",
+            text("Could not access", "Nao foi possivel acessar"),
+            server_dir.display()
+        )
+    })?;
+    let canonical_server_path = server_path.canonicalize().map_err(|error| {
+        format!(
+            "{} {}: {error}",
+            text("Could not access", "Nao foi possivel acessar"),
+            server_path.display()
+        )
+    })?;
+
+    if !canonical_server_path.starts_with(&canonical_server_dir) {
+        return Err(text("Invalid server file.", "Arquivo de servidor invalido.").to_string());
+    }
+
+    open_file_external(&canonical_server_path)
 }
 
 fn read_zomboid_server_from_path(path: &Path) -> Result<ZomboidServer, String> {
@@ -55,13 +107,24 @@ fn read_zomboid_server_from_path(path: &Path) -> Result<ZomboidServer, String> {
     let max_players = read_ini_value(&content, "MaxPlayers")
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(0);
-    let active_mod_ids = read_ini_value(&content, "Mods")
-        .map(|value| split_mod_ids(&value))
-        .unwrap_or_default();
+    let game_build = read_zomboid_server_build(&file_stem)?;
+    let configured_mods = read_ini_value(&content, "Mods").unwrap_or_default();
+    let active_mod_ids = parse_server_mod_ids(&configured_mods);
+
+    if game_build == BUILD_42 {
+        let serialized_mod_ids = serialize_server_mod_ids(&active_mod_ids, &game_build);
+        if configured_mods != serialized_mod_ids {
+            let updated_content =
+                replace_or_append_ini_value(&content, "Mods", &serialized_mod_ids);
+            fs::write(path, updated_content)
+                .map_err(|error| format!("Nao foi possivel salvar {}: {error}", path.display()))?;
+        }
+    }
+
     let mods_count = active_mod_ids.len();
 
     Ok(ZomboidServer {
-        id: file_stem,
+        id: file_stem.clone(),
         name,
         file_name,
         path: path.display().to_string(),
@@ -70,27 +133,78 @@ fn read_zomboid_server_from_path(path: &Path) -> Result<ZomboidServer, String> {
         mods_count,
         active_mod_ids,
         status: "offline".to_string(),
+        game_build,
     })
 }
 
+pub(crate) fn read_zomboid_server_build(server_id: &str) -> Result<String, String> {
+    Ok(read_server_builds()?
+        .remove(server_id)
+        .unwrap_or_else(|| BUILD_41.to_string()))
+}
+
 #[tauri::command]
-pub(crate) fn update_zomboid_server_mods(
+pub(crate) fn update_zomboid_server_build(
+    server_id: String,
+    game_build: String,
+) -> Result<(), String> {
+    let server_path = zomboid_server_dir()?.join(format!("{server_id}.ini"));
+    if !server_path.is_file() {
+        return Err(format!(
+            "{}: {}",
+            text(
+                "Server file not found",
+                "Arquivo do servidor nao encontrado"
+            ),
+            server_path.display()
+        ));
+    }
+    let game_build = normalize_game_build(&game_build)?;
+    let content = read_text_lossy(&server_path)?;
+    let mod_ids = read_ini_value(&content, "Mods")
+        .map(|value| parse_server_mod_ids(&value))
+        .unwrap_or_default();
+    let updated_content = replace_or_append_ini_value(
+        &content,
+        "Mods",
+        &serialize_server_mod_ids(&mod_ids, game_build),
+    );
+    fs::write(&server_path, updated_content)
+        .map_err(|error| format!("Nao foi possivel salvar {}: {error}", server_path.display()))?;
+    write_zomboid_server_build(&server_id, game_build)
+}
+
+#[tauri::command]
+pub(crate) async fn update_zomboid_server_mods(
     server_id: String,
     mod_ids: Vec<String>,
     workshop_ids: Vec<String>,
+) -> Result<(), String> {
+    run_blocking(move || update_zomboid_server_mods_impl(&server_id, &mod_ids, &workshop_ids)).await
+}
+
+fn update_zomboid_server_mods_impl(
+    server_id: &str,
+    mod_ids: &[String],
+    workshop_ids: &[String],
 ) -> Result<(), String> {
     let server_path = zomboid_server_dir()?.join(format!("{server_id}.ini"));
 
     if !server_path.exists() {
         return Err(format!(
-            "Arquivo do servidor nao encontrado: {}",
+            "{}: {}",
+            text(
+                "Server file not found",
+                "Arquivo do servidor nao encontrado"
+            ),
             server_path.display()
         ));
     }
 
     let content = read_text_lossy(&server_path)?;
-    let normalized_mods = normalize_server_values(&mod_ids).join(";");
-    let normalized_workshop_ids = resolve_server_workshop_ids(&mod_ids, &workshop_ids)?.join(";");
+    let game_build = read_zomboid_server_build(server_id)?;
+    let normalized_mods = serialize_server_mod_ids(mod_ids, &game_build);
+    let normalized_workshop_ids = normalize_server_values(workshop_ids).join(";");
     let updated_content = replace_or_append_ini_value(&content, "Mods", &normalized_mods);
     let updated_content =
         replace_or_append_ini_value(&updated_content, "WorkshopItems", &normalized_workshop_ids);
@@ -108,7 +222,11 @@ pub(crate) fn install_zomboid_server_map(
 
     if !server_path.exists() {
         return Err(format!(
-            "Arquivo do servidor nao encontrado: {}",
+            "{}: {}",
+            text(
+                "Server file not found",
+                "Arquivo do servidor nao encontrado"
+            ),
             server_path.display()
         ));
     }
@@ -116,7 +234,11 @@ pub(crate) fn install_zomboid_server_map(
     let map_names = find_mod_map_names(Path::new(&mod_path))?;
 
     if map_names.is_empty() {
-        return Err("Este mod nao possui mapas em media/maps.".to_string());
+        return Err(text(
+            "This mod has no maps in media/maps.",
+            "Este mod nao possui mapas em media/maps.",
+        )
+        .to_string());
     }
 
     let content = read_text_lossy(&server_path)?;
@@ -168,8 +290,12 @@ pub(crate) async fn create_zomboid_server(
     name: String,
     mod_ids: Vec<String>,
     workshop_ids: Vec<String>,
+    game_build: String,
 ) -> Result<ZomboidServer, String> {
-    run_blocking(move || create_zomboid_server_impl(&app, &name, &mod_ids, &workshop_ids)).await
+    run_blocking(move || {
+        create_zomboid_server_impl(&app, &name, &mod_ids, &workshop_ids, &game_build)
+    })
+    .await
 }
 
 fn create_zomboid_server_impl(
@@ -177,17 +303,22 @@ fn create_zomboid_server_impl(
     name: &str,
     mod_ids: &[String],
     workshop_ids: &[String],
+    game_build: &str,
 ) -> Result<ZomboidServer, String> {
     let name = name.trim();
 
     if name.is_empty() {
-        return Err("Informe um nome para o servidor.".to_string());
+        return Err(text("Enter a server name.", "Informe um nome para o servidor.").to_string());
     }
 
     let server_id = sanitize_server_id(name);
 
     if server_id.is_empty() {
-        return Err("Use um nome de servidor com letras ou numeros.".to_string());
+        return Err(text(
+            "Use a server name with letters or numbers.",
+            "Use um nome de servidor com letras ou numeros.",
+        )
+        .to_string());
     }
 
     let server_dir = zomboid_server_dir()?;
@@ -197,7 +328,13 @@ fn create_zomboid_server_impl(
     let server_path = server_dir.join(format!("{server_id}.ini"));
 
     if server_path.exists() {
-        return Err(format!("Ja existe um servidor chamado '{server_id}'."));
+        return Err(format!(
+            "{} '{server_id}'.",
+            text(
+                "A server already exists with the name",
+                "Ja existe um servidor chamado"
+            )
+        ));
     }
 
     let example_dir = server_example_dir(app)?;
@@ -214,12 +351,12 @@ fn create_zomboid_server_impl(
         }
     }
 
-    let normalized_mod_ids = normalize_server_values(mod_ids);
+    let game_build = normalize_game_build(game_build)?;
+    let normalized_mod_ids = serialize_server_mod_ids(mod_ids, game_build);
     let normalized_workshop_ids = resolve_server_workshop_ids(mod_ids, workshop_ids)?;
     let ini_content = read_text_lossy(&template_ini)?;
     let ini_content = replace_or_append_ini_value(&ini_content, "PublicName", name);
-    let ini_content =
-        replace_or_append_ini_value(&ini_content, "Mods", &normalized_mod_ids.join(";"));
+    let ini_content = replace_or_append_ini_value(&ini_content, "Mods", &normalized_mod_ids);
     let ini_content = replace_or_append_ini_value(
         &ini_content,
         "WorkshopItems",
@@ -238,8 +375,62 @@ fn create_zomboid_server_impl(
         server_dir.join(format!("{server_id}_spawnregions.lua")),
     )
     .map_err(|error| format!("Nao foi possivel copiar spawnregions: {error}"))?;
+    write_zomboid_server_build(&server_id, game_build)?;
 
     read_zomboid_server_from_path(&server_path)
+}
+
+fn server_builds_path() -> Result<PathBuf, String> {
+    Ok(app_config_dir()?.join("server-builds.ini"))
+}
+
+fn normalize_game_build(game_build: &str) -> Result<&'static str, String> {
+    match game_build.trim().to_lowercase().as_str() {
+        BUILD_41 => Ok(BUILD_41),
+        BUILD_42 => Ok(BUILD_42),
+        _ => Err(text(
+            "Invalid build. Use b41 or b42.",
+            "Build invalida. Use b41 ou b42.",
+        )
+        .to_string()),
+    }
+}
+
+fn read_server_builds() -> Result<HashMap<String, String>, String> {
+    let path = server_builds_path()?;
+    if !path.is_file() {
+        return Ok(HashMap::new());
+    }
+    let content = read_text_lossy(&path)?;
+    Ok(content
+        .lines()
+        .filter_map(|line| {
+            let (server_id, game_build) = line.split_once('=')?;
+            normalize_game_build(game_build)
+                .ok()
+                .map(|build| (server_id.trim().to_string(), build.to_string()))
+        })
+        .collect())
+}
+
+fn write_zomboid_server_build(server_id: &str, game_build: &str) -> Result<(), String> {
+    let game_build = normalize_game_build(game_build)?;
+    let path = server_builds_path()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Nao foi possivel criar {}: {error}", parent.display()))?;
+    }
+    let mut builds = read_server_builds()?;
+    builds.insert(server_id.to_string(), game_build.to_string());
+    let mut entries = builds.into_iter().collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.0.to_lowercase().cmp(&right.0.to_lowercase()));
+    let content = entries
+        .into_iter()
+        .map(|(id, build)| format!("{id}={build}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(&path, format!("{content}\n"))
+        .map_err(|error| format!("Nao foi possivel salvar {}: {error}", path.display()))
 }
 
 fn server_display_name(file_stem: &str, public_name: Option<String>) -> String {
@@ -299,5 +490,13 @@ mod tests {
         let _ = fs::remove_dir_all(mod_dir);
 
         assert_eq!(map_names, vec!["BedfordFalls".to_string()]);
+    }
+
+    #[test]
+    fn defaults_profiles_without_metadata_to_b41() {
+        assert_eq!(
+            read_zomboid_server_build("pzmm-profile-without-metadata-test").unwrap(),
+            BUILD_41
+        );
     }
 }

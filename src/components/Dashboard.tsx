@@ -1,5 +1,6 @@
 import { Activity, ChevronRight, Eye, EyeOff, FolderOpen, Plus, RefreshCw, Server, Users, Wifi } from "lucide-react"
 import { useEffect, useState } from "react"
+import { useTranslation } from "react-i18next"
 
 import type { ZomboidServer } from "@/types/server"
 
@@ -24,6 +25,7 @@ export function Dashboard({
   searchQuery,
   onServerClick
 }: DashboardProps) {
+  const { t } = useTranslation()
   const [hiddenServerIds, setHiddenServerIds] = useState<Set<string>>(new Set())
   const [showHidden, setShowHidden] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ server: ZomboidServer; x: number; y: number } | null>(null)
@@ -74,8 +76,8 @@ export function Dashboard({
     <div className="p-8 h-full overflow-y-auto custom-scrollbar relative" onClick={() => setContextMenu(null)}>
       <div className="flex justify-between items-center mb-8">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">Servidores</h2>
-          <p className="text-gray-400 mt-1">Gerencie e monitore seus servidores de Project Zomboid.</p>
+          <h2 className="text-3xl font-bold tracking-tight">{t("dashboard.title")}</h2>
+          <p className="text-gray-400 mt-1">{t("dashboard.description")}</p>
         </div>
 
         <button
@@ -83,7 +85,7 @@ export function Dashboard({
           onClick={onRefresh}
         >
           <RefreshCw size={18} className={isLoading ? "animate-spin" : ""} />
-          Atualizar
+          {t("common.refresh")}
         </button>
       </div>
 
@@ -95,7 +97,7 @@ export function Dashboard({
 
       {isLoading && (
         <div className="mb-6 rounded-2xl border border-white/5 bg-[#2b3238] px-5 py-4 text-sm text-gray-300">
-          Buscando servidores em sua pasta do Project Zomboid...
+          {t("dashboard.loading")}
         </div>
       )}
 
@@ -122,7 +124,7 @@ export function Dashboard({
             className="flex items-center gap-3 mb-6 px-2 py-2 hover:bg-white/5 rounded-xl transition-colors w-full text-left group"
           >
             <EyeOff size={18} className="text-gray-500" />
-            <h3 className="text-lg font-bold text-gray-500 uppercase tracking-tighter">Servidores Ocultos</h3>
+            <h3 className="text-lg font-bold text-gray-500 uppercase tracking-tighter">{t("dashboard.hidden")}</h3>
             <div className="h-px flex-1 bg-white/5" />
             <span className="text-xs font-mono text-gray-600 bg-[#2b3238] px-2 py-0.5 rounded-full">{hiddenServers.length}</span>
             <ChevronRight
@@ -161,12 +163,12 @@ export function Dashboard({
             {hiddenServerIds.has(contextMenu.server.id) ? (
               <>
                 <Eye size={16} />
-                Mostrar Servidor
+                {t("dashboard.show")}
               </>
             ) : (
               <>
                 <EyeOff size={16} />
-                Ocultar Servidor
+                {t("dashboard.hide")}
               </>
             )}
           </button>
@@ -187,6 +189,7 @@ function ServerCard({
   onContextMenu?: (e: React.MouseEvent) => void;
   isHidden?: boolean
 }) {
+  const { t } = useTranslation()
   const isOnline = server.status === "online"
 
   return (
@@ -218,13 +221,16 @@ function ServerCard({
           <Server size={24} />
         </div>
         <h3 className="text-xl font-semibold truncate">{server.name}</h3>
+        <span className="rounded-full border border-orange-400/20 bg-orange-400/10 px-2 py-0.5 text-[10px] font-black uppercase text-orange-300">
+          {server.gameBuild}
+        </span>
       </div>
 
       <div className="space-y-3">
         <div className="flex items-center justify-between text-sm">
           <div className="flex items-center gap-2 text-gray-400">
             <Users size={16} />
-            <span>Max Players</span>
+            <span>{t("serverDetail.maxPlayers")}</span>
           </div>
           <span className="font-medium">{server.maxPlayers || "-"}</span>
         </div>
@@ -232,7 +238,7 @@ function ServerCard({
         <div className="flex items-center justify-between text-sm">
           <div className="flex items-center gap-2 text-gray-400">
             <Wifi size={16} />
-            <span>Porta</span>
+            <span>{t("serverDetail.port")}</span>
           </div>
           <span className="font-mono text-xs text-gray-300">{server.port}</span>
         </div>
@@ -251,15 +257,17 @@ function ServerCard({
 
 
 function EmptyServerCard({ hasSearch }: { hasSearch: boolean }) {
+  const { t } = useTranslation()
+
   return (
     <div className="min-h-[220px] flex flex-col items-center justify-center gap-4 bg-[#2b3238] border border-white/5 rounded-2xl p-6 text-center">
       <div className="p-4 bg-[#22272b] rounded-full text-gray-400">
         <FolderOpen size={32} />
       </div>
       <div>
-        <p className="text-lg font-semibold">Nenhum servidor encontrado</p>
+        <p className="text-lg font-semibold">{t("dashboard.noServers")}</p>
         <p className="text-sm text-gray-500">
-          {hasSearch ? "Tente buscar por outro nome ou porta." : "Crie ou coloque arquivos .ini em Zomboid/Server."}
+          {t(hasSearch ? "dashboard.emptySearch" : "dashboard.emptyHint")}
         </p>
       </div>
     </div>
@@ -267,6 +275,8 @@ function EmptyServerCard({ hasSearch }: { hasSearch: boolean }) {
 }
 
 function AddServerCard({ onClick }: { onClick: () => void }) {
+  const { t } = useTranslation()
+
   return (
     <button
       onClick={onClick}
@@ -276,8 +286,8 @@ function AddServerCard({ onClick }: { onClick: () => void }) {
         <Plus size={32} />
       </div>
       <div className="text-center">
-        <p className="text-lg font-semibold">Criar Servidor</p>
-        <p className="text-sm text-gray-500">Adicione um novo servidor</p>
+        <p className="text-lg font-semibold">{t("dashboard.create")}</p>
+        <p className="text-sm text-gray-500">{t("dashboard.addServer")}</p>
       </div>
     </button>
   )

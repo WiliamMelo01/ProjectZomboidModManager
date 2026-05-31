@@ -1,5 +1,6 @@
 import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Download, Info, RefreshCw, Search, X } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
 
 import { MissingDependencyModal } from "@/components/MissingDependencyModal"
 import { ModCard } from "@/components/mods/ModCard"
@@ -33,8 +34,11 @@ export function ModsList({
   searchQuery,
   onSearchChange,
 }: ModsListProps) {
+  const { t } = useTranslation()
   const [filterStatus, setFilterStatus] = useState<"all" | "local" | "steam">("all")
+  const [filterBuild, setFilterBuild] = useState<"all" | "b41" | "b42">("all")
   const [currentPage, setCurrentPage] = useState(1)
+  const modsListRef = useRef<HTMLDivElement>(null)
   const [pendingInstall, setPendingInstall] = useState<{ mod: ZomboidMod; dependencies: ZomboidMod[] } | null>(null)
   const [missingDependency, setMissingDependency] = useState<{ mod: ZomboidMod; dependencyId: string } | null>(null)
   const steamCount = mods.filter((mod) => !isLocalMod(mod)).length
@@ -54,19 +58,25 @@ export function ModsList({
       filterStatus === "all" ||
       (filterStatus === "local" && isLocalMod(mod)) ||
       (filterStatus === "steam" && !isLocalMod(mod))
+    const matchesBuild = filterBuild === "all" || mod.compatibleBuilds.includes(filterBuild)
 
-    return matchesSearch && matchesFilter
+    return matchesSearch && matchesFilter && matchesBuild
   })
   const totalPages = Math.max(1, Math.ceil(filteredMods.length / MODS_PER_PAGE))
   const paginatedMods = filteredMods.slice((currentPage - 1) * MODS_PER_PAGE, currentPage * MODS_PER_PAGE)
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [filterStatus, searchQuery])
+  }, [filterStatus, filterBuild, searchQuery])
 
   useEffect(() => {
     setCurrentPage((page) => Math.min(page, totalPages))
   }, [totalPages])
+
+  const changePage = (page: number) => {
+    setCurrentPage(page)
+    modsListRef.current?.scrollTo({ top: 0, behavior: "smooth" })
+  }
 
   const handleInstallClick = async (mod: ZomboidMod) => {
     const dependencyPlan = buildInstallDependencyPlan(mod, mods)
@@ -94,8 +104,8 @@ export function ModsList({
     <div className="p-8 h-full flex flex-col gap-6 relative">
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight text-white">Workshop de Mods</h2>
-          <p className="text-gray-400 mt-1">Mods encontrados na pasta local do Zomboid e na Steam.</p>
+          <h2 className="text-3xl font-bold tracking-tight text-white">{t("library.title")}</h2>
+          <p className="text-gray-400 mt-1">{t("library.description")}</p>
         </div>
 
         <div className="flex w-full flex-col gap-4 md:flex-row md:items-center xl:w-auto">
@@ -107,7 +117,7 @@ export function ModsList({
                 filterStatus === "all" ? "bg-orange-500 text-white shadow-lg" : "text-gray-400 hover:text-white"
               }`}
             >
-              Todos
+              {t("library.all")}
             </button>
             <button
               onClick={() => setFilterStatus("local")}
@@ -126,6 +136,19 @@ export function ModsList({
               Steam
             </button>
           </div>
+          <div className="flex bg-[#2b3238] p-1 rounded-xl border border-white/5 shadow-inner">
+            {(["all", "b41", "b42"] as const).map((build) => (
+              <button
+                key={build}
+                onClick={() => setFilterBuild(build)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-all ${
+                  filterBuild === build ? "bg-orange-500 text-white shadow-lg" : "text-gray-400 hover:text-white"
+                }`}
+              >
+                {build === "all" ? t("library.builds") : build}
+              </button>
+            ))}
+          </div>
 
           <div className="relative w-full md:w-64 group">
             <Search
@@ -134,7 +157,7 @@ export function ModsList({
             />
             <input
               type="text"
-              placeholder="Buscar mods..."
+              placeholder={t("mods.search")}
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
               className="w-full bg-[#2b3238] border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-orange-400/50 transition-all placeholder:text-gray-600"
@@ -146,7 +169,7 @@ export function ModsList({
             onClick={onRefresh}
           >
             <RefreshCw size={18} className={isLoading ? "animate-spin" : ""} />
-            <span className="hidden md:inline">Atualizar</span>
+            <span className="hidden md:inline">{t("common.refresh")}</span>
           </button>
 
           <button
@@ -159,7 +182,7 @@ export function ModsList({
             onClick={() => void onInstallAll()}
           >
             {isInstallingAll ? <RefreshCw size={18} className="animate-spin" /> : <Download size={18} />}
-            <span>Trazer Steam para local</span>
+            <span>{t("library.bringLocal")}</span>
             {steamCount > 0 && <span className="text-xs opacity-80">({steamCount})</span>}
           </button>
         </div>
@@ -173,11 +196,11 @@ export function ModsList({
 
       {isLoading && (
         <div className="rounded-2xl border border-white/5 bg-[#2b3238] px-5 py-4 text-sm text-gray-300">
-          Buscando mods em Zomboid/mods e nas bibliotecas Steam...
+          {t("library.loading")}
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
+      <div ref={modsListRef} className="flex-1 overflow-y-auto custom-scrollbar pr-2">
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 pb-8">
           {paginatedMods.map((mod) => (
             <ModCard
@@ -190,8 +213,8 @@ export function ModsList({
           {!isLoading && filteredMods.length === 0 && (
             <div className="col-span-full flex flex-col items-center justify-center py-20 text-gray-500 bg-[#2b3238]/30 rounded-3xl border-2 border-dashed border-white/5">
               <Info size={48} className="mb-4 opacity-20" />
-              <p className="text-lg font-medium">Nenhum mod encontrado</p>
-              <p className="text-sm">Tente buscar por outro nome, autor, Mod ID, dependencia ou Workshop ID.</p>
+              <p className="text-lg font-medium">{t("mods.noResults")}</p>
+              <p className="text-sm">{t("library.noResultsHint")}</p>
             </div>
           )}
         </div>
@@ -201,22 +224,21 @@ export function ModsList({
         <div className="flex items-center justify-center gap-4 border-t border-white/5 pt-4">
           <button
             disabled={currentPage === 1}
-            onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+            onClick={() => changePage(Math.max(1, currentPage - 1))}
             className="flex items-center gap-2 rounded-xl border border-white/5 bg-[#2b3238] px-4 py-2 text-sm font-bold text-gray-300 transition-colors hover:border-orange-400/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
           >
             <ChevronLeft size={16} />
-            Anterior
+            {t("common.previous")}
           </button>
           <span className="text-sm text-gray-400">
-            Pagina <span className="font-bold text-white">{currentPage}</span> de{" "}
-            <span className="font-bold text-white">{totalPages}</span>
+            {t("library.page", { current: currentPage, total: totalPages })}
           </span>
           <button
             disabled={currentPage === totalPages}
-            onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+            onClick={() => changePage(Math.min(totalPages, currentPage + 1))}
             className="flex items-center gap-2 rounded-xl border border-white/5 bg-[#2b3238] px-4 py-2 text-sm font-bold text-gray-300 transition-colors hover:border-orange-400/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Proxima
+            {t("common.next")}
             <ChevronRight size={16} />
           </button>
         </div>
@@ -231,7 +253,7 @@ export function ModsList({
                 <div className="p-2 bg-orange-500/20 text-orange-400 rounded-xl">
                   <AlertCircle size={24} />
                 </div>
-                <h3 className="text-xl font-bold text-white">Dependências</h3>
+                <h3 className="text-xl font-bold text-white">{t("library.dependencies")}</h3>
               </div>
               <button
                 onClick={() => setPendingInstall(null)}
@@ -243,8 +265,7 @@ export function ModsList({
 
             <div className="p-6">
               <p className="text-gray-400 text-sm mb-4">
-                O mod <span className="text-white font-bold">{pendingInstall.mod.name}</span> requer os seguintes mods
-                adicionais para funcionar corretamente:
+                {t("library.dependenciesBody", { name: pendingInstall.mod.name })}
               </p>
 
               <div className="space-y-3 mb-6 max-h-48 overflow-y-auto custom-scrollbar pr-2">
@@ -273,13 +294,13 @@ export function ModsList({
                   className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl transition-all shadow-lg shadow-orange-500/20 flex items-center justify-center gap-2"
                 >
                   <CheckCircle2 size={18} />
-                  Trazer tudo para local
+                  {t("library.bringAllLocal")}
                 </button>
                 <button
                   onClick={() => setPendingInstall(null)}
                   className="w-full py-3 bg-transparent border border-white/10 text-gray-400 hover:text-white hover:bg-white/5 font-bold rounded-xl transition-all"
                 >
-                  Cancelar
+                  {t("common.cancel")}
                 </button>
               </div>
             </div>

@@ -8,10 +8,12 @@ use std::{
 };
 use tauri::{path::BaseDirectory, Manager};
 
+rust_i18n::i18n!("locales", fallback = "en");
+
 mod game;
+mod i18n;
 mod models;
 mod mods;
-mod server_launch;
 mod server_test;
 mod servers;
 mod settings;
@@ -21,16 +23,19 @@ mod workshop;
 use game::{
     get_system_ram, open_steam_zomboid_folder, scan_zomboid_installation, select_game_executable,
 };
+use i18n::{
+    emit_native_menu, get_language_preference, refresh_native_menu, set_language_preference,
+    sync_effective_language,
+};
 use models::*;
 use mods::{count_zomboid_mods, install_zomboid_mod, list_zomboid_mods};
-use server_launch::start_zomboid_server;
 use server_test::{
     check_zomboid_server_ports, kill_processes_by_pid, start_zomboid_server_test,
     test_zomboid_server,
 };
 use servers::{
     create_zomboid_server, install_zomboid_server_map, list_zomboid_servers,
-    update_zomboid_server_mods,
+    open_zomboid_server_file, update_zomboid_server_build, update_zomboid_server_mods,
 };
 use settings::{
     add_mod_location, detect_steamcmd_path, get_app_settings, get_mod_locations, push_mod_location,
@@ -369,19 +374,20 @@ fn read_saved_mod_locations() -> Result<Vec<ModLocation>, String> {
     for location in read_ini_values(&content, "mod_location") {
         let parts = location.splitn(3, '|').collect::<Vec<_>>();
 
-        if parts.len() != 3 {
+        if parts.len() < 2 {
             continue;
         }
 
         let kind = parts[0].trim();
-        let label = parts[1].trim();
-        let path = parts[2].trim();
+        let path = parts.last().copied().unwrap_or_default().trim();
+        let custom_name = Path::new(path).file_name().and_then(|name| name.to_str());
+        let label = i18n::mod_location_label(kind, custom_name);
 
-        if kind.is_empty() || label.is_empty() || path.is_empty() {
+        if kind.is_empty() || path.is_empty() {
             continue;
         }
 
-        push_mod_location(&mut locations, &mut seen, label, kind, PathBuf::from(path));
+        push_mod_location(&mut locations, &mut seen, &label, kind, PathBuf::from(path));
     }
 
     Ok(locations)
@@ -449,21 +455,24 @@ fn read_steam_library_dirs(libraryfolders_path: &Path) -> Vec<PathBuf> {
 
 fn main() {
     tauri::Builder::default()
+        .on_menu_event(|app, event| emit_native_menu(app, event.id().as_ref()))
         .setup(|app| {
             if let Err(error) = ensure_managed_steamcmd(app.handle()) {
                 eprintln!("Nao foi possivel preparar o SteamCMD gerenciado: {error}");
             }
 
+            refresh_native_menu(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             list_zomboid_servers,
-            start_zomboid_server,
             test_zomboid_server,
             start_zomboid_server_test,
             check_zomboid_server_ports,
             kill_processes_by_pid,
             create_zomboid_server,
+            open_zomboid_server_file,
+            update_zomboid_server_build,
             update_zomboid_server_mods,
             install_zomboid_server_map,
             list_zomboid_mods,
@@ -484,6 +493,9 @@ fn main() {
             open_steam_zomboid_folder,
             select_mod_folder,
             add_mod_location,
+            get_language_preference,
+            set_language_preference,
+            sync_effective_language,
             open_steam_workshop,
             open_steam_workshop_external,
             open_steam_workshop_steam_client

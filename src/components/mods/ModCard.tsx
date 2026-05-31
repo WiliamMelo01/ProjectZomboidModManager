@@ -1,4 +1,5 @@
 import { AlertCircle, Download, Hash, PackageCheck, User } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 import { isLocalMod } from "@/lib/modDependencies"
 import type { ZomboidMod } from "@/types/mod"
@@ -9,6 +10,7 @@ type ModCardProps = {
 }
 
 export function ModCard({ mod, onInstall }: ModCardProps) {
+  const { t } = useTranslation()
   const isLocal = isLocalMod(mod)
   const sourceLabel = isLocal ? "LOCAL" : "STEAM"
   const displayWorkshopId = mod.workshopId || "-"
@@ -35,6 +37,13 @@ export function ModCard({ mod, onInstall }: ModCardProps) {
             {sourceLabel}
           </span>
         </div>
+        <div className="absolute bottom-3 left-3 flex gap-1">
+          {mod.compatibleBuilds.map((build) => (
+            <span key={build} className="rounded-md border border-white/10 bg-black/50 px-2 py-0.5 text-[10px] font-black uppercase text-orange-200">
+              {build}
+            </span>
+          ))}
+        </div>
 
         <div className="absolute top-3 right-3">
           <span className="text-[10px] text-gray-300 font-mono bg-black/40 backdrop-blur-md px-2 py-0.5 rounded-md border border-white/10">
@@ -52,12 +61,12 @@ export function ModCard({ mod, onInstall }: ModCardProps) {
             <div className="flex items-center gap-2 mt-1">
               <div className="flex items-center gap-1 text-xs text-gray-500">
                 <User size={12} />
-                <span>por {mod.author}</span>
+                <span>{t("mods.by")} {mod.author}</span>
               </div>
               {hasDependencies && (
                 <div className="flex items-center gap-1 text-[10px] text-orange-400/80 bg-orange-400/5 px-2 py-0.5 rounded-full border border-orange-400/10">
                   <AlertCircle size={10} />
-                  <span>Requer dependências</span>
+                  <span>{t("mods.requiresDependencies")}</span>
                 </div>
               )}
             </div>
@@ -89,7 +98,7 @@ export function ModCard({ mod, onInstall }: ModCardProps) {
         </div>
 
         <div className="bg-[#22272b] p-2 rounded-lg border border-white/5 mb-6">
-          <p className="text-[10px] text-gray-500 uppercase font-bold tracking-tighter text-center">Tamanho</p>
+          <p className="text-[10px] text-gray-500 uppercase font-bold tracking-tighter text-center">{t("mods.size")}</p>
           <p className="text-xs font-mono text-gray-300 mt-0.5 text-center">{mod.size}</p>
         </div>
 
@@ -102,7 +111,7 @@ export function ModCard({ mod, onInstall }: ModCardProps) {
               : "bg-orange-500 text-white hover:bg-orange-600 hover:shadow-[0_4px_15_rgba(249,115,22,0.3)] active:scale-[0.98]"
           }`}
         >
-          {isLocal ? "Já esta local" : "Trazer para local"}
+          {isLocal ? t("mods.installed") : t("mods.install")}
         </button>
       </div>
     </div>

@@ -1,4 +1,10 @@
 import type { ZomboidMod } from "@/types/mod"
+import type { GameBuild } from "@/types/server"
+import { findModForServerId } from "@/lib/modBuilds"
+
+function normalizeModId(modId: string) {
+  return modId.trim().replace(/^\\+/, "").toLowerCase()
+}
 
 export function getActiveDependencyChain(
   mod: ZomboidMod,
@@ -10,7 +16,7 @@ export function getActiveDependencyChain(
   const visitedModIds = new Set<string>()
 
   function visit(currentMod: ZomboidMod) {
-    const currentModId = currentMod.id.toLowerCase()
+    const currentModId = normalizeModId(currentMod.id)
 
     if (visitedModIds.has(currentModId) || visitingModIds.has(currentModId)) {
       return
@@ -19,7 +25,7 @@ export function getActiveDependencyChain(
     visitingModIds.add(currentModId)
 
     for (const dependencyId of currentMod.dependencies ?? []) {
-      const normalizedDependencyId = dependencyId.toLowerCase()
+      const normalizedDependencyId = normalizeModId(dependencyId)
 
       if (!activeModIds.has(normalizedDependencyId)) {
         continue
@@ -44,12 +50,12 @@ export function getActiveDependencyChain(
   return orderedModIds
 }
 
-export function getWorkshopIdsForModIds(modIds: string[], mods: ZomboidMod[]) {
-  const selectedModIds = new Set(modIds.map((modId) => modId.toLowerCase()))
+export function getWorkshopIdsForModIds(modIds: string[], mods: ZomboidMod[], gameBuild: GameBuild) {
+  const selectedModIds = new Set(modIds.map(normalizeModId))
   const seenWorkshopIds = new Set<string>()
 
   return modIds.flatMap((modId) => {
-    const mod = mods.find((item) => item.id.toLowerCase() === modId.toLowerCase())
+    const mod = findModForServerId(mods, modId, gameBuild)
     const workshopId = mod?.workshopId?.trim()
 
     if (!workshopId) {
@@ -58,7 +64,7 @@ export function getWorkshopIdsForModIds(modIds: string[], mods: ZomboidMod[]) {
 
     const normalizedWorkshopId = workshopId.toLowerCase()
 
-    if (seenWorkshopIds.has(normalizedWorkshopId) || !selectedModIds.has(modId.toLowerCase())) {
+    if (seenWorkshopIds.has(normalizedWorkshopId) || !selectedModIds.has(normalizeModId(modId))) {
       return []
     }
 

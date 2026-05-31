@@ -1,0 +1,56 @@
+_version: 2
+
+"Local Zomboid mods":
+  en: "Local Zomboid mods"
+  pt-BR: "Mods locais do Zomboid"
+"SteamCMD downloads":
+  en: "SteamCMD downloads"
+  pt-BR: "Downloads do SteamCMD"
+"Custom folder":
+  en: "Custom folder"
+  pt-BR: "Pasta personalizada"
+"New server":
+  en: "New server"
+  pt-BR: "Novo servidor"
+"File":
+  en: "File"
+  pt-BR: "Arquivo"
+"Navigate":
+  en: "Navigate"
+  pt-BR: "Navegar"
+"Servers":
+  en: "Servers"
+  pt-BR: "Servidores"
+"Downloads":
+  en: "Downloads"
+  pt-BR: "Downloads"
+"Settings":
+  en: "Settings"
+  pt-BR: "Configuracoes"
+"Unknown":
+  en: "Unknown"
+  pt-BR: "Desconhecido"
+"No description available.":
+  en: "No description available."
+  pt-BR: "Sem descricao disponivel."
+"Select a mod folder.":
+  en: "Select a mod folder."
+  pt-BR: "Selecione uma pasta de mods."
+"Folder not found":
+  en: "Folder not found"
+  pt-BR: "Pasta nao encontrada"
+"Invalid server for testing.":
+  en: "Invalid server for testing."
+  pt-BR: "Servidor invalido para teste."
+"Enter at least one Steam Workshop item to download.":
+  en: "Enter at least one Steam Workshop item to download."
+  pt-BR: "Informe ao menos um item da Steam Workshop para baixar."
+"A Steam Workshop download is already in progress.":
+  en: "A Steam Workshop download is already in progress."
+  pt-BR: "Ja existe um download da Steam Workshop em andamento."
+"Enter a server name.":
+  en: "Enter a server name."
+  pt-BR: "Informe um nome para o servidor."
+"Invalid build. Use b41 or b42.":
+  en: "Invalid build. Use b41 or b42."
+  pt-BR: "Build invalida. Use b41 ou b42."

@@ -13,6 +13,7 @@ import {
   XCircle,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
+import { useTranslation } from "react-i18next"
 
 import type { WorkshopDownloadManager } from "@/hooks/useWorkshopDownloadManager"
 import { invokeTauri } from "@/lib/tauri"
@@ -39,6 +40,7 @@ function extractWorkshopId(value: string) {
 }
 
 export function DownloadMods({ manager, onOpenSettings }: DownloadModsProps) {
+  const { t } = useTranslation()
   const [workshopInput, setWorkshopInput] = useState("")
   const [downloadType, setDownloadType] = useState<DownloadType>("item")
   const [forceValidate, setForceValidate] = useState(false)
@@ -84,8 +86,8 @@ export function DownloadMods({ manager, onOpenSettings }: DownloadModsProps) {
     <div className="h-full overflow-y-auto bg-[#22272b] p-8 text-white custom-scrollbar">
       <div className="mx-auto max-w-3xl">
         <div className="mb-8">
-          <h2 className="text-3xl font-black uppercase italic tracking-tight">Baixar da Oficina</h2>
-          <p className="mt-1 text-gray-400">Baixe um mod ou uma coleção com uma única sessão SteamCMD.</p>
+          <h2 className="text-3xl font-black uppercase italic tracking-tight">{t("downloads.pageTitle")}</h2>
+          <p className="mt-1 text-gray-400">{t("downloads.pageDescription")}</p>
         </div>
 
         <section className="rounded-3xl border border-white/5 bg-[#2b3238] p-8 shadow-xl">
@@ -98,22 +100,22 @@ export function DownloadMods({ manager, onOpenSettings }: DownloadModsProps) {
 
           <div className="mb-6 grid grid-cols-2 gap-3 rounded-2xl border border-white/5 bg-[#1e2327] p-2">
             <TypeButton active={downloadType === "item"} onClick={() => setDownloadType("item")} icon={<Download size={18} />}>
-              Item individual
+              {t("downloads.item")}
             </TypeButton>
             <TypeButton active={downloadType === "collection"} onClick={() => setDownloadType("collection")} icon={<Layers3 size={18} />}>
-              Coleção completa
+              {t("downloads.collection")}
             </TypeButton>
           </div>
 
           <label className="mb-2 block text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">
-            {downloadType === "collection" ? "Collection ID ou URL" : "Workshop ID ou URL"}
+            {downloadType === "collection" ? t("downloads.collectionId") : t("downloads.workshopId")}
           </label>
           <div className="relative">
             <Hash size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" />
             <input
               value={workshopInput}
               onChange={(event) => setWorkshopInput(event.target.value)}
-              placeholder={downloadType === "collection" ? "Cole o ID ou a URL da coleção" : "Cole o ID ou a URL do mod"}
+              placeholder={downloadType === "collection" ? t("downloads.collectionPlaceholder") : t("downloads.modPlaceholder")}
               className="w-full rounded-2xl border border-white/5 bg-[#1e2327] py-4 pl-12 pr-4 font-mono text-sm focus:border-orange-400/50 focus:outline-none"
             />
           </div>
@@ -122,8 +124,8 @@ export function DownloadMods({ manager, onOpenSettings }: DownloadModsProps) {
             <input type="checkbox" checked={forceValidate} onChange={(event) => setForceValidate(event.target.checked)} />
             <ShieldCheck size={18} className="text-orange-400" />
             <span>
-              <span className="block text-sm font-bold">Forçar validação completa</span>
-              <span className="text-xs text-gray-500">Use somente para corrigir downloads corrompidos. O modo normal é mais rápido.</span>
+              <span className="block text-sm font-bold">{t("downloads.validate")}</span>
+              <span className="text-xs text-gray-500">{t("downloads.validateHint")}</span>
             </span>
           </label>
 
@@ -136,11 +138,11 @@ export function DownloadMods({ manager, onOpenSettings }: DownloadModsProps) {
               className="flex items-center justify-center gap-3 rounded-2xl bg-orange-500 px-5 py-4 font-black uppercase italic tracking-widest transition-colors hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-500"
             >
               {manager.isDownloading ? <RefreshCw size={20} className="animate-spin" /> : <Download size={20} />}
-              {manager.isDownloading ? "Baixando..." : downloadType === "collection" ? "Baixar coleção" : "Baixar mod"}
+              {manager.isDownloading ? t("downloads.downloading") : downloadType === "collection" ? t("downloads.downloadCollection") : t("downloads.downloadMod")}
             </button>
             {manager.isDownloading && (
               <button onClick={() => void manager.cancelDownload()} className="flex items-center justify-center gap-2 rounded-2xl border border-red-500/20 bg-red-500/10 px-5 py-4 text-sm font-bold text-red-300">
-                <Square size={16} /> Cancelar
+                <Square size={16} /> {t("common.cancel")}
               </button>
             )}
             <button onClick={() => void openWorkshop()} disabled={!workshopInput.trim()} className="flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-[#1e2327] px-5 py-4 text-sm font-bold text-gray-300 disabled:text-gray-600">
@@ -153,8 +155,8 @@ export function DownloadMods({ manager, onOpenSettings }: DownloadModsProps) {
           <section className="mt-6 flex items-center gap-4 rounded-3xl border border-green-500/20 bg-green-500/10 p-5 text-green-200">
             <CheckCircle2 size={24} />
             <div>
-              <p className="font-bold">Download concluído</p>
-              <p className="text-sm text-green-300">{manager.result.downloadedItems} itens foram baixados e a biblioteca foi atualizada.</p>
+              <p className="font-bold">{t("downloads.completedTitle")}</p>
+              <p className="text-sm text-green-300">{t("downloads.completedLibrary", { count: manager.result.downloadedItems })}</p>
             </div>
           </section>
         )}
@@ -162,8 +164,8 @@ export function DownloadMods({ manager, onOpenSettings }: DownloadModsProps) {
         {manager.downloadItems.length > 0 && (
           <section className="mt-6 rounded-3xl border border-white/5 bg-[#2b3238] p-6">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <h3 className="font-bold">Progresso dos itens</h3>
-              <p className="text-xs text-gray-400">{manager.progress.completedItems} concluídos · {manager.progress.failedItems} falhos · {manager.progress.queuedItems} aguardando</p>
+              <h3 className="font-bold">{t("downloads.itemProgress")}</h3>
+              <p className="text-xs text-gray-400">{t("downloads.itemProgressSummary", manager.progress)}</p>
             </div>
             <div className="max-h-72 space-y-2 overflow-y-auto pr-2 custom-scrollbar">
               {manager.downloadItems.map((item) => <DownloadItemRow key={item.workshopId} item={item} />)}
@@ -189,16 +191,17 @@ function SteamCmdStatus({ isChecking, isConfigured, path, onOpenSettings }: {
   path: string | null
   onOpenSettings?: () => void
 }) {
+  const { t } = useTranslation()
   return (
     <div className="mb-6 flex items-start gap-3 rounded-2xl border border-white/5 bg-[#1e2327] p-4">
       {isChecking ? <RefreshCw size={20} className="animate-spin text-orange-400" /> : isConfigured ? <CheckCircle2 size={20} className="text-green-400" /> : <XCircle size={20} className="text-red-400" />}
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-bold">{isChecking ? "Verificando SteamCMD" : isConfigured ? "SteamCMD pronto" : "SteamCMD não configurado"}</p>
-        <p className="mt-1 break-all text-xs text-gray-500">{path || "Configure o caminho do steamcmd.exe para liberar downloads."}</p>
+        <p className="text-sm font-bold">{isChecking ? t("downloads.checking") : isConfigured ? t("downloads.configured") : t("downloads.notConfigured")}</p>
+        <p className="mt-1 break-all text-xs text-gray-500">{path || t("downloads.configureHint")}</p>
       </div>
       {!isChecking && !isConfigured && onOpenSettings && (
         <button onClick={onOpenSettings} className="flex items-center gap-2 rounded-xl bg-orange-500 px-3 py-2 text-xs font-bold">
-          <Settings size={15} /> Configurar
+          <Settings size={15} /> {t("downloads.configure")}
         </button>
       )}
     </div>
@@ -214,24 +217,27 @@ function StatusBox({ status }: { status: WorkshopDownloadStatus }) {
 }
 
 function DownloadItemRow({ item }: { item: DownloadListItem }) {
+  const { t } = useTranslation()
   const color = item.status === "completed" ? "text-green-300" : item.status === "failed" || item.status === "cancelled" ? "text-red-300" : "text-orange-300"
-  return <div className="flex items-center gap-3 rounded-xl border border-white/5 bg-[#1e2327] px-4 py-3 text-sm"><Hash size={14} className="text-gray-600" /><span className="flex-1 font-mono">{item.workshopId}</span><span className={color}>{statusLabel(item.status)}</span></div>
+  return <div className="flex items-center gap-3 rounded-xl border border-white/5 bg-[#1e2327] px-4 py-3 text-sm"><Hash size={14} className="text-gray-600" /><span className="flex-1 font-mono">{item.workshopId}</span><span className={color}>{statusLabel(item.status, t)}</span></div>
 }
 
 function DownloadResultModal({ result, onClose, onRetry }: { result: WorkshopDownloadResult; onClose: () => void; onRetry: () => void }) {
+  const { t } = useTranslation()
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
       <div className="w-full max-w-2xl rounded-3xl border border-white/10 bg-[#22272b] shadow-2xl">
         <div className="flex items-center justify-between border-b border-white/5 p-6">
-          <div><h3 className="text-xl font-bold">Resumo do download</h3><p className="mt-1 text-sm text-gray-400">{result.wasCancelled ? "Download interrompido." : "Alguns itens não puderam ser baixados."}</p></div>
+          <div><h3 className="text-xl font-bold">{t("downloads.summary")}</h3><p className="mt-1 text-sm text-gray-400">{t(result.wasCancelled ? "downloads.interrupted" : "downloads.failedSome")}</p></div>
           <button onClick={onClose} className="rounded-full p-2 text-gray-400 hover:bg-white/5"><X size={20} /></button>
         </div>
         <div className="p-6">
           <div className="mb-5 grid grid-cols-2 gap-3 text-center sm:grid-cols-4">
-            <ResultCount label="Total" value={result.totalItems} color="text-white" />
-            <ResultCount label="Baixados" value={result.downloadedItems} color="text-green-300" />
-            <ResultCount label="Falhas" value={result.failedItems.length} color="text-red-300" />
-            <ResultCount label="Cancelados" value={result.cancelledItems} color="text-orange-300" />
+            <ResultCount label={t("downloads.total")} value={result.totalItems} color="text-white" />
+            <ResultCount label={t("downloads.downloaded")} value={result.downloadedItems} color="text-green-300" />
+            <ResultCount label={t("downloads.failures")} value={result.failedItems.length} color="text-red-300" />
+            <ResultCount label={t("downloads.cancelledCount")} value={result.cancelledItems} color="text-orange-300" />
           </div>
           {result.failedItems.length > 0 && (
             <div className="max-h-72 space-y-3 overflow-y-auto pr-2 custom-scrollbar">
@@ -239,8 +245,8 @@ function DownloadResultModal({ result, onClose, onRetry }: { result: WorkshopDow
             </div>
           )}
           <div className="mt-6 flex justify-end gap-3">
-            <button onClick={onClose} className="rounded-xl border border-white/10 px-4 py-3 text-sm font-bold text-gray-300">Fechar</button>
-            {result.failedItems.length > 0 && <button onClick={onRetry} className="rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold">Tentar falhos novamente</button>}
+            <button onClick={onClose} className="rounded-xl border border-white/10 px-4 py-3 text-sm font-bold text-gray-300">{t("common.close")}</button>
+            {result.failedItems.length > 0 && <button onClick={onRetry} className="rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold">{t("downloads.retryFailed")}</button>}
           </div>
         </div>
       </div>
@@ -252,6 +258,6 @@ function ResultCount({ label, value, color }: { label: string; value: number; co
   return <div className="rounded-2xl border border-white/5 bg-[#1e2327] p-4"><p className={`text-2xl font-black ${color}`}>{value}</p><p className="text-xs text-gray-500">{label}</p></div>
 }
 
-function statusLabel(status: DownloadItemStatus) {
-  return { queued: "Aguardando", downloading: "Baixando", completed: "Concluído", retrying: "Tentando novamente", failed: "Falhou", cancelled: "Cancelado" }[status]
+function statusLabel(status: DownloadItemStatus, t: (key: string) => string) {
+  return t({ queued: "downloads.queued", downloading: "downloads.downloading", completed: "downloads.completed", retrying: "downloads.retryingStatus", failed: "downloads.failed", cancelled: "downloads.cancelledStatus" }[status])
 }

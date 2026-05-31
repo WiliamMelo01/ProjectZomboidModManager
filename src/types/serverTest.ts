@@ -12,6 +12,7 @@ export type ServerTestResult = {
 export type ServerTestEvent = {
   serverId: string
   event: "started" | "line" | "finished" | "error"
+  timeoutSeconds: number | null
   line: string | null
   result: ServerTestResult | null
   error: string | null

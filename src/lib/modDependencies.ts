@@ -1,7 +1,7 @@
 import type { ZomboidMod } from "@/types/mod"
 
 export function normalizeModId(modId: string) {
-  return String(modId ?? "").trim().toLowerCase()
+  return String(modId ?? "").trim().replace(/^\\+/, "").toLowerCase()
 }
 
 export function isLocalMod(mod: ZomboidMod) {
@@ -63,7 +63,15 @@ export function buildActivationDependencyPlan(
 }
 
 function mapModsById(mods: ZomboidMod[]) {
-  return new Map(mods.filter((mod) => mod.id).map((mod) => [normalizeModId(mod.id), mod]))
+  return new Map(
+    mods.flatMap((mod) => [
+      [normalizeModId(mod.id), mod] as const,
+      ...mod.variants.map((variant) => [
+        normalizeModId(variant.id),
+        { ...mod, id: variant.id, path: variant.path, dependencies: variant.dependencies, mapNames: variant.mapNames },
+      ] as const),
+    ]),
+  )
 }
 
 function visitModDependencies(

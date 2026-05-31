@@ -1,5 +1,6 @@
 import { Download, FolderSync, Settings, Search, Bell, RefreshCw } from "lucide-react"
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 
 import type { WorkshopDownloadResult } from "@/types/download"
 
@@ -42,6 +43,7 @@ export function AppHeader({
   searchQuery,
   onSearchChange,
 }: AppHeaderProps) {
+  const { t, i18n } = useTranslation()
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
   const latestNotification = notifications.find((notification) => !notification.isRead) ?? null
   const unreadCount = notifications.filter((notification) => !notification.isRead).length
@@ -53,7 +55,7 @@ export function AppHeader({
           <Search className="absolute left-3 text-gray-500 group-focus-within:text-orange-400 transition-colors" size={18} />
           <input
             type="text"
-            placeholder="Buscar servidores ou mods..."
+            placeholder={t("header.search")}
             value={searchQuery}
             onChange={(event) => onSearchChange(event.target.value)}
             className="w-full bg-[#2b3238] border border-white/5 rounded-xl py-2 pl-10 pr-4 text-sm focus:outline-none focus:border-orange-400/50 focus:ring-1 focus:ring-orange-400/20 transition-all placeholder:text-gray-600"
@@ -69,7 +71,7 @@ export function AppHeader({
           onClick={onScanMods}
         >
           <FolderSync size={20} className="group-hover:rotate-180 transition-transform duration-500" />
-          <span>Escanear Mods</span>
+          <span>{t("header.scanMods")}</span>
         </button>
 
         <button
@@ -78,7 +80,7 @@ export function AppHeader({
           onClick={onInstallAllMods}
         >
           {isInstallingAllMods ? <RefreshCw size={20} className="animate-spin" /> : <Download size={20} />}
-          <span>Trazer Steam</span>
+          <span>{t("header.bringSteam")}</span>
         </button>
 
         <div className="w-[1px] h-8 bg-white/5 mx-2" />
@@ -111,7 +113,7 @@ export function AppHeader({
             >
               <div className="flex items-start justify-between gap-3">
                 <p className="text-sm font-black text-white">{latestNotification.title}</p>
-                <span className="shrink-0 text-[10px] font-bold text-gray-400">{formatNotificationTime(latestNotification.createdAt)}</span>
+                <span className="shrink-0 text-[10px] font-bold text-gray-400">{formatNotificationTime(latestNotification.createdAt, i18n.language)}</span>
               </div>
               <p className="mt-1 line-clamp-2 text-xs text-gray-300">{latestNotification.message}</p>
             </button>
@@ -120,19 +122,19 @@ export function AppHeader({
           {isNotificationsOpen && (
           <div className="absolute right-0 top-12 z-40 w-96 overflow-hidden rounded-2xl border border-white/10 bg-[#1e2327] shadow-2xl shadow-black/50">
             <div className="flex items-center justify-between gap-3 border-b border-white/5 px-4 py-3">
-              <p className="text-xs font-black uppercase tracking-widest text-gray-400">Notificacoes</p>
+              <p className="text-xs font-black uppercase tracking-widest text-gray-400">{t("header.notifications")}</p>
               {unreadCount > 0 && (
                 <button
                   onClick={onMarkAllNotificationsRead}
                   className="text-[11px] font-bold text-orange-400 transition-colors hover:text-orange-300"
                 >
-                  Marcar tudo como lido
+                  {t("header.markAllRead")}
                 </button>
               )}
             </div>
             <div className="max-h-96 overflow-y-auto custom-scrollbar">
               {notifications.length === 0 ? (
-                <p className="px-4 py-6 text-center text-sm text-gray-500">Nenhuma notificacao.</p>
+                <p className="px-4 py-6 text-center text-sm text-gray-500">{t("header.noNotifications")}</p>
               ) : (
                 notifications.map((notification) => (
                   <button
@@ -153,7 +155,7 @@ export function AppHeader({
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="truncate text-sm font-bold text-white">{notification.title}</p>
-                          <span className="shrink-0 text-[10px] font-bold text-gray-500">{formatNotificationTime(notification.createdAt)}</span>
+                          <span className="shrink-0 text-[10px] font-bold text-gray-500">{formatNotificationTime(notification.createdAt, i18n.language)}</span>
                         </div>
                         <p className="mt-1 line-clamp-2 text-xs text-gray-400">{notification.message}</p>
                       </div>
@@ -186,8 +188,8 @@ export function AppHeader({
   )
 }
 
-function formatNotificationTime(createdAt: string) {
-  return new Intl.DateTimeFormat("pt-BR", {
+function formatNotificationTime(createdAt: string, locale = "en") {
+  return new Intl.DateTimeFormat(locale, {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(createdAt))

@@ -1,3 +1,13 @@
+import type { GameBuild } from "@/types/server"
+
+export type ZomboidModVariant = {
+  gameBuild: GameBuild
+  id: string
+  path: string
+  dependencies: string[]
+  mapNames: string[]
+}
+
 export type ZomboidMod = {
   id: string
   name: string
@@ -12,4 +22,7 @@ export type ZomboidMod = {
   imageUrl?: string
   dependencies?: string[]
   mapNames?: string[]
+  compatibleBuilds: GameBuild[]
+  variants: ZomboidModVariant[]
+  packagePath: string
 }

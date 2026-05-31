@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2, Clipboard, Maximize2, Minimize2, RefreshCw, Terminal, X, XCircle } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { listen } from "@tauri-apps/api/event"
+import { useTranslation } from "react-i18next"
 
 import type { AppNotification } from "@/components/AppHeader"
 import { ServerTestCompactCard } from "@/components/server-test/ServerTestCompactCard"
@@ -13,6 +14,7 @@ type ServerTestPanelProps = {
 }
 
 export function ServerTestPanel({ hasDownloadProgressCard = false, onNotification }: ServerTestPanelProps) {
+  const { t } = useTranslation()
   const [serverId, setServerId] = useState<string | null>(null)
   const [isOpen, setIsOpen] = useState(false)
   const [isMinimized, setIsMinimized] = useState(false)
@@ -24,6 +26,7 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
   const [isLogCopied, setIsLogCopied] = useState(false)
   const [startedAt, setStartedAt] = useState<number | null>(null)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const [timeoutSeconds, setTimeoutSeconds] = useState(180)
   const onNotificationRef = useRef(onNotification)
 
   useEffect(() => {
@@ -47,6 +50,7 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
         setIsMinimized(false)
         setStartedAt(Date.now())
         setElapsedSeconds(0)
+        setTimeoutSeconds(payload.timeoutSeconds ?? 180)
         setIsLogCopied(false)
         return
       }
@@ -70,7 +74,7 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
         setIsOpen(true)
 
         onNotificationRef.current?.({
-          title: "Teste do servidor finalizado",
+          title: t("serverTest.finishedTitle"),
           message: payload.result.summary,
           tone: payload.result.status === "passed" ? "success" : payload.result.status === "failed" ? "error" : "warning",
           action: { type: "server-test", serverId: payload.serverId },
@@ -79,14 +83,14 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
       }
 
       if (payload.event === "error") {
-        const message = payload.error ?? "Nao foi possivel testar o servidor."
+        const message = payload.error ?? t("serverTest.fallbackError")
         setServerId(payload.serverId)
         setError(message)
         setIsTesting(false)
         setStartedAt(null)
         setIsOpen(true)
         onNotificationRef.current?.({
-          title: "Falha ao testar servidor",
+          title: t("serverTest.failedTitle"),
           message,
           tone: "error",
           action: { type: "server-test", serverId: payload.serverId },
@@ -203,13 +207,13 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h3 className="truncate text-lg font-black text-white">
-                  Teste do servidor
+                  {t("serverTest.title")}
                 </h3>
               </div>
               <p className="mt-0.5 truncate text-sm text-gray-400">
                 {isTesting
-                  ? `${serverId ?? "perfil"} - ${formatDuration(elapsedSeconds)} - ${logLines.length} linhas`
-                  : error ?? result?.summary ?? "Aguardando teste"}
+                  ? `${serverId ?? t("serverTest.profile")} - ${formatDuration(elapsedSeconds)} - ${logLines.length} ${t("serverTest.lines")}`
+                  : error ?? result?.summary ?? t("serverTest.waiting")}
               </p>
             </div>
           </div>
@@ -217,21 +221,21 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
             <button
               onClick={() => setPanelSize((size) => (size === "compact" ? "wide" : "compact"))}
               className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-white/5 hover:text-white"
-              title="Alternar tamanho"
+              title={t("serverTest.toggleSize")}
             >
               <Maximize2 size={16} />
             </button>
             <button
               onClick={() => setIsMinimized(true)}
               className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-white/5 hover:text-white"
-              title="Minimizar"
+              title={t("serverTest.minimize")}
             >
               <Minimize2 size={16} />
             </button>
             <button
               onClick={closePanel}
               className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-white/5 hover:text-white"
-              title={isTesting ? "Minimizar enquanto roda" : "Fechar"}
+              title={isTesting ? t("serverTest.minimizeRunning") : t("common.close")}
             >
               <X size={18} />
             </button>
@@ -243,21 +247,21 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
               {result && (
                 <div className="mb-4 grid gap-3 md:grid-cols-4">
                   <div className={`rounded-2xl border p-4 ${getServerTestStatusStyle(result.status, false).panel}`}>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Status</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">{t("serverTest.status")}</p>
                     <p className="mt-1 text-sm font-bold text-white">{getServerTestStatusLabel(result.status)}</p>
                   </div>
                   <div className="rounded-2xl border border-white/5 bg-[#1e2327] p-4">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Duracao</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">{t("serverTest.duration")}</p>
                     <p className="mt-1 text-sm font-bold text-white">{result.durationSeconds}s</p>
                   </div>
                   <div className="rounded-2xl border border-white/5 bg-[#1e2327] p-4">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Perfil</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">{t("serverTest.profileLabel")}</p>
                     <p className="mt-1 truncate text-sm font-bold text-white">{serverId ?? "-"}</p>
                   </div>
                   <div className="rounded-2xl border border-white/5 bg-[#1e2327] p-4">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Avisos</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">{t("serverTest.warnings")}</p>
                     <p className={`mt-1 text-sm font-bold ${result.criticalCount > 0 ? "text-red-300" : result.warningCount > 0 ? "text-yellow-300" : "text-white"}`}>
-                      {result.criticalCount} criticos / {result.warningCount} avisos
+                      {t("serverTest.warningSummary", { critical: result.criticalCount, warnings: result.warningCount })}
                     </p>
                   </div>
                 </div>
@@ -266,11 +270,11 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
               {result && (
                 <div className="mb-4 space-y-3 rounded-2xl border border-white/5 bg-[#1e2327] p-4">
                   <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Arquivo</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">{t("serverTest.file")}</p>
                     <p className="mt-1 break-all font-mono text-xs text-gray-300">{result.batPath}</p>
                   </div>
                   <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Comando</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">{t("serverTest.command")}</p>
                     <p className="mt-1 break-all font-mono text-xs text-gray-300">{result.command}</p>
                   </div>
                 </div>
@@ -286,7 +290,7 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
                 <div className="flex items-center justify-between border-b border-white/5 px-4 py-3">
                   <div className="flex items-center gap-2 text-gray-300">
                     <Terminal size={16} className="text-orange-400" />
-                    <span className="text-xs font-black uppercase tracking-widest">Log do teste</span>
+                    <span className="text-xs font-black uppercase tracking-widest">{t("serverTest.log")}</span>
                   </div>
                   <button
                     onClick={() => void copyLog()}
@@ -294,7 +298,7 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
                     className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-bold text-gray-400 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <Clipboard size={14} />
-                    {isLogCopied ? "Copiado" : "Copiar"}
+                    {isLogCopied ? t("serverTest.copied") : t("serverTest.copy")}
                   </button>
                 </div>
                 <div className="max-h-80 overflow-y-auto whitespace-pre-wrap p-4 font-mono text-xs leading-relaxed custom-scrollbar">
@@ -305,7 +309,7 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
                       </div>
                     ))
                   ) : (
-                    <p className="text-gray-500">Aguardando saida do servidor...</p>
+                    <p className="text-gray-500">{t("serverTest.waitingOutput")}</p>
                   )}
                 </div>
               </div>
@@ -313,13 +317,13 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
 
             <div className="flex items-center justify-between gap-3 border-t border-white/5 p-5">
               <div className="font-mono text-xs text-gray-500">
-                {isTesting ? `Tempo: ${formatDuration(elapsedSeconds)} / 03:00` : result ? `Finalizado em ${formatDuration(result.durationSeconds)}` : "Pronto"}
+                {isTesting ? t("serverTest.time", { elapsed: formatDuration(elapsedSeconds), timeout: formatDuration(timeoutSeconds) }) : result ? t("serverTest.finishedIn", { duration: formatDuration(result.durationSeconds) }) : t("serverTest.ready")}
               </div>
               <button
                 onClick={closePanel}
                 className="rounded-xl border border-white/10 px-5 py-3 text-sm font-bold text-gray-400 transition-colors hover:bg-white/5 hover:text-white"
               >
-                {isTesting ? "Minimizar" : "Fechar"}
+                {isTesting ? t("serverTest.minimize") : t("common.close")}
               </button>
             </div>
           </>

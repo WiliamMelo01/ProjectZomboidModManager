@@ -1,3 +1,4 @@
+use crate::i18n::text;
 use crate::models::ServerTestResult;
 use std::path::Path;
 
@@ -53,8 +54,10 @@ pub(super) fn summarize_known_server_error(log_lines: &[String]) -> Option<Strin
         || combined_log.contains("connection startup failed. code: 5")
     {
         return Some(
-            "Falha ao iniciar a rede do servidor: a porta configurada parece estar em uso ou bloqueada. Verifique se outro servidor Project Zomboid ja esta rodando ou altere as portas do perfil."
-                .to_string(),
+            text(
+                "Failed to start the server network: the configured port appears to be in use or blocked. Check whether another Project Zomboid server is running or change the profile ports.",
+                "Falha ao iniciar a rede do servidor: a porta configurada parece estar em uso ou bloqueada. Verifique se outro servidor Project Zomboid ja esta rodando ou altere as portas do perfil.",
+            ).to_string(),
         );
     }
 
@@ -65,6 +68,7 @@ pub(super) fn is_server_started_line(normalized_line: &str) -> bool {
     normalized_line.contains("*** server started")
         || normalized_line.contains("server is listening on port")
         || normalized_line.contains("raknet.startup() return code: 0")
+        || normalized_line.contains("luanet: initialization [done]")
 }
 
 pub(super) fn count_warning_server_lines(log_lines: &[String]) -> usize {
@@ -82,4 +86,16 @@ pub(super) fn tail_log_lines(log_lines: Vec<String>, max_lines: usize) -> Vec<St
     let start = log_lines.len().saturating_sub(max_lines);
 
     log_lines.into_iter().skip(start).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recognizes_b42_luanet_initialization_as_server_started() {
+        assert!(is_server_started_line(
+            "log  : lua > luanet: initialization [done], triggering events for 'luanet.oninitadd'."
+        ));
+    }
 }

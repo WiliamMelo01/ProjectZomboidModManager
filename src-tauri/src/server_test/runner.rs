@@ -5,7 +5,9 @@ use super::logs::{
 };
 use super::preflight::{resolve_zomboid_game_dir, validate_server_mod_dependencies};
 use super::process::{kill_process_tree, spawn_output_reader};
-use crate::models::ServerTestResult;
+use crate::i18n::text;
+use crate::models::{ServerTestResult, BUILD_42};
+use crate::servers::read_zomboid_server_build;
 use crate::zomboid_server_dir;
 use std::{
     fs,
@@ -20,6 +22,20 @@ pub(super) fn test_zomboid_server_impl(server_id: &str) -> Result<ServerTestResu
     test_zomboid_server_impl_with_line_callback(server_id, |_| {})
 }
 
+pub(super) fn server_test_timeout_seconds(server_id: &str) -> Result<u64, String> {
+    Ok(timeout_seconds_for_build(&read_zomboid_server_build(
+        server_id,
+    )?))
+}
+
+fn timeout_seconds_for_build(game_build: &str) -> u64 {
+    if game_build.eq_ignore_ascii_case(BUILD_42) {
+        360
+    } else {
+        180
+    }
+}
+
 pub(super) fn test_zomboid_server_impl_with_line_callback<F>(
     server_id: &str,
     mut on_line: F,
@@ -27,13 +43,14 @@ pub(super) fn test_zomboid_server_impl_with_line_callback<F>(
 where
     F: FnMut(&str),
 {
-    const TEST_TIMEOUT: Duration = Duration::from_secs(180);
-
     let server_id = server_id.trim();
 
     if server_id.is_empty() {
         return Ok(server_test_setup_error(
-            "Servidor invalido para teste.",
+            &text(
+                "Invalid server for testing.",
+                "Servidor invalido para teste.",
+            ),
             Path::new("ProjectZomboidServer.bat"),
             "",
             0,
@@ -45,7 +62,11 @@ where
     if !server_path.exists() {
         return Ok(server_test_setup_error(
             &format!(
-                "Arquivo do servidor nao encontrado: {}.",
+                "{}: {}.",
+                text(
+                    "Server file not found",
+                    "Arquivo do servidor nao encontrado"
+                ),
                 server_path.display()
             ),
             Path::new("ProjectZomboidServer.bat"),
@@ -58,9 +79,15 @@ where
         return Ok(dependency_result);
     }
 
+    let timeout_seconds = server_test_timeout_seconds(server_id)?;
+    let test_timeout = Duration::from_secs(timeout_seconds);
+
     let Some(game_dir) = resolve_zomboid_game_dir()? else {
         return Ok(server_test_setup_error(
-            "Pasta do Project Zomboid nao encontrada. Configure o executavel do jogo nas configuracoes.",
+            &text(
+                "Project Zomboid folder not found. Configure the game executable in settings.",
+                "Pasta do Project Zomboid nao encontrada. Configure o executavel do jogo nas configuracoes.",
+            ),
             Path::new("ProjectZomboidServer.bat"),
             "",
             0,
@@ -76,7 +103,11 @@ where
     if !bat_path.exists() || !bat_path.is_file() {
         return Ok(server_test_setup_error(
             &format!(
-                "ProjectZomboidServer.bat nao encontrado em {}.",
+                "{} {}.",
+                text(
+                    "ProjectZomboidServer.bat not found in",
+                    "ProjectZomboidServer.bat nao encontrado em"
+                ),
                 game_dir.display()
             ),
             &bat_path,
@@ -97,7 +128,15 @@ where
         .stderr(Stdio::piped())
         .stdin(Stdio::null())
         .spawn()
-        .map_err(|error| format!("Nao foi possivel iniciar o teste do servidor: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "{}: {error}",
+                text(
+                    "Could not start the server test",
+                    "Nao foi possivel iniciar o teste do servidor"
+                )
+            )
+        })?;
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
@@ -110,7 +149,7 @@ where
     let mut process_exited = false;
     let mut server_started = false;
 
-    while started_at.elapsed() < TEST_TIMEOUT {
+    while started_at.elapsed() < test_timeout {
         while let Ok(line) = receiver.try_recv() {
             if is_server_started_line(&line.to_lowercase()) {
                 server_started = true;
@@ -125,7 +164,15 @@ where
 
         if child
             .try_wait()
-            .map_err(|error| format!("Nao foi possivel consultar o processo do servidor: {error}"))?
+            .map_err(|error| {
+                format!(
+                    "{}: {error}",
+                    text(
+                        "Could not inspect the server process",
+                        "Nao foi possivel consultar o processo do servidor"
+                    )
+                )
+            })?
             .is_some()
         {
             process_exited = true;
@@ -172,22 +219,42 @@ where
         "failed"
     };
     let summary = if server_started {
-        "Servidor iniciado com sucesso: rede ativa e porta escutando. O teste foi encerrado automaticamente.".to_string()
+        text(
+            "Server started successfully: network active and port listening. The test was stopped automatically.",
+            "Servidor iniciado com sucesso: rede ativa e porta escutando. O teste foi encerrado automaticamente.",
+        ).to_string()
     } else if let Some(network_error_summary) = summarize_known_server_error(&log_lines) {
         network_error_summary
     } else if critical_lines.is_empty() {
         if warning_count == 0 {
-            "Teste rapido concluido em 180s: nenhuma falha critica detectada nos logs capturados."
-                .to_string()
+            format!(
+                "{} {timeout_seconds}s: {}",
+                text("Quick test completed in", "Teste rapido concluido em"),
+                text(
+                    "no critical failures detected in captured logs.",
+                    "nenhuma falha critica detectada nos logs capturados."
+                )
+            )
         } else {
             format!(
-                "Teste rapido concluido em 180s: nenhuma falha critica detectada. Foram capturados {warning_count} aviso(s)."
+                "{} {timeout_seconds}s: {} {warning_count} {}.",
+                text("Quick test completed in", "Teste rapido concluido em"),
+                text(
+                    "no critical failures detected. Captured",
+                    "nenhuma falha critica detectada. Foram capturados"
+                ),
+                text("warning(s)", "aviso(s)")
             )
         }
     } else {
         format!(
-            "Teste encontrou {} linha(s) com possiveis falhas criticas.",
-            critical_lines.len()
+            "{} {} {}.",
+            text("Test found", "Teste encontrou"),
+            critical_lines.len(),
+            text(
+                "line(s) with possible critical failures",
+                "linha(s) com possiveis falhas criticas"
+            )
         )
     };
 
@@ -201,4 +268,16 @@ where
         critical_count: critical_lines.len(),
         log_lines: tail_log_lines(log_lines, 240),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::BUILD_41;
+
+    #[test]
+    fn gives_b42_more_time_to_start() {
+        assert_eq!(timeout_seconds_for_build(BUILD_41), 180);
+        assert_eq!(timeout_seconds_for_build(BUILD_42), 360);
+    }
 }

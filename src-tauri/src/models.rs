@@ -1,5 +1,8 @@
 use serde::Serialize;
 
+pub(crate) const BUILD_41: &str = "b41";
+pub(crate) const BUILD_42: &str = "b42";
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ZomboidServer {
@@ -12,9 +15,10 @@ pub(crate) struct ZomboidServer {
     pub(crate) mods_count: usize,
     pub(crate) active_mod_ids: Vec<String>,
     pub(crate) status: String,
+    pub(crate) game_build: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ZomboidMod {
     pub(crate) id: String,
@@ -30,6 +34,19 @@ pub(crate) struct ZomboidMod {
     pub(crate) image_url: Option<String>,
     pub(crate) dependencies: Vec<String>,
     pub(crate) map_names: Vec<String>,
+    pub(crate) compatible_builds: Vec<String>,
+    pub(crate) variants: Vec<ZomboidModVariant>,
+    pub(crate) package_path: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ZomboidModVariant {
+    pub(crate) game_build: String,
+    pub(crate) id: String,
+    pub(crate) path: String,
+    pub(crate) dependencies: Vec<String>,
+    pub(crate) map_names: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -41,6 +58,7 @@ pub(crate) struct AppSettings {
     pub(crate) game_executable_path: String,
     pub(crate) client_ram: String,
     pub(crate) server_ram: String,
+    pub(crate) language_preference: String,
 }
 
 #[derive(Serialize)]
@@ -111,13 +129,6 @@ pub(crate) struct ServerTestStarted {
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ZomboidServerStarted {
-    pub(crate) server_id: String,
-    pub(crate) pid: u32,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
 pub(crate) struct PortUsage {
     pub(crate) port: u16,
     pub(crate) protocol: String,
@@ -137,6 +148,7 @@ pub(crate) struct ServerPortCheck {
 pub(crate) struct ServerTestEvent {
     pub(crate) server_id: String,
     pub(crate) event: String,
+    pub(crate) timeout_seconds: Option<u64>,
     pub(crate) line: Option<String>,
     pub(crate) result: Option<ServerTestResult>,
     pub(crate) error: Option<String>,

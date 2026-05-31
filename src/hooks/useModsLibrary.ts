@@ -12,7 +12,7 @@ export function useModsLibrary() {
   const [modsError, setModsError] = useState<string | null>(null)
   const [isLoadingMods, setIsLoadingMods] = useState(false)
   const [isInstallingAllMods, setIsInstallingAllMods] = useState(false)
-  const [hasLoadedMods, setHasLoadedMods] = useState(cachedMods !== null)
+  const [hasLoadedMods, setHasLoadedMods] = useState(false)
   const modsLoadPromiseRef = useRef<Promise<ZomboidMod[]> | null>(null)
 
   async function loadMods() {
@@ -58,7 +58,7 @@ export function useModsLibrary() {
 
       for (const mod of modsToMove) {
         await invokeTauri<void>("install_zomboid_mod", {
-          modPath: mod.path,
+          packagePath: mod.packagePath,
           modId: mod.id,
           workshopId: mod.workshopId,
         })

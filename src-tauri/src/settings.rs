@@ -1,4 +1,5 @@
 use crate::game::{apply_performance_settings, normalize_ram_gb, validate_game_executable_path};
+use crate::i18n::{mod_location_label, text, validate_language_preference, LANGUAGE_AUTO};
 use crate::models::{AppSettings, ModLocation};
 use crate::{
     app_settings_path, ensure_managed_steamcmd, find_steamcmd_path, read_config_value,
@@ -69,6 +70,7 @@ fn load_app_settings() -> Result<AppSettings, String> {
     let game_executable_path = read_config_value("game_executable_path")?.unwrap_or_default();
     let client_ram = read_config_value("client_ram")?.unwrap_or_else(|| "4.00".to_string());
     let server_ram = read_config_value("server_ram")?.unwrap_or_else(|| "4.00".to_string());
+    let language_preference = read_language_preference()?;
 
     Ok(AppSettings {
         steamcmd_path: configured_path,
@@ -77,6 +79,7 @@ fn load_app_settings() -> Result<AppSettings, String> {
         game_executable_path,
         client_ram,
         server_ram,
+        language_preference,
     })
 }
 
@@ -101,11 +104,13 @@ fn get_mod_locations_impl() -> Result<Vec<ModLocation>, String> {
     let game_executable_path = read_config_value("game_executable_path")?.unwrap_or_default();
     let client_ram = read_config_value("client_ram")?.unwrap_or_else(|| "4.00".to_string());
     let server_ram = read_config_value("server_ram")?.unwrap_or_else(|| "4.00".to_string());
+    let language_preference = read_language_preference()?;
     write_app_settings_file(
         &steamcmd_path,
         &game_executable_path,
         &client_ram,
         &server_ram,
+        &language_preference,
         &locations,
     )?;
 
@@ -142,7 +147,7 @@ fn build_default_mod_locations(steamcmd_path: Option<&str>) -> Result<Vec<ModLoc
     push_mod_location(
         &mut locations,
         &mut seen,
-        "Steam Workshop Project Zomboid",
+        &mod_location_label("steam", None),
         "steam",
         default_steam_workshop_dir(),
     );
@@ -150,7 +155,7 @@ fn build_default_mod_locations(steamcmd_path: Option<&str>) -> Result<Vec<ModLoc
     push_mod_location(
         &mut locations,
         &mut seen,
-        "Mods locais do Zomboid",
+        &mod_location_label("local", None),
         "local",
         zomboid_mods_dir()?,
     );
@@ -162,7 +167,7 @@ fn build_default_mod_locations(steamcmd_path: Option<&str>) -> Result<Vec<ModLoc
             push_mod_location(
                 &mut locations,
                 &mut seen,
-                "Downloads do SteamCMD",
+                &mod_location_label("steamcmd", None),
                 "steamcmd",
                 steamcmd_dir
                     .join("steamapps")
@@ -260,6 +265,7 @@ fn save_app_settings_impl(
         game_executable_path,
         &client_ram,
         &server_ram,
+        &read_language_preference()?,
         &locations,
     )?;
 
@@ -270,18 +276,26 @@ fn add_mod_location_impl(path: &str) -> Result<Vec<ModLocation>, String> {
     let path = path.trim();
 
     if path.is_empty() {
-        return Err("Selecione uma pasta de mods.".to_string());
+        return Err(text("Select a mod folder.", "Selecione uma pasta de mods.").to_string());
     }
 
     let path = PathBuf::from(path);
 
     if !path.exists() {
-        return Err(format!("Pasta nao encontrada: {}.", path.display()));
+        return Err(format!(
+            "{}: {}.",
+            text("Folder not found", "Pasta nao encontrada"),
+            path.display()
+        ));
     }
 
     if !path.is_dir() {
         return Err(format!(
-            "O caminho {} nao aponta para uma pasta.",
+            "{} {}.",
+            text(
+                "The path does not point to a folder:",
+                "O caminho nao aponta para uma pasta:"
+            ),
             path.display()
         ));
     }
@@ -289,12 +303,7 @@ fn add_mod_location_impl(path: &str) -> Result<Vec<ModLocation>, String> {
     let steamcmd_path = read_configured_steamcmd_path()?.unwrap_or_default();
     let mut locations = build_default_mod_locations(Some(&steamcmd_path))?;
     let mut custom_locations = read_saved_custom_mod_locations()?;
-    let label = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.trim().is_empty())
-        .map(|name| format!("Pasta personalizada: {name}"))
-        .unwrap_or_else(|| "Pasta personalizada".to_string());
+    let label = mod_location_label("custom", path.file_name().and_then(|name| name.to_str()));
 
     custom_locations.push(ModLocation {
         label,
@@ -306,11 +315,13 @@ fn add_mod_location_impl(path: &str) -> Result<Vec<ModLocation>, String> {
     let game_executable_path = read_config_value("game_executable_path")?.unwrap_or_default();
     let client_ram = read_config_value("client_ram")?.unwrap_or_else(|| "4.00".to_string());
     let server_ram = read_config_value("server_ram")?.unwrap_or_else(|| "4.00".to_string());
+    let language_preference = read_language_preference()?;
     write_app_settings_file(
         &steamcmd_path,
         &game_executable_path,
         &client_ram,
         &server_ram,
+        &language_preference,
         &locations,
     )?;
 
@@ -322,6 +333,7 @@ fn write_app_settings_file(
     game_executable_path: &str,
     client_ram: &str,
     server_ram: &str,
+    language_preference: &str,
     mod_locations: &[ModLocation],
 ) -> Result<(), String> {
     let settings_path = app_settings_path()?;
@@ -333,13 +345,13 @@ fn write_app_settings_file(
     }
 
     let mut content = format!(
-        "steamcmd_path={steamcmd_path}\ngame_executable_path={game_executable_path}\nclient_ram={client_ram}\nserver_ram={server_ram}\n"
+        "steamcmd_path={steamcmd_path}\ngame_executable_path={game_executable_path}\nclient_ram={client_ram}\nserver_ram={server_ram}\nlanguage={language_preference}\n"
     );
 
     for location in mod_locations {
         content.push_str(&format!(
-            "mod_location={}|{}|{}\n",
-            location.kind, location.label, location.path
+            "mod_location={}|{}\n",
+            location.kind, location.path
         ));
     }
 
@@ -353,20 +365,45 @@ fn write_app_settings_file(
     Ok(())
 }
 
+pub(crate) fn read_language_preference() -> Result<String, String> {
+    let preference = read_config_value("language")?.unwrap_or_else(|| LANGUAGE_AUTO.to_string());
+    Ok(validate_language_preference(&preference)
+        .unwrap_or(LANGUAGE_AUTO)
+        .to_string())
+}
+
+pub(crate) fn save_language_preference(preference: &str) -> Result<(), String> {
+    let preference = validate_language_preference(preference)?;
+    let steamcmd_path = read_configured_steamcmd_path()?.unwrap_or_default();
+    let game_executable_path = read_config_value("game_executable_path")?.unwrap_or_default();
+    let client_ram = read_config_value("client_ram")?.unwrap_or_else(|| "4.00".to_string());
+    let server_ram = read_config_value("server_ram")?.unwrap_or_else(|| "4.00".to_string());
+    let mut locations = build_default_mod_locations(Some(&steamcmd_path))?;
+    merge_custom_mod_locations(&mut locations, read_saved_custom_mod_locations()?);
+    write_app_settings_file(
+        &steamcmd_path,
+        &game_executable_path,
+        &client_ram,
+        &server_ram,
+        preference,
+        &locations,
+    )
+}
+
 #[cfg(windows)]
 fn select_steamcmd_path_impl() -> Result<Option<String>, String> {
-    let script = r#"
+    let script = format!(r#"
 Add-Type -AssemblyName System.Windows.Forms
 $dialog = New-Object System.Windows.Forms.OpenFileDialog
-$dialog.Title = 'Selecionar steamcmd.exe'
-$dialog.Filter = 'SteamCMD (steamcmd.exe)|steamcmd.exe|Executaveis (*.exe)|*.exe|Todos os arquivos (*.*)|*.*'
+$dialog.Title = '{}'
+$dialog.Filter = '{}'
 $dialog.CheckFileExists = $true
 $dialog.Multiselect = $false
-if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
   [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
   Write-Output $dialog.FileName
-}
-"#;
+}}
+"#, text("Select steamcmd.exe", "Selecionar steamcmd.exe"), text("SteamCMD (steamcmd.exe)|steamcmd.exe|Executables (*.exe)|*.exe|All files (*.*)|*.*", "SteamCMD (steamcmd.exe)|steamcmd.exe|Executaveis (*.exe)|*.exe|Todos os arquivos (*.*)|*.*"));
 
     let output = Command::new("powershell.exe")
         .args([
@@ -375,16 +412,28 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
             "-ExecutionPolicy",
             "Bypass",
             "-Command",
-            script,
+            &script,
         ])
         .output()
-        .map_err(|error| format!("Nao foi possivel abrir o seletor de arquivos: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "{}: {error}",
+                text(
+                    "Could not open the file picker",
+                    "Nao foi possivel abrir o seletor de arquivos"
+                )
+            )
+        })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
 
         return Err(if stderr.is_empty() {
-            "Nao foi possivel selecionar o executavel do SteamCMD.".to_string()
+            text(
+                "Could not select the SteamCMD executable.",
+                "Nao foi possivel selecionar o executavel do SteamCMD.",
+            )
+            .to_string()
         } else {
             stderr
         });
@@ -403,21 +452,31 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
 
 #[cfg(not(windows))]
 fn select_steamcmd_path_impl() -> Result<Option<String>, String> {
-    Err("Selecao de arquivo automatica esta disponivel apenas no Windows.".to_string())
+    Err(text(
+        "Automatic file selection is available only on Windows.",
+        "Selecao de arquivo automatica esta disponivel apenas no Windows.",
+    )
+    .to_string())
 }
 
 #[cfg(windows)]
 fn select_mod_folder_impl() -> Result<Option<String>, String> {
-    let script = r#"
+    let script = format!(
+        r#"
 Add-Type -AssemblyName System.Windows.Forms
 $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-$dialog.Description = 'Selecionar pasta com mods do Project Zomboid'
+$dialog.Description = '{}'
 $dialog.ShowNewFolderButton = $false
-if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
   [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
   Write-Output $dialog.SelectedPath
-}
-"#;
+}}
+"#,
+        text(
+            "Select folder with Project Zomboid mods",
+            "Selecionar pasta com mods do Project Zomboid"
+        )
+    );
 
     let output = Command::new("powershell.exe")
         .args([
@@ -426,16 +485,28 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
             "-ExecutionPolicy",
             "Bypass",
             "-Command",
-            script,
+            &script,
         ])
         .output()
-        .map_err(|error| format!("Nao foi possivel abrir o seletor de pastas: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "{}: {error}",
+                text(
+                    "Could not open the folder picker",
+                    "Nao foi possivel abrir o seletor de pastas"
+                )
+            )
+        })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
 
         return Err(if stderr.is_empty() {
-            "Nao foi possivel selecionar a pasta de mods.".to_string()
+            text(
+                "Could not select the mod folder.",
+                "Nao foi possivel selecionar a pasta de mods.",
+            )
+            .to_string()
         } else {
             stderr
         });
@@ -452,5 +523,9 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
 
 #[cfg(not(windows))]
 fn select_mod_folder_impl() -> Result<Option<String>, String> {
-    Err("Selecao de pasta automatica esta disponivel apenas no Windows.".to_string())
+    Err(text(
+        "Automatic folder selection is available only on Windows.",
+        "Selecao de pasta automatica esta disponivel apenas no Windows.",
+    )
+    .to_string())
 }

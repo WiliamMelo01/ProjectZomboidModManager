@@ -1,13 +1,14 @@
 import type { ServerTestResult } from "@/types/serverTest"
+import { i18n } from "@/i18n"
 
 export function getServerTestStatusLabel(status: ServerTestResult["status"]) {
   switch (status) {
     case "passed":
-      return "Sem falhas criticas"
+      return i18n.t("serverTest.statusPassed")
     case "failed":
-      return "Falhas encontradas"
+      return i18n.t("serverTest.statusFailed")
     case "setup_error":
-      return "Configuracao incompleta"
+      return i18n.t("serverTest.statusSetupError")
   }
 }
 

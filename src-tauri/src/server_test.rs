@@ -1,3 +1,4 @@
+use crate::i18n::text;
 use crate::models::{ServerPortCheck, ServerTestEvent, ServerTestResult, ServerTestStarted};
 use crate::run_blocking;
 use std::thread;
@@ -11,10 +12,12 @@ mod process;
 mod runner;
 
 use ports::check_zomboid_server_ports_impl;
-pub(crate) use preflight::{resolve_zomboid_game_dir, validate_server_mod_dependencies};
 use process::kill_processes_by_pid_impl;
 pub(crate) use process::{kill_process_tree, spawn_output_reader};
-use runner::{test_zomboid_server_impl, test_zomboid_server_impl_with_line_callback};
+use runner::{
+    server_test_timeout_seconds, test_zomboid_server_impl,
+    test_zomboid_server_impl_with_line_callback,
+};
 
 #[tauri::command]
 pub(crate) async fn test_zomboid_server(server_id: String) -> Result<ServerTestResult, String> {
@@ -29,9 +32,14 @@ pub(crate) fn start_zomboid_server_test(
     let server_id = server_id.trim().to_string();
 
     if server_id.is_empty() {
-        return Err("Servidor invalido para teste.".to_string());
+        return Err(text(
+            "Invalid server for testing.",
+            "Servidor invalido para teste.",
+        )
+        .to_string());
     }
 
+    let timeout_seconds = server_test_timeout_seconds(&server_id)?;
     let event_server_id = server_id.clone();
 
     thread::spawn(move || {
@@ -40,6 +48,7 @@ pub(crate) fn start_zomboid_server_test(
             ServerTestEvent {
                 server_id: event_server_id.clone(),
                 event: "started".to_string(),
+                timeout_seconds: Some(timeout_seconds),
                 line: None,
                 result: None,
                 error: None,
@@ -54,6 +63,7 @@ pub(crate) fn start_zomboid_server_test(
                 ServerTestEvent {
                     server_id: line_server_id.clone(),
                     event: "line".to_string(),
+                    timeout_seconds: None,
                     line: Some(line.to_string()),
                     result: None,
                     error: None,
@@ -68,6 +78,7 @@ pub(crate) fn start_zomboid_server_test(
                     ServerTestEvent {
                         server_id: event_server_id,
                         event: "finished".to_string(),
+                        timeout_seconds: Some(timeout_seconds),
                         line: None,
                         result: Some(result),
                         error: None,
@@ -80,6 +91,7 @@ pub(crate) fn start_zomboid_server_test(
                     ServerTestEvent {
                         server_id: event_server_id,
                         event: "error".to_string(),
+                        timeout_seconds: Some(timeout_seconds),
                         line: None,
                         result: None,
                         error: Some(error),

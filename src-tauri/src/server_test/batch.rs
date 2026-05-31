@@ -1,3 +1,4 @@
+use crate::i18n::text;
 use crate::util::read_text_lossy;
 use std::{
     env, fs,
@@ -13,9 +14,11 @@ pub(super) fn create_server_test_batch(
         .chars()
         .all(|char| char.is_ascii_alphanumeric() || char == '_' || char == '-')
     {
-        return Err(
-            "O identificador do servidor contem caracteres invalidos para teste.".to_string(),
-        );
+        return Err(text(
+            "The server identifier contains invalid characters for testing.",
+            "O identificador do servidor contem caracteres invalidos para teste.",
+        )
+        .to_string());
     }
 
     let content = read_text_lossy(bat_path)?;
@@ -47,16 +50,24 @@ pub(super) fn create_server_test_batch(
         .join("\r\n");
 
     if !injected_server_name && !updated_content.contains("-servername") {
-        return Err(
-            "Nao foi possivel preparar o teste: linha GameServer nao encontrada no .bat."
-                .to_string(),
-        );
+        return Err(text(
+            "Could not prepare the test: GameServer line not found in the .bat file.",
+            "Nao foi possivel preparar o teste: linha GameServer nao encontrada no .bat.",
+        )
+        .to_string());
     }
 
     let test_bat_path = env::temp_dir().join(format!("pzmm-test-{server_id}.bat"));
 
-    fs::write(&test_bat_path, updated_content)
-        .map_err(|error| format!("Nao foi possivel criar .bat temporario de teste: {error}"))?;
+    fs::write(&test_bat_path, updated_content).map_err(|error| {
+        format!(
+            "{}: {error}",
+            text(
+                "Could not create the temporary test .bat file",
+                "Nao foi possivel criar .bat temporario de teste"
+            )
+        )
+    })?;
 
     Ok(test_bat_path)
 }

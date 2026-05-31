@@ -8,4 +8,7 @@ export type ZomboidServer = {
   modsCount: number
   activeModIds: string[]
   status: "online" | "offline"
+  gameBuild: GameBuild
 }
+
+export type GameBuild = "b41" | "b42"

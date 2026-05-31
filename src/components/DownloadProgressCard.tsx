@@ -1,4 +1,5 @@
 import { Download, RefreshCw } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 import type { WorkshopDownloadManager } from "@/hooks/useWorkshopDownloadManager"
 
@@ -8,6 +9,7 @@ type DownloadProgressCardProps = {
 }
 
 export function DownloadProgressCard({ manager, onOpen }: DownloadProgressCardProps) {
+  const { t } = useTranslation()
   const { progress } = manager
 
   return (
@@ -21,13 +23,13 @@ export function DownloadProgressCard({ manager, onOpen }: DownloadProgressCardPr
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
-            <p className="truncate text-sm font-black text-white">Download da Workshop</p>
+            <p className="truncate text-sm font-black text-white">{t("downloads.progressTitle")}</p>
             {!progress.isPreparing && <span className="text-xs font-black text-orange-300">{progress.percentage}%</span>}
           </div>
           <p className="mt-1 text-xs text-gray-400">
             {progress.isPreparing
-              ? "Preparando coleção..."
-              : `${progress.completedItems} de ${progress.totalItems} baixados · ${progress.failedItems} falhas`}
+              ? t("downloads.preparing")
+              : t("downloads.progressSummary", { completed: progress.completedItems, total: progress.totalItems, failed: progress.failedItems })}
           </p>
           <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/5">
             <div

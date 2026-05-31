@@ -118,6 +118,36 @@ pub(crate) fn open_path_external(path: &Path) -> Result<(), String> {
     }
 }
 
+pub(crate) fn open_file_external(path: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        Command::new("rundll32.exe")
+            .arg("url.dll,FileProtocolHandler")
+            .arg(path)
+            .spawn()
+            .map_err(|error| format!("Nao foi possivel abrir o arquivo: {error}"))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(path)
+            .spawn()
+            .map_err(|error| format!("Nao foi possivel abrir o arquivo: {error}"))?;
+        return Ok(());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map_err(|error| format!("Nao foi possivel abrir o arquivo: {error}"))?;
+        return Ok(());
+    }
+}
+
 fn build_steam_workshop_url(value: &str) -> String {
     if value.chars().all(|char| char.is_ascii_digit()) {
         format!("https://steamcommunity.com/sharedfiles/filedetails/?id={value}")

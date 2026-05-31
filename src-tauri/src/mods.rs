@@ -9,7 +9,10 @@ mod server_values;
 
 use catalog::count_zomboid_mods_impl;
 pub(crate) use catalog::list_zomboid_mods_impl;
-pub(crate) use server_values::{normalize_server_values, resolve_server_workshop_ids};
+pub(crate) use server_values::{
+    normalize_server_values, parse_server_mod_ids, resolve_server_workshop_ids,
+    serialize_server_mod_ids,
+};
 
 #[tauri::command]
 pub(crate) async fn list_zomboid_mods() -> Result<Vec<ZomboidMod>, String> {
@@ -23,9 +26,9 @@ pub(crate) async fn count_zomboid_mods() -> Result<usize, String> {
 
 #[tauri::command]
 pub(crate) fn install_zomboid_mod(
-    mod_path: String,
+    package_path: String,
     mod_id: String,
     workshop_id: String,
 ) -> Result<(), String> {
-    install::install_zomboid_mod_impl(mod_path, mod_id, workshop_id)
+    install::install_zomboid_mod_impl(package_path, mod_id, workshop_id)
 }

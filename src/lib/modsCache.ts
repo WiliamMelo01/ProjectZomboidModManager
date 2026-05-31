@@ -1,8 +1,8 @@
 import type { ZomboidMod } from "@/types/mod"
 
 const MODS_LIBRARY_CACHE_KEY = "pzmm:mods-library"
-const MODS_LIBRARY_CACHE_VERSION = 3
-const MODS_LIBRARY_COMPATIBLE_CACHE_VERSIONS = new Set([2, MODS_LIBRARY_CACHE_VERSION])
+const MODS_LIBRARY_CACHE_VERSION = 5
+const MODS_LIBRARY_COMPATIBLE_CACHE_VERSIONS = new Set([MODS_LIBRARY_CACHE_VERSION])
 const MODS_LIBRARY_CACHE_LIMIT = 30
 const MOD_IMAGE_THUMBNAIL_WIDTH = 320
 const MOD_IMAGE_THUMBNAIL_HEIGHT = 160
@@ -36,6 +36,15 @@ function isCachedMod(value: unknown): value is ZomboidMod {
     typeof mod.isInstalled === "boolean" &&
     typeof mod.source === "string" &&
     typeof mod.path === "string" &&
+    typeof mod.packagePath === "string" &&
+    isStringArray(mod.compatibleBuilds) &&
+    Array.isArray(mod.variants) &&
+    mod.variants.every((variant) => {
+      if (!variant || typeof variant !== "object") return false
+      const item = variant as Record<string, unknown>
+      return typeof item.gameBuild === "string" && typeof item.id === "string" && typeof item.path === "string" &&
+        isStringArray(item.dependencies) && isStringArray(item.mapNames)
+    }) &&
     (mod.imageUrl === undefined || typeof mod.imageUrl === "string") &&
     (mod.dependencies === undefined || isStringArray(mod.dependencies)) &&
     (mod.mapNames === undefined || isStringArray(mod.mapNames))

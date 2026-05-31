@@ -1,9 +1,11 @@
 use super::logs::tail_log_lines;
 use crate::game::steam_zomboid_game_dirs;
-use crate::models::ServerTestResult;
-use crate::mods::list_zomboid_mods_impl;
+use crate::i18n::text;
+use crate::models::{ServerTestResult, ZomboidMod, ZomboidModVariant};
+use crate::mods::{list_zomboid_mods_impl, parse_server_mod_ids};
 use crate::read_config_value;
-use crate::util::{read_ini_value, read_text_lossy, split_mod_ids};
+use crate::servers::read_zomboid_server_build;
+use crate::util::{read_ini_value, read_text_lossy};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -30,8 +32,9 @@ pub(crate) fn validate_server_mod_dependencies(
     server_path: &Path,
 ) -> Result<Option<ServerTestResult>, String> {
     let content = read_text_lossy(server_path)?;
+    let game_build = read_zomboid_server_build(server_id)?;
     let active_mod_ids = read_ini_value(&content, "Mods")
-        .map(|value| split_mod_ids(&value))
+        .map(|value| parse_server_mod_ids(&value))
         .unwrap_or_default();
 
     if active_mod_ids.is_empty() {
@@ -43,33 +46,51 @@ pub(crate) fn validate_server_mod_dependencies(
         .enumerate()
         .map(|(index, mod_id)| (mod_id.to_lowercase(), index))
         .collect::<HashMap<_, _>>();
-    let mods_by_id = list_zomboid_mods_impl()?
-        .into_iter()
-        .map(|zomboid_mod| (zomboid_mod.id.to_lowercase(), zomboid_mod))
-        .collect::<HashMap<_, _>>();
+    let mods_by_id = build_variant_lookup(list_zomboid_mods_impl()?, &game_build);
     let mut issues = Vec::new();
 
     for (mod_index, mod_id) in active_mod_ids.iter().enumerate() {
         let normalized_mod_id = mod_id.to_lowercase();
         let Some(zomboid_mod) = mods_by_id.get(&normalized_mod_id) else {
             issues.push(format!(
-                "[ERR] Mod '{mod_id}' esta ativo em {server_id}, mas nao foi encontrado nas bibliotecas locais."
+                "[ERR] {} '{mod_id}' {} {server_id}, {} {}.",
+                text("Mod", "Mod"),
+                text("is active in", "esta ativo em"),
+                text(
+                    "but was not found as compatible with",
+                    "mas nao foi encontrado como compativel com"
+                ),
+                game_build.to_uppercase()
             ));
             continue;
         };
 
         for dependency_id in &zomboid_mod.dependencies {
-            let normalized_dependency_id = dependency_id.to_lowercase();
+            let normalized_dependency_id = dependency_id
+                .strip_prefix('\\')
+                .unwrap_or(dependency_id)
+                .to_lowercase();
             let Some(dependency_index) = active_positions.get(&normalized_dependency_id) else {
                 issues.push(format!(
-                    "[ERR] Mod '{mod_id}' requer '{dependency_id}', mas essa dependencia nao esta ativa no servidor."
+                    "[ERR] {} '{mod_id}' {} '{dependency_id}', {}.",
+                    text("Mod", "Mod"),
+                    text("requires", "requer"),
+                    text(
+                        "but this dependency is not active on the server",
+                        "mas essa dependencia nao esta ativa no servidor"
+                    )
                 ));
                 continue;
             };
 
             if *dependency_index > mod_index {
                 issues.push(format!(
-                    "[ERR] Ordem invalida: '{mod_id}' esta antes de sua dependencia '{dependency_id}'. Coloque '{dependency_id}' antes de '{mod_id}' em Mods=."
+                    "[ERR] {}: '{mod_id}' {} '{dependency_id}'. {} '{dependency_id}' {} '{mod_id}' {} Mods=.",
+                    text("Invalid order", "Ordem invalida"),
+                    text("is before its dependency", "esta antes de sua dependencia"),
+                    text("Place", "Coloque"),
+                    text("before", "antes de"),
+                    text("in", "em")
                 ));
             }
         }
@@ -82,14 +103,39 @@ pub(crate) fn validate_server_mod_dependencies(
     Ok(Some(ServerTestResult {
         status: "failed".to_string(),
         summary: format!(
-            "Validacao de dependencias encontrou {} problema(s) antes de iniciar o servidor.",
-            issues.len()
+            "{} {} {}.",
+            text(
+                "Dependency validation found",
+                "Validacao de dependencias encontrou"
+            ),
+            issues.len(),
+            text(
+                "issue(s) before starting the server",
+                "problema(s) antes de iniciar o servidor"
+            )
         ),
         duration_seconds: 0,
         bat_path: "ProjectZomboidServer.bat".to_string(),
-        command: "preflight: validar dependencias e ordem de Mods=".to_string(),
+        command: format!(
+            "preflight: {}",
+            text(
+                "validate dependencies and Mods= order",
+                "validar dependencias e ordem de Mods="
+            )
+        ),
         warning_count: 0,
         critical_count: issues.len(),
         log_lines: tail_log_lines(issues, 240),
     }))
+}
+
+fn build_variant_lookup(
+    mods: Vec<ZomboidMod>,
+    game_build: &str,
+) -> HashMap<String, ZomboidModVariant> {
+    mods.into_iter()
+        .flat_map(|mod_item| mod_item.variants)
+        .filter(|variant| variant.game_build == game_build)
+        .map(|variant| (variant.id.to_lowercase(), variant))
+        .collect()
 }

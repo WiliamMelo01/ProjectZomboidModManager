@@ -5,7 +5,11 @@ export type AppSettings = {
   gameExecutablePath: string
   clientRam: string
   serverRam: string
+  languagePreference: LanguagePreference
 }
+
+export type LanguagePreference = "auto" | EffectiveLanguage
+export type EffectiveLanguage = "en" | "pt-BR"
 
 export type ModLocation = {
   label: string

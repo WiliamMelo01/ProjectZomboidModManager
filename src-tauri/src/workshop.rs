@@ -7,7 +7,7 @@ mod navigation;
 
 use api::{fetch_steam_workshop_collection_items, validate_workshop_id};
 use download::{cancel_steam_workshop_download_impl, download_steam_workshop_items_impl};
-pub(crate) use navigation::open_path_external;
+pub(crate) use navigation::{open_file_external, open_path_external};
 use navigation::{
     open_steam_workshop_external_impl, open_steam_workshop_impl,
     open_steam_workshop_steam_client_impl,

@@ -1,4 +1,5 @@
 import { CheckCircle2, Folder, Search, XCircle } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 type SteamCmdSettingsSectionProps = {
   path: string
@@ -17,6 +18,7 @@ export function SteamCmdSettingsSection({
   onBrowse,
   onDetect,
 }: SteamCmdSettingsSectionProps) {
+  const { t } = useTranslation()
   return (
     <section className="bg-[#2b3238] rounded-3xl border border-white/5 p-8 shadow-xl relative group">
       <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/5 blur-3xl rounded-full -mr-16 -mt-16 transition-all group-hover:bg-orange-500/10" />
@@ -25,8 +27,8 @@ export function SteamCmdSettingsSection({
           <Folder size={20} />
         </div>
         <div>
-          <h3 className="text-xl font-bold text-white">Integracao SteamCMD</h3>
-          <p className="text-xs text-gray-500">Usado para baixar itens da Workshop do Project Zomboid.</p>
+          <h3 className="text-xl font-bold text-white">{t("settings.steamcmd.title")}</h3>
+          <p className="text-xs text-gray-500">{t("settings.steamcmd.description")}</p>
         </div>
       </div>
 
@@ -39,10 +41,10 @@ export function SteamCmdSettingsSection({
           )}
           <div className="min-w-0">
             <p className="text-sm font-bold text-white">
-              {isConfigured ? "SteamCMD configurado" : "SteamCMD nao configurado"}
+              {isConfigured ? t("settings.steamcmd.configured") : t("settings.steamcmd.notConfigured")}
             </p>
             <p className="text-xs text-gray-500 break-all">
-              {resolvedPath || "Informe o caminho do steamcmd.exe ou use a deteccao automatica."}
+              {resolvedPath || t("settings.steamcmd.hint")}
             </p>
           </div>
         </div>
@@ -50,7 +52,7 @@ export function SteamCmdSettingsSection({
 
       <div className="space-y-3 relative z-10">
         <label htmlFor="steamcmd-path" className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">
-          Caminho do executavel
+          {t("settings.steamcmd.executablePath")}
         </label>
         <div className="flex flex-col gap-3 md:flex-row">
           <div className="relative flex-1 group/input">
@@ -66,15 +68,15 @@ export function SteamCmdSettingsSection({
           </div>
           <button onClick={onBrowse} className="flex items-center justify-center gap-2 bg-[#2b3238] hover:bg-[#323a41] border border-white/10 px-5 py-3.5 rounded-2xl text-sm font-bold transition-all hover:border-orange-500/30 active:scale-95">
             <Folder size={18} />
-            Procurar
+            {t("settings.steamcmd.browse")}
           </button>
           <button onClick={onDetect} className="flex items-center justify-center gap-2 bg-[#2b3238] hover:bg-[#323a41] border border-white/10 px-5 py-3.5 rounded-2xl text-sm font-bold transition-all hover:border-orange-500/30 active:scale-95">
             <Search size={18} />
-            Detectar
+            {t("settings.steamcmd.detect")}
           </button>
         </div>
         <p className="text-xs text-gray-500">
-          Ao salvar vazio, o app tenta encontrar pelo STEAMCMD_PATH, PATH e locais comuns como C:\steamcmd.
+          {t("settings.steamcmd.emptyHint")}
         </p>
       </div>
     </section>

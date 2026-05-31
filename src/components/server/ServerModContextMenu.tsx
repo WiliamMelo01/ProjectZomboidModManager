@@ -1,4 +1,5 @@
 import type { ZomboidMod } from "@/types/mod"
+import { useTranslation } from "react-i18next"
 
 type ServerModContextMenuProps = {
   mod: ZomboidMod
@@ -10,6 +11,7 @@ type ServerModContextMenuProps = {
 }
 
 export function ServerModContextMenu({ mod, x, y, dependents, onClose, onMove }: ServerModContextMenuProps) {
+  const { t } = useTranslation()
   const cannotMoveToEnd = dependents.length > 0
 
   return (
@@ -27,23 +29,23 @@ export function ServerModContextMenu({ mod, x, y, dependents, onClose, onMove }:
           onClick={() => onMove("start")}
           className="w-full px-4 py-2.5 text-left text-sm font-medium text-gray-300 transition-colors hover:bg-orange-500/10 hover:text-orange-300"
         >
-          Colocar no inicio
+          {t("contextMenu.moveStart")}
         </button>
         <button
           onClick={() => onMove("end")}
           disabled={cannotMoveToEnd}
-          title={cannotMoveToEnd ? `Este mod e dependencia de ${dependents.length} mod(s) ativo(s).` : undefined}
+          title={cannotMoveToEnd ? t("contextMenu.dependencyTitle", { count: dependents.length }) : undefined}
           className={`w-full px-4 py-2.5 text-left text-sm font-medium transition-colors ${
             cannotMoveToEnd
               ? "cursor-not-allowed text-gray-600"
               : "text-gray-300 hover:bg-orange-500/10 hover:text-orange-300"
           }`}
         >
-          Colocar no final
+          {t("contextMenu.moveEnd")}
         </button>
         {cannotMoveToEnd && (
           <p className="border-t border-white/5 px-4 py-2 text-[10px] leading-relaxed text-orange-300/80">
-            Este mod precisa carregar antes de outros mods ativos.
+            {t("contextMenu.dependencyHint")}
           </p>
         )}
       </div>

@@ -1,6 +1,9 @@
 import { Lightbulb } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 export function RamTips() {
+  const { t } = useTranslation()
+
   return (
     <div className="hidden lg:block absolute top-24 right-0 w-72 animate-in fade-in slide-in-from-right-4 duration-500">
       <section className="bg-[#2b3238] rounded-3xl border border-orange-400/20 p-6 shadow-xl relative overflow-hidden group">
@@ -10,37 +13,37 @@ export function RamTips() {
           <div className="p-2 bg-orange-500/10 text-orange-400 rounded-lg">
             <Lightbulb size={20} />
           </div>
-          <h3 className="font-bold text-white tracking-tight text-sm uppercase italic">Dicas de Alocação</h3>
+          <h3 className="font-bold text-white tracking-tight text-sm uppercase italic">{t("ramTips.title")}</h3>
         </div>
 
         <div className="space-y-6">
           <RamTipsSection
-            title="Client (Jogo)"
+            title={t("ramTips.client")}
             items={[
-              ["Vanilla:", "2GB a 4GB é o suficiente."],
-              ["Alguns Mods:", "4GB a 6GB recomendado."],
-              ["Muitos Mods:", "8GB+ para estabilidade."],
+              [t("ramTips.vanilla"), t("ramTips.vanillaDescription")],
+              [t("ramTips.someMods"), t("ramTips.someModsDescription")],
+              [t("ramTips.manyMods"), t("ramTips.manyModsDescription")],
             ]}
           />
 
           <div className="h-px bg-white/5" />
 
           <RamTipsSection
-            title="Servidor"
+            title={t("ramTips.server")}
             items={[
-              ["Pequeno:", "2GB a 4GB dão conta."],
-              ["Médio + Mods:", "6GB a 8GB recomendados."],
-              ["Grandes:", "12GB+ para mapas extensos."],
+              [t("ramTips.small"), t("ramTips.smallDescription")],
+              [t("ramTips.medium"), t("ramTips.mediumDescription")],
+              [t("ramTips.large"), t("ramTips.largeDescription")],
             ]}
           />
 
           <div className="bg-[#1e2327] rounded-2xl p-4 border border-white/5">
             <div className="flex items-center gap-2 mb-2">
               <Lightbulb size={12} className="text-orange-400" />
-              <span className="text-[9px] font-bold text-white uppercase italic">Atenção</span>
+              <span className="text-[9px] font-bold text-white uppercase italic">{t("ramTips.attention")}</span>
             </div>
             <p className="text-[10px] text-gray-500 leading-relaxed italic">
-              Deixe sempre 2-4GB livres para o seu Windows funcionar sem travar.
+              {t("ramTips.windowsFree")}
             </p>
           </div>
         </div>

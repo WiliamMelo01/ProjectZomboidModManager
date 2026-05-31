@@ -1,8 +1,8 @@
 <div align="center">
 
-# 🧟 Zomboid Server Mod Manager
+# PZ Manager
 
-### Gerencie mods de servidores multiplayer de Project Zomboid sem editar configurações na mão.
+### Gerencie mods de servidores multiplayer de Project Zomboid sem editar configurações manualmente.
 
 [![Versão](https://img.shields.io/badge/versão-0.0.1-6d5dfc?style=for-the-badge)](package.json)
 ![Plataforma](https://img.shields.io/badge/plataforma-Windows-0078D4?style=for-the-badge&logo=windows)
@@ -13,131 +13,113 @@
 
 ---
 
-## 😵 O problema
+## Sobre
 
-Gerenciar mods em um servidor multiplayer de **Project Zomboid** pode ficar complicado rapidamente. Cada novo mod traz IDs, itens da Workshop, dependências e uma posição correta na ordem de carregamento. Basta uma entrada ausente ou fora de ordem para impedir o servidor de iniciar ou para fazer os jogadores perderem tempo tentando descobrir o que deu errado.
+O **PZ Manager** é um aplicativo desktop para organizar mods de servidores de **Project Zomboid**. Ele encontra perfis existentes, monta uma biblioteca a partir de mods locais e da Steam Workshop, atualiza arquivos `.ini` e executa um teste de inicialização com logs em tempo real.
 
-O **Zomboid Server Mod Manager** centraliza esse trabalho em uma interface desktop. Ele encontra seus servidores e mods, atualiza os arquivos `.ini`, ajuda a organizar dependências, baixa itens da Steam Workshop e testa a inicialização do servidor com logs em tempo real.
+O aplicativo suporta perfis para **Build 41** e **Build 42**. Cada servidor mantém sua própria build, lista de mods e itens da Workshop.
 
-> Menos tempo editando `Mods=` e `WorkshopItems=` manualmente. Mais tempo jogando.
+## Funcionalidades
 
-## ✨ Funcionalidades
+| Recurso | O que você pode fazer |
+| --- | --- |
+| **Servidores** | Criar perfis, listar servidores existentes, pesquisar, ocultar perfis e clonar listas entre servidores da mesma build. |
+| **B41 e B42** | Escolher a build por perfil, trocar a versão com confirmação e identificar mods incompatíveis. |
+| **Mods ativos** | Ativar, desativar e reorganizar mods com atualização automática do arquivo `.ini`. |
+| **Dependências** | Detectar dependências ausentes, instalar itens necessários e validar a ordem de carregamento. |
+| **Biblioteca** | Encontrar mods locais, itens da Steam Workshop e mods armazenados em pastas personalizadas. |
+| **Downloads** | Baixar mods individuais ou coleções completas usando SteamCMD com login anônimo. |
+| **Diagnóstico** | Testar a inicialização do servidor, acompanhar logs e identificar conflitos de porta. |
+| **Configurações** | Detectar Project Zomboid e SteamCMD, ajustar RAM, idioma e diretórios monitorados. |
+| **Idiomas** | Usar inglês ou português brasileiro, com detecção automática e troca imediata. |
 
-| | Recurso | O que você pode fazer |
-| :---: | --- | --- |
-| 🖥️ | **Servidores** | Criar perfis, listar servidores existentes, pesquisar, ocultar perfis e clonar listas de mods. |
-| 🧩 | **Mods ativos** | Ativar, desativar e reorganizar mods com atualização automática do arquivo `.ini`. |
-| 🔗 | **Dependências** | Detectar dependências ausentes, instalar itens necessários e manter a ordem correta de carregamento. |
-| 📚 | **Biblioteca** | Encontrar mods locais, itens da Steam Workshop e mods armazenados em pastas personalizadas. |
-| ⬇️ | **Downloads** | Baixar um mod individual ou uma coleção completa por ID ou URL usando SteamCMD com login anônimo. |
-| 🧪 | **Diagnóstico** | Testar a inicialização do servidor, acompanhar logs em tempo real e identificar conflitos de porta. |
-| ⚙️ | **Configurações** | Detectar o Project Zomboid e o SteamCMD, ajustar RAM e adicionar diretórios monitorados. |
+## Suporte B41 e B42
 
-<details>
-<summary><strong>🖥️ Gerenciamento de servidores</strong></summary>
-<br>
+Perfis antigos sem metadados continuam abrindo como **B41**. Novos perfis permitem escolher entre `B41` e `B42`.
 
-- Lista os perfis encontrados em `Zomboid/Server`.
-- Exibe nome, arquivo `.ini`, porta, limite de jogadores e quantidade de mods ativos.
-- Cria servidores a partir dos arquivos de exemplo incluídos no projeto.
-- Permite selecionar mods durante a criação ou clonar a lista de outro servidor.
-- Oculta perfis da listagem principal sem excluir seus arquivos.
-- Pesquisa servidores por nome, arquivo ou porta.
+Na biblioteca, cada mod recebe badges de compatibilidade. Pacotes híbridos aparecem uma única vez mesmo quando possuem variantes para as duas builds.
 
-</details>
+O suporte à B42 preserva a estrutura versionada dos pacotes:
 
-<details>
-<summary><strong>📚 Biblioteca de mods</strong></summary>
-<br>
+```text
+mods/
+└── ExampleMod/
+    ├── common/
+    ├── 42/
+    │   └── mod.info
+    └── 42.17/
+        └── mod.info
+```
 
-- Procura mods locais, itens da Steam Workshop e pastas personalizadas.
-- Exibe nome, autor, versão, descrição, tamanho, Mod ID e Workshop ID.
-- Pesquisa por nome, autor, descrição, IDs e dependências.
-- Filtra mods locais e itens disponíveis na Steam.
-- Copia mods baixados pela Steam para a pasta local do Project Zomboid.
-- Importa todos os mods disponíveis na Steam para a biblioteca local de uma vez.
-- Lê imagens definidas como `poster` ou `icon` no arquivo `mod.info`.
+Ao ativar mods:
 
-</details>
+- Perfis B41 escrevem o Mod ID tradicional em `Mods=`.
+- Perfis B42 escrevem o ID da variante compatível.
+- `WorkshopItems=` mantém Workshop IDs únicos.
+- Mods incompatíveis continuam visíveis para remoção manual.
+- O preflight do teste bloqueia dependências ausentes, ordem inválida e mods incompatíveis.
 
-<details>
-<summary><strong>🔗 Mods ativos e dependências</strong></summary>
-<br>
+## Biblioteca e SteamCMD
 
-- Atualiza automaticamente os campos `Mods` e `WorkshopItems` do arquivo `.ini`.
-- Ativa, desativa e reorganiza mods por servidor.
-- Mantém dependências ativas antes dos mods que dependem delas.
-- Alerta antes de desativar um mod utilizado por outros mods ativos.
-- Detecta dependências disponíveis e oferece instalação e ativação em conjunto.
-- Identifica dependências ausentes e ajuda a localizar ou baixar o item correspondente.
+O aplicativo lê mods instalados em `Zomboid/mods`, bibliotecas Steam e diretórios personalizados.
 
-</details>
+Ao trazer um mod para a pasta local, o pacote completo é copiado. Isso preserva variantes B41, diretórios versionados B42, conteúdo compartilhado em `common` e o marcador `.pzmm-workshop-id`.
 
-<details>
-<summary><strong>⬇️ Steam Workshop e SteamCMD</strong></summary>
-<br>
+Downloads aceitam Workshop ID numérico ou URL:
 
-- Aceita Workshop ID numérico ou URL completa.
-- Baixa um item individual ou resolve e baixa todos os itens de uma coleção pública.
-- Exibe o progresso do download de coleções item a item.
-- Usa uma única sessão SteamCMD para baixar coleções com mais rapidez.
-- Permite cancelar downloads e repetir somente os itens que falharam.
-- Oferece validação completa opcional para investigar downloads corrompidos.
-- Atualiza automaticamente a biblioteca de mods após o download.
-- Mantém downloads em segundo plano ao navegar entre as telas do aplicativo.
-- Exibe progresso compacto no canto da tela e envia uma notificação ao finalizar.
-- Executa downloads pelo SteamCMD com login anônimo.
-- Inclui um `steamcmd.zip` gerenciado nos recursos do aplicativo.
-- Detecta instalações existentes e permite selecionar o executável manualmente.
-- Abre itens da Workshop no navegador, no cliente Steam ou em uma janela auxiliar.
+- Item individual ou coleção pública.
+- Progresso item a item.
+- Cancelamento durante o download.
+- Nova tentativa somente para itens que falharam.
+- Validação completa opcional para investigar arquivos corrompidos.
+- Atualização automática da biblioteca ao finalizar.
 
-</details>
+## Teste do servidor
 
-<details>
-<summary><strong>🧪 Configurações e diagnóstico</strong></summary>
-<br>
+O diagnóstico executa uma inicialização controlada e exibe os logs em tempo real. Antes de iniciar, o aplicativo:
 
-- Detecta a instalação do Project Zomboid e permite selecionar o executável manualmente.
-- Configura a RAM do cliente e do servidor alterando flags `-Xms` e `-Xmx`.
-- Exibe os locais monitorados e permite adicionar diretórios personalizados.
-- Testa a inicialização de um servidor com logs em tempo real.
-- Valida dependências ausentes e ordem incorreta antes do teste.
-- Verifica conflitos de porta e permite encerrar processos conflitantes.
-- Exibe notificações quando um teste minimizado termina.
-- Mantém o progresso de testes minimizados em um cartão compacto no canto da tela.
+1. Valida mods ativos e dependências.
+2. Verifica a ordem de carregamento.
+3. Verifica compatibilidade com B41 ou B42.
+4. Procura conflitos nas portas configuradas.
 
-</details>
+A B42 possui um timeout maior porque a inicialização pode levar mais tempo.
 
-## 🚀 Primeiros passos
+## Internacionalização
 
-1. Abra **Configurações** e confira se o SteamCMD foi localizado automaticamente.
+O idioma pode ser alterado em **Configurações**:
+
+- `Automático`: usa `pt-BR` quando o sistema estiver em qualquer idioma `pt-*`; caso contrário usa inglês.
+- `English`
+- `Português (Brasil)`
+
+A preferência é salva em `settings.ini` e aplicada imediatamente.
+
+| Camada | Implementação |
+| --- | --- |
+| Frontend React | [`i18next`](https://www.i18next.com/) e [`react-i18next`](https://react.i18next.com/) |
+| Backend Rust e menu nativo | [`rust-i18n`](https://docs.rs/rust-i18n/latest/rust_i18n/) |
+| Catálogo frontend | `src/i18n/resources.ts` |
+| Catálogo backend | `src-tauri/locales/app.yml` |
+
+## Primeiros passos
+
+1. Abra **Configurações** e confira se o SteamCMD foi localizado.
 2. Verifique se o executável do Project Zomboid foi detectado.
-3. Adicione diretórios personalizados caso mantenha mods fora das pastas padrão.
-4. Atualize a biblioteca para listar mods locais e itens encontrados na Steam.
-5. Crie um servidor selecionando mods ou clonando a lista de outro perfil.
-6. Revise dependências, ajuste a ordem dos mods e execute um teste de inicialização.
+3. Escolha o idioma desejado ou mantenha a detecção automática.
+4. Adicione diretórios personalizados caso mantenha mods fora das pastas padrão.
+5. Atualize a biblioteca.
+6. Crie um servidor selecionando a build e os mods.
+7. Revise dependências e execute um teste de inicialização.
 
-## 📸 Interface
-
-As capturas de tela oficiais serão adicionadas ao repositório conforme a interface evoluir.
-
-| Tela | Descrição | Caminho planejado |
-| --- | --- | --- |
-| Dashboard | Servidores e criação de novos perfis | `docs/screenshots/dashboard.png` |
-| Detalhes do servidor | Mods ativos, disponíveis e ações de gerenciamento | `docs/screenshots/server-detail.png` |
-| Biblioteca | Busca, filtros e importação de mods | `docs/screenshots/mods.png` |
-| Downloads | Download por Workshop ID ou URL | `docs/screenshots/downloads.png` |
-| Configurações | SteamCMD, diretórios, executável e RAM | `docs/screenshots/settings.png` |
-| Teste do servidor | Diagnóstico com logs em tempo real | `docs/screenshots/server-test.png` |
-
-## 🛠️ Desenvolvimento
+## Desenvolvimento
 
 ### Pré-requisitos
 
 - Windows 10 ou 11
 - [Node.js](https://nodejs.org/) com npm
 - [Rust](https://www.rust-lang.org/tools/install)
-- [Dependências do Tauri para Windows](https://v2.tauri.app/start/prerequisites/), incluindo Microsoft C++ Build Tools e WebView2
+- [Dependências do Tauri para Windows](https://v2.tauri.app/start/prerequisites/)
 - Project Zomboid instalado para utilizar todas as funcionalidades
 
 ### Executando localmente
@@ -147,32 +129,30 @@ npm install
 npm run tauri:dev
 ```
 
-Para trabalhar somente na interface web:
+Para trabalhar somente na interface:
 
 ```powershell
 npm run dev
 ```
 
-Para validar o frontend e gerar a aplicação desktop:
+Para gerar o build desktop:
 
 ```powershell
-npm run build
 npm run tauri:build
 ```
 
-Os artefatos compilados pelo Tauri são gerados em `src-tauri/target/release/`.
+### Validação
 
-### Comandos disponíveis
+```powershell
+npm run build
+cd src-tauri
+cargo test
+cargo fmt --check
+cd ..
+git diff --check
+```
 
-| Comando | Descrição |
-| --- | --- |
-| `npm install` | Instala as dependências JavaScript |
-| `npm run dev` | Inicia somente o frontend com Vite |
-| `npm run build` | Compila e valida o frontend |
-| `npm run tauri:dev` | Inicia o frontend e a aplicação desktop em desenvolvimento |
-| `npm run tauri:build` | Gera o build desktop de produção |
-
-## 🧱 Tecnologias
+## Tecnologias
 
 | Camada | Tecnologias |
 | --- | --- |
@@ -182,65 +162,25 @@ Os artefatos compilados pelo Tauri são gerados em `src-tauri/target/release/`.
 | Aplicativo desktop | Tauri 2 |
 | Backend local | Rust |
 | Downloads da Workshop | SteamCMD |
+| Internacionalização | i18next, react-i18next e rust-i18n |
 
-<details>
-<summary><strong>📂 Estrutura do projeto</strong></summary>
-<br>
+## Estrutura do projeto
 
 ```text
 .
-├── resources/          # Arquivos de exemplo e SteamCMD empacotado
-├── src/                # Interface React, componentes, tipos e integração Tauri
-├── src-tauri/          # Backend Rust e configuração do aplicativo desktop
-├── CONTRIBUTING.md     # Guia resumido de contribuição
-├── package.json        # Dependências e scripts do frontend
-└── README.md           # Documentação principal
+├── resources/             # Arquivos de exemplo e recursos empacotados
+├── src/                   # Interface React, componentes, tipos e catálogos frontend
+├── src-tauri/
+│   ├── locales/           # Catálogos rust-i18n do backend
+│   └── src/               # Backend Rust e comandos Tauri
+├── package.json           # Dependências e scripts do frontend
+└── README.md              # Documentação principal
 ```
 
-</details>
+## Estado atual
 
-<details>
-<summary><strong>⚙️ Como funciona</strong></summary>
-<br>
+O projeto está em desenvolvimento ativo e o foco atual é Windows. O status dos servidores listados começa como offline; o diagnóstico detalhado acontece ao executar o teste do servidor.
 
-O frontend React chama comandos Tauri por meio de `invoke`. O backend Rust executa operações locais, como leitura e escrita de configurações, varredura de mods, download de itens da Workshop e teste de inicialização.
-
-| Local | Uso |
-| --- | --- |
-| `Zomboid/Server` | Perfis de servidor e arquivos `.ini` |
-| `Zomboid/mods` | Mods instalados localmente |
-| Bibliotecas Steam | Itens baixados da Workshop do Project Zomboid |
-| Diretórios personalizados | Pastas adicionais configuradas pelo usuário |
-| Diretório de configuração do app | Caminhos salvos, RAM e locais adicionais de mods |
-
-Ao atualizar os mods ativos de um servidor, o aplicativo escreve os campos `Mods` e `WorkshopItems` no arquivo `.ini`. O Workshop ID também é preservado ao copiar um mod para a biblioteca local.
-
-</details>
-
-## 🤝 Contribuindo
-
-Contribuições são bem-vindas. Leia o [guia de contribuição](CONTRIBUTING.md) antes de enviar mudanças e mantenha os commits pequenos e objetivos.
-
-O projeto segue o padrão **Conventional Commits**:
-
-```text
-<tipo>(<escopo>): <resumo curto>
-```
-
-Exemplos:
-
-```text
-feat(server): detectar instâncias automaticamente
-fix(scanner): corrigir leitura de workshop id
-chore: atualizar dependências de desenvolvimento
-```
-
-## 🚧 Estado atual
-
-Este projeto está em desenvolvimento ativo. O foco atual é Windows, as capturas de tela oficiais ainda serão adicionadas e ainda não há uma suíte de testes automatizados configurada no repositório.
-
-O status dos servidores listados começa como offline; o diagnóstico detalhado acontece ao executar o teste do servidor.
-
-## 📄 Licença
+## Licença
 
 Este repositório ainda não possui um arquivo de licença. Antes de reutilizar ou redistribuir o código, confirme os termos aplicáveis com o autor do projeto.

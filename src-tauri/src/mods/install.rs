@@ -6,11 +6,11 @@ use std::{
 };
 
 pub(super) fn install_zomboid_mod_impl(
-    mod_path: String,
+    package_path: String,
     mod_id: String,
     workshop_id: String,
 ) -> Result<(), String> {
-    let source = PathBuf::from(&mod_path);
+    let source = PathBuf::from(&package_path);
 
     if !source.exists() || !source.is_dir() {
         return Err(format!("Pasta do mod nao encontrada: {}", source.display()));
@@ -90,5 +90,48 @@ fn sanitize_folder_name(value: &str) -> String {
         "mod".to_string()
     } else {
         sanitized
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn copies_complete_versioned_package_tree() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("pzmm-install-{timestamp}"));
+        let source = root.join("source");
+        let target = root.join("target");
+        fs::create_dir_all(source.join("42.17").join("media")).unwrap();
+        fs::create_dir_all(source.join("common")).unwrap();
+        fs::write(source.join("mod.info"), "id=Example").unwrap();
+        fs::write(source.join("42.17").join("mod.info"), "id=123/Example").unwrap();
+        fs::write(source.join("common").join("shared.txt"), "shared").unwrap();
+
+        install_mod(&source, "Example", &target, Some("123")).unwrap();
+
+        assert!(target.join("Example").join("mod.info").is_file());
+        assert!(target
+            .join("Example")
+            .join("42.17")
+            .join("mod.info")
+            .is_file());
+        assert!(target
+            .join("Example")
+            .join("common")
+            .join("shared.txt")
+            .is_file());
+        assert_eq!(
+            fs::read_to_string(target.join("Example").join(".pzmm-workshop-id"))
+                .unwrap()
+                .trim(),
+            "123"
+        );
+        let _ = fs::remove_dir_all(root);
     }
 }

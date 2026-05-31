@@ -1,0 +1,39 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background for visibility in some viewers, can be removed for transparency -->
+  <rect width="512" height="512" rx="128" fill="#1e2327"/>
+
+  <g transform="translate(64, 64) scale(16)">
+    <!-- Hexagon Frame -->
+    <path
+      d="M12 2L3.5 7V17L12 22L20.5 17V7L12 2Z"
+      stroke="#f97316"
+      stroke-width="2"
+      stroke-linejoin="round"
+      fill="#f97316"
+      fill-opacity="0.1"
+    />
+
+    <!-- Stylized Z -->
+    <path
+      d="M7 8H17L7 16H17"
+      stroke="white"
+      stroke-width="2.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+
+    <!-- Scratches -->
+    <path
+      d="M9 10L8 11"
+      stroke="#f97316"
+      stroke-width="1"
+      stroke-linecap="round"
+    />
+    <path
+      d="M16 13L15 14"
+      stroke="#f97316"
+      stroke-width="1"
+      stroke-linecap="round"
+    />
+  </g>
+</svg>

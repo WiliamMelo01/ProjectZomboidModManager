@@ -1,4 +1,5 @@
 import { CheckCircle2, Folder, FolderOpen, Monitor, RefreshCw, Search, XCircle } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 import { RamDropdown } from "@/components/settings/RamDropdown"
 import type { ZomboidInstallationStatus } from "@/types/settings"
@@ -32,6 +33,7 @@ export function GamePerformanceSection({
   onOpenFolder,
   onScan,
 }: GamePerformanceSectionProps) {
+  const { t } = useTranslation()
   const isConfigured = status?.isExecutableFound && status?.isClientConfigFound
 
   return (
@@ -43,8 +45,8 @@ export function GamePerformanceSection({
             <Monitor size={20} />
           </div>
           <div>
-            <h3 className="text-xl font-bold text-white">Configuracao do Jogo</h3>
-            <p className="text-xs text-gray-500">Defina o executavel e a memoria alocada para o client.</p>
+            <h3 className="text-xl font-bold text-white">{t("settings.performanceSection.title")}</h3>
+            <p className="text-xs text-gray-500">{t("settings.performanceSection.description")}</p>
           </div>
         </div>
 
@@ -61,29 +63,29 @@ export function GamePerformanceSection({
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <p className="text-sm font-bold text-white">
-                    {isConfigured ? "Project Zomboid configurado" : "Project Zomboid nao configurado"}
+                    {isConfigured ? t("settings.performanceSection.configured") : t("settings.performanceSection.notConfigured")}
                   </p>
                   <button type="button" onClick={onScan} className="flex items-center gap-2 rounded-xl border border-orange-500/20 bg-orange-500/10 px-3 py-1.5 text-xs font-bold text-orange-400 transition-all hover:bg-orange-500 hover:text-white">
                     <RefreshCw size={14} className={isScanning ? "animate-spin" : ""} />
-                    Escanear
+                    {t("settings.performanceSection.scan")}
                   </button>
                 </div>
                 <p className="mt-1 text-xs text-gray-500 break-all">
-                  {status?.detectedExecutablePath || "O app tenta usar a pasta padrao da Steam e localizar ProjectZomboid64.exe automaticamente."}
+                  {status?.detectedExecutablePath || t("settings.performanceSection.autoDetectHint")}
                 </p>
                 <div className="mt-3 grid gap-2 text-[11px] text-gray-500 md:grid-cols-3">
                   <span className={status?.isGameDirFound ? "text-green-300" : "text-red-300"}>
-                    Pasta Steam: {status?.isGameDirFound ? "encontrada" : "nao encontrada"}
+                    {t("settings.performanceSection.steamFolder")}: {status?.isGameDirFound ? t("settings.performanceSection.found") : t("settings.performanceSection.notFound")}
                   </span>
                   <span className={status?.isClientConfigFound ? "text-green-300" : "text-red-300"}>
-                    Launcher: {status?.isClientConfigFound ? "ok" : "pendente"}
+                    Launcher: {status?.isClientConfigFound ? "ok" : t("settings.performanceSection.pending")}
                   </span>
                   <span className={status?.isServerConfigFound ? "text-green-300" : "text-yellow-300"}>
-                    Servidor: {status?.isServerConfigFound ? "ok" : "nao encontrado"}
+                    {t("settings.performanceSection.server")}: {status?.isServerConfigFound ? "ok" : t("settings.performanceSection.notFound")}
                   </span>
                 </div>
                 <p className="mt-2 text-[11px] text-gray-600 break-all">
-                  Pasta padrao: {status?.defaultGameDir || "C:\\Program Files (x86)\\Steam\\steamapps\\common\\ProjectZomboid"}
+                  {t("settings.performanceSection.defaultFolder")}: {status?.defaultGameDir || "C:\\Program Files (x86)\\Steam\\steamapps\\common\\ProjectZomboid"}
                 </p>
               </div>
             </div>
@@ -91,7 +93,7 @@ export function GamePerformanceSection({
 
           <div className="space-y-3">
             <label htmlFor="game-path" className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">
-              Executavel do Jogo (.exe)
+              {t("settings.performanceSection.gameExecutable")}
             </label>
             <div className="flex flex-col gap-3 md:flex-row">
               <div className="relative flex-1 group/input">
@@ -107,18 +109,18 @@ export function GamePerformanceSection({
               </div>
               <button onClick={onBrowse} className="flex items-center justify-center gap-2 bg-[#2b3238] hover:bg-[#323a41] border border-white/10 px-5 py-3.5 rounded-2xl text-sm font-bold transition-all hover:border-orange-500/30 active:scale-95">
                 <Folder size={18} />
-                Procurar
+                {t("settings.performanceSection.browse")}
               </button>
               <button onClick={onOpenFolder} className="flex items-center justify-center gap-2 bg-[#2b3238] hover:bg-[#323a41] border border-white/10 px-5 py-3.5 rounded-2xl text-sm font-bold transition-all hover:border-orange-500/30 active:scale-95">
                 <FolderOpen size={18} />
-                Abrir pasta
+                {t("settings.performanceSection.openFolder")}
               </button>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-            <RamInput label="RAM do Client (Jogo)" value={clientRam} options={ramOptions} onChange={onClientRamChange} />
-            <RamInput label="RAM do Servidor" value={serverRam} options={ramOptions} onChange={onServerRamChange} />
+            <RamInput label={t("settings.performanceSection.clientRam")} value={clientRam} options={ramOptions} onChange={onClientRamChange} />
+            <RamInput label={t("settings.performanceSection.serverRam")} value={serverRam} options={ramOptions} onChange={onServerRamChange} />
           </div>
         </div>
       </section>
@@ -126,7 +128,7 @@ export function GamePerformanceSection({
       <div className="p-4 bg-orange-400/5 border border-orange-400/10 rounded-2xl flex gap-3">
         <Search size={20} className="text-orange-400 shrink-0 mt-0.5" />
         <p className="text-[11px] text-gray-400 leading-relaxed italic">
-          O app usará o executável selecionado para localizar o arquivo de configuração e ajustar as flags de memória (-Xms e -Xmx). Certifique-se de selecionar o executável correto da versão que você utiliza (geralmente 64 bits).
+          {t("settings.performanceSection.details")}
         </p>
       </div>
     </div>

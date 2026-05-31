@@ -1,3 +1,4 @@
+use crate::i18n::text;
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
@@ -26,7 +27,10 @@ pub(super) fn fetch_steam_workshop_item_names(
            -Body $body; \
          $response | ConvertTo-Json -Depth 8 -Compress"
     );
-    let response = run_powershell_json_request(&script, "consultar os detalhes dos mods")?;
+    let response = run_powershell_json_request(
+        &script,
+        &text("fetch mod details", "consultar os detalhes dos mods"),
+    )?;
     let mut names = HashMap::new();
 
     if let Some(items) = response
@@ -52,7 +56,12 @@ pub(super) fn validate_workshop_id(value: &str, item_label: &str) -> Result<Stri
 
     if value.is_empty() || !value.chars().all(|char| char.is_ascii_digit()) {
         return Err(format!(
-            "Informe um Workshop ID numerico para a {item_label}."
+            "{} {}.",
+            text(
+                "Enter a numeric Workshop ID for",
+                "Informe um Workshop ID numerico para"
+            ),
+            item_label
         ));
     }
 
@@ -62,7 +71,7 @@ pub(super) fn validate_workshop_id(value: &str, item_label: &str) -> Result<Stri
 pub(super) fn fetch_steam_workshop_collection_items(
     collection_id: &str,
 ) -> Result<Vec<String>, String> {
-    let collection_id = validate_workshop_id(collection_id, "colecao")?;
+    let collection_id = validate_workshop_id(collection_id, &text("collection", "colecao"))?;
     let script = format!(
         "$ErrorActionPreference = 'Stop'; \
          $body = @{{ collectioncount = '1'; 'publishedfileids[0]' = '{collection_id}' }}; \
@@ -71,7 +80,10 @@ pub(super) fn fetch_steam_workshop_collection_items(
            -Body $body; \
          $response | ConvertTo-Json -Depth 8 -Compress"
     );
-    let response = run_powershell_json_request(&script, "consultar a colecao na Steam")?;
+    let response = run_powershell_json_request(
+        &script,
+        &text("fetch the Steam collection", "consultar a colecao na Steam"),
+    )?;
     let children = response
         .get("response")
         .and_then(|value| value.get("collectiondetails"))
@@ -80,8 +92,10 @@ pub(super) fn fetch_steam_workshop_collection_items(
         .and_then(|collection| collection.get("children"))
         .and_then(Value::as_array)
         .ok_or_else(|| {
-            "A Steam nao encontrou itens nessa colecao. Confirme se o ID pertence a uma colecao publica."
-                .to_string()
+            text(
+                "Steam did not find items in this collection. Confirm that the ID belongs to a public collection.",
+                "A Steam nao encontrou itens nessa colecao. Confirme se o ID pertence a uma colecao publica.",
+            ).to_string()
         })?;
     let mut seen = HashSet::new();
     let workshop_ids = children
@@ -93,7 +107,11 @@ pub(super) fn fetch_steam_workshop_collection_items(
         .collect::<Vec<_>>();
 
     if workshop_ids.is_empty() {
-        return Err("A colecao informada nao possui itens para baixar.".to_string());
+        return Err(text(
+            "The provided collection has no items to download.",
+            "A colecao informada nao possui itens para baixar.",
+        )
+        .to_string());
     }
 
     Ok(workshop_ids)
@@ -103,20 +121,34 @@ fn run_powershell_json_request(script: &str, action: &str) -> Result<Value, Stri
     let output = Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .output()
-        .map_err(|error| format!("Nao foi possivel {action}: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "{} {action}: {error}",
+                text("Could not", "Nao foi possivel")
+            )
+        })?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
     if !output.status.success() {
         let details = stderr.trim();
         return Err(if details.is_empty() {
-            format!("Nao foi possivel {action}.")
+            format!("{} {action}.", text("Could not", "Nao foi possivel"))
         } else {
-            format!("Nao foi possivel {action}:\n{details}")
+            format!(
+                "{} {action}:\n{details}",
+                text("Could not", "Nao foi possivel")
+            )
         });
     }
 
     serde_json::from_str(&stdout).map_err(|error| {
-        format!("A Steam retornou uma resposta invalida ao tentar {action}: {error}")
+        format!(
+            "{} {action}: {error}",
+            text(
+                "Steam returned an invalid response while trying to",
+                "A Steam retornou uma resposta invalida ao tentar"
+            )
+        )
     })
 }

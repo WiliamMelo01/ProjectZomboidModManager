@@ -1,10 +1,13 @@
-import { ArrowLeft, CircleCheck, CircleX, Play, Power, RefreshCw, Search, Server } from "lucide-react"
+import { ArrowLeft, FilePenLine, Play, RefreshCw, Search, Server } from "lucide-react"
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 
 import { MissingDependencyModal } from "@/components/MissingDependencyModal"
 import {
   DeactivateModModal,
+  ChangeServerBuildModal,
   DependencyWarningModal,
+  IncompatibleModsModal,
   MapInstallConfirmationModal,
   MoveModWarningModal,
   PendingActivationModal,
@@ -15,7 +18,9 @@ import { ServerModContextMenu } from "@/components/server/ServerModContextMenu"
 import { ServerModList } from "@/components/server/ServerModList"
 import { ServerPortConflictModal } from "@/components/server/ServerPortConflictModal"
 import { buildActivationDependencyPlan, isLocalMod, normalizeModId } from "@/lib/modDependencies"
+import { resolveModForBuild } from "@/lib/modBuilds"
 import { invokeTauri } from "@/lib/tauri"
+import { i18n } from "@/i18n"
 import type { ZomboidMod } from "@/types/mod"
 import type { ZomboidServer } from "@/types/server"
 import type { ServerPortCheck } from "@/components/server/ServerPortConflictModal"
@@ -32,6 +37,7 @@ type ServerDetailProps = {
   onDependencyDownloaded?: (dependencyId: string) => Promise<void>
   onOpenSettings?: () => void
   runningServerTestId?: string | null
+  onChangeBuild: (gameBuild: "b41" | "b42") => Promise<void>
 }
 
 const MOVE_MOD_WARNING_KEY = "pzmm_move_mod_warning_modal_seen"
@@ -61,7 +67,9 @@ export function ServerDetail({
   onDependencyDownloaded,
   onOpenSettings,
   runningServerTestId,
+  onChangeBuild,
 }: ServerDetailProps) {
+  const { t } = useTranslation()
   const [search, setSearch] = useState("")
   const [confirmDelete, setConfirmDelete] = useState<ZomboidMod | null>(null)
   const [dependencyWarning, setDependencyWarning] = useState<{ mod: ZomboidMod; dependents: ZomboidMod[] } | null>(null)
@@ -71,14 +79,15 @@ export function ServerDetail({
   const [showMoveWarning, setShowMoveWarning] = useState<MoveModRequest | null>(null)
   const [dontShowAgainMove, setDontShowAgainMove] = useState(false)
   const [isTestingServer, setIsTestingServer] = useState(false)
-  const [isStartingServer, setIsStartingServer] = useState(false)
-  const [serverStartStatus, setServerStartStatus] = useState<{ type: "success" | "error"; message: string } | null>(null)
   const [portConflictCheck, setPortConflictCheck] = useState<ServerPortCheck | null>(null)
-  const [pendingPortAction, setPendingPortAction] = useState<"test" | "start">("test")
   const [isCheckingPorts, setIsCheckingPorts] = useState(false)
   const [isKillingPorts, setIsKillingPorts] = useState(false)
   const [mapInstallError, setMapInstallError] = useState<string | null>(null)
+  const [serverFileOpenError, setServerFileOpenError] = useState<string | null>(null)
   const [pendingMapInstall, setPendingMapInstall] = useState<ZomboidMod | null>(null)
+  const [isChangingBuild, setIsChangingBuild] = useState(false)
+  const [pendingBuild, setPendingBuild] = useState<"b41" | "b42" | null>(null)
+  const [showIncompatibleMods, setShowIncompatibleMods] = useState(false)
 
   const [isActivatedExpanded, setIsActivatedExpanded] = useState(true)
   const [isAvailableExpanded, setIsAvailableExpanded] = useState(true)
@@ -91,11 +100,11 @@ export function ServerDetail({
           className="flex items-center gap-2 text-gray-400 hover:text-orange-400 transition-colors w-fit group"
         >
           <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
-          <span className="text-sm font-medium">Voltar para Servidores</span>
+          <span className="text-sm font-medium">{t("serverDetail.back")}</span>
         </button>
 
         <div className="mt-8 rounded-3xl border border-white/5 bg-[#2b3238] p-6 text-gray-400">
-          Servidor nao encontrado.
+          {t("serverDetail.notFound")}
         </div>
       </div>
     )
@@ -105,11 +114,26 @@ export function ServerDetail({
   const safeActiveIds = Array.isArray(server.activeModIds) ? server.activeModIds : []
   const activatedModIds = new Set(safeActiveIds.map((modId) => normalizeModId(modId)))
   const libraryMods = safeMods.filter((mod) => mod?.id)
-  const modsById = new Map(libraryMods.map((mod) => [normalizeModId(mod.id), mod]))
-  const activatedMods = safeActiveIds
-    .map((modId) => modsById.get(normalizeModId(modId)))
+  const compatibleMods = libraryMods
+    .map((mod) => resolveModForBuild(mod, server.gameBuild))
     .filter((mod): mod is ZomboidMod => Boolean(mod))
-  const availableMods = libraryMods.filter((mod) => !activatedModIds.has(String(mod.id).toLowerCase()))
+  const modsById = new Map(
+    libraryMods.flatMap((mod) => mod.variants.map((variant) => [
+      normalizeModId(variant.id),
+      { ...mod, id: variant.id, path: variant.path, dependencies: variant.dependencies, mapNames: variant.mapNames },
+    ] as const)),
+  )
+  const activatedMods = safeActiveIds
+    .map((modId) => modsById.get(normalizeModId(modId)) ?? createMissingActiveMod(modId))
+  const availableMods = compatibleMods.filter((mod) => !activatedModIds.has(String(mod.id).toLowerCase()))
+  const incompatibleActiveIds = safeActiveIds.filter((modId) => !compatibleMods.some((mod) => normalizeModId(mod.id) === normalizeModId(modId)))
+  const incompatibleActiveIdSet = new Set(incompatibleActiveIds.map(normalizeModId))
+  const incompatibleActiveMods = incompatibleActiveIds.map((modId) => ({
+    id: modId,
+    name: modsById.get(normalizeModId(modId))?.name ?? modId,
+    compatibleBuilds: modsById.get(normalizeModId(modId))?.compatibleBuilds ?? [],
+    isInLibrary: modsById.has(normalizeModId(modId)),
+  }))
   const isCurrentServerTesting = isTestingServer || runningServerTestId === server.id
 
   const filteredActivated = activatedMods.filter((mod) => matchesSearch(mod, search))
@@ -253,7 +277,6 @@ export function ServerDetail({
         })
 
         if (check.usages.length > 0) {
-          setPendingPortAction("test")
           setPortConflictCheck(check)
           return
         }
@@ -279,46 +302,6 @@ export function ServerDetail({
     }
   }
 
-  const startServer = async (skipPortCheck = false) => {
-    if (!skipPortCheck) {
-      setIsCheckingPorts(true)
-
-      try {
-        const check = await invokeTauri<ServerPortCheck>("check_zomboid_server_ports", {
-          serverId: server.id,
-        })
-
-        if (check.usages.length > 0) {
-          setPendingPortAction("start")
-          setPortConflictCheck(check)
-          return
-        }
-      } catch (error) {
-        setServerStartStatus({ type: "error", message: getErrorMessage(error) })
-        return
-      } finally {
-        setIsCheckingPorts(false)
-      }
-    }
-
-    setIsStartingServer(true)
-    setServerStartStatus(null)
-
-    try {
-      await invokeTauri("start_zomboid_server", {
-        serverId: server.id,
-      })
-      setServerStartStatus({
-        type: "success",
-        message: "Servidor iniciado em um novo console. A inicializacao pode levar alguns instantes.",
-      })
-    } catch (error) {
-      setServerStartStatus({ type: "error", message: getErrorMessage(error) })
-    } finally {
-      setIsStartingServer(false)
-    }
-  }
-
   const killPortConflictsAndContinue = async () => {
     if (!portConflictCheck) {
       return
@@ -331,19 +314,34 @@ export function ServerDetail({
         pids: Array.from(new Set(portConflictCheck.usages.map((usage) => usage.pid))),
       })
       setPortConflictCheck(null)
-      if (pendingPortAction === "start") {
-        await startServer(true)
-      } else {
-        await testServer(true)
-      }
+      await testServer(true)
     } catch (error) {
-      if (pendingPortAction === "start") {
-        setServerStartStatus({ type: "error", message: getErrorMessage(error) })
-      } else {
-        window.dispatchEvent(new CustomEvent("pzmm-open-server-test-panel", { detail: { serverId: server.id, error: getErrorMessage(error) } }))
-      }
+      window.dispatchEvent(new CustomEvent("pzmm-open-server-test-panel", { detail: { serverId: server.id, error: getErrorMessage(error) } }))
     } finally {
       setIsKillingPorts(false)
+    }
+  }
+
+  const openServerFile = async () => {
+    setServerFileOpenError(null)
+
+    try {
+      await invokeTauri("open_zomboid_server_file", {
+        serverId: server.id,
+      })
+    } catch (error) {
+      setServerFileOpenError(getErrorMessage(error))
+    }
+  }
+
+  const changeBuild = async () => {
+    if (!pendingBuild || pendingBuild === server.gameBuild) return
+    setIsChangingBuild(true)
+    try {
+      await onChangeBuild(pendingBuild)
+      setPendingBuild(null)
+    } finally {
+      setIsChangingBuild(false)
     }
   }
 
@@ -357,7 +355,7 @@ export function ServerDetail({
           className="flex items-center gap-2 text-gray-400 hover:text-orange-400 transition-colors w-fit group"
         >
           <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
-          <span className="text-sm font-medium">Voltar para Servidores</span>
+          <span className="text-sm font-medium">{t("serverDetail.back")}</span>
         </button>
 
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-[#2b3238] p-6 rounded-3xl border border-white/5 relative overflow-hidden">
@@ -375,36 +373,51 @@ export function ServerDetail({
                   OFFLINE
                 </span>
                 <span className="text-white/10">|</span>
-                <span>{server.fileName}</span>
+                <button
+                  type="button"
+                  onClick={() => void openServerFile()}
+                  title={t("serverDetail.openFile")}
+                  className="flex items-center gap-1.5 transition-colors hover:text-orange-300 hover:underline"
+                >
+                  <FilePenLine size={14} />
+                  <span>{server.fileName}</span>
+                </button>
                 <span className="text-white/10">|</span>
-                <span>Porta: {server.port}</span>
+                <span>{t("serverDetail.port")}: {server.port}</span>
+              </div>
+              <div className="mt-3 flex items-center gap-2">
+                {(["b41", "b42"] as const).map((build) => (
+                  <button
+                    key={build}
+                    type="button"
+                    disabled={isChangingBuild}
+                    onClick={() => setPendingBuild(build)}
+                    className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${
+                      server.gameBuild === build ? "border-orange-400/30 bg-orange-400/10 text-orange-300" : "border-white/10 text-gray-500 hover:text-white"
+                    }`}
+                  >
+                    {build}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
 
           <div className="flex flex-wrap gap-3 relative z-10">
              <button
-                onClick={() => void startServer()}
-                disabled={isStartingServer || isCheckingPorts || isCurrentServerTesting}
-                className="flex items-center gap-2 rounded-xl border border-green-500/20 bg-green-500/10 px-4 py-2 text-sm font-black text-green-400 transition-all hover:bg-green-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-             >
-                {isStartingServer ? <RefreshCw size={18} className="animate-spin" /> : <Power size={18} />}
-                <span>{isStartingServer ? "Iniciando" : "Iniciar servidor"}</span>
-             </button>
-             <button
                 onClick={() => void testServer()}
-                disabled={isCurrentServerTesting || isCheckingPorts || isStartingServer}
+                disabled={isCurrentServerTesting || isCheckingPorts}
                 className="flex items-center gap-2 rounded-xl border border-orange-500/20 bg-orange-500/10 px-4 py-2 text-sm font-black text-orange-400 transition-all hover:bg-orange-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
              >
                 {isCurrentServerTesting || isCheckingPorts ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
-                <span>{isCheckingPorts ? "Verificando portas" : isCurrentServerTesting ? "Testando" : "Testar servidor"}</span>
+                <span>{isCheckingPorts ? t("serverDetail.checkingPorts") : isCurrentServerTesting ? t("serverDetail.testing") : t("serverDetail.test")}</span>
              </button>
              <div className="bg-[#22272b] px-4 py-2 rounded-xl border border-white/5 text-center">
-                <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest">Mods Ativos</p>
+                <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest">{t("serverDetail.activeMods")}</p>
                 <p className="text-xl font-black text-orange-400">{activatedMods.length}</p>
              </div>
              <div className="bg-[#22272b] px-4 py-2 rounded-xl border border-white/5 text-center">
-                <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest">Jogadores Max</p>
+                <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest">{t("serverDetail.maxPlayers")}</p>
                 <p className="text-xl font-black text-white">{server.maxPlayers || "-"}</p>
              </div>
           </div>
@@ -416,7 +429,7 @@ export function ServerDetail({
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-orange-400 transition-colors" size={18} />
         <input
           type="text"
-          placeholder="Filtrar mods do servidor..."
+          placeholder={t("serverDetail.filter")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full bg-[#2b3238] border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-orange-400/50 transition-all placeholder:text-gray-600"
@@ -431,39 +444,48 @@ export function ServerDetail({
           </div>
         )}
 
-        {serverStartStatus && (
-          <div className={`flex items-center gap-3 rounded-2xl border px-5 py-4 text-sm ${
-            serverStartStatus.type === "success"
-              ? "border-green-500/20 bg-green-500/10 text-green-300"
-              : "border-red-500/20 bg-red-500/10 text-red-300"
-          }`}>
-            {serverStartStatus.type === "success"
-              ? <CircleCheck size={18} className="shrink-0" />
-              : <CircleX size={18} className="shrink-0" />}
-            {serverStartStatus.message}
+        {serverFileOpenError && (
+          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-5 py-4 text-sm text-red-300">
+            {serverFileOpenError}
+          </div>
+        )}
+
+        {incompatibleActiveIds.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-orange-500/20 bg-orange-500/10 px-5 py-4 text-sm text-orange-200">
+            <span>{t("serverDetail.incompatibleWarning", { count: incompatibleActiveIds.length, build: server.gameBuild.toUpperCase() })}</span>
+            <button
+              type="button"
+              onClick={() => setShowIncompatibleMods(true)}
+              className="shrink-0 rounded-xl border border-orange-400/20 bg-orange-400/10 px-3 py-2 text-xs font-bold text-orange-200 transition-colors hover:bg-orange-400/20"
+            >
+              {t("serverDetail.viewMods")}
+            </button>
           </div>
         )}
 
         <ServerModList
-          title="Mods Ativados"
+          title={t("serverDetail.activated")}
           mods={filteredActivated}
-          emptyMessage="Nenhum mod ativado encontrado."
+          emptyMessage={t("serverDetail.noActivated")}
           isExpanded={isActivatedExpanded}
           action="deactivate"
           onToggleExpanded={() => setIsActivatedExpanded(!isActivatedExpanded)}
           onAction={handleDeactivateClick}
           onContextMenu={handleActiveModContextMenu}
+          incompatibleModIds={incompatibleActiveIdSet}
         />
 
         <ServerModList
-          title="Mods Disponíveis"
+          title={t("serverDetail.available")}
           mods={filteredAvailable}
-          emptyMessage="Nenhum mod disponivel encontrado."
+          emptyMessage={t("serverDetail.noAvailable")}
           isExpanded={isAvailableExpanded}
           action="activate"
           onToggleExpanded={() => setIsAvailableExpanded(!isAvailableExpanded)}
           onAction={handleActivateClick}
           onInstallMap={setPendingMapInstall}
+          paginate
+          paginationResetKey={`${server.id}:${server.gameBuild}:${search}`}
         />
       </div>
 
@@ -482,7 +504,6 @@ export function ServerDetail({
         <ServerPortConflictModal
           check={portConflictCheck}
           isKilling={isKillingPorts}
-          operation={pendingPortAction}
           onCancel={() => setPortConflictCheck(null)}
           onConfirm={() => void killPortConflictsAndContinue()}
         />
@@ -540,6 +561,25 @@ export function ServerDetail({
         />
       )}
 
+      {pendingBuild && pendingBuild !== server.gameBuild && (
+        <ChangeServerBuildModal
+          currentBuild={server.gameBuild}
+          nextBuild={pendingBuild}
+          activeModsCount={safeActiveIds.length}
+          isSaving={isChangingBuild}
+          onCancel={() => setPendingBuild(null)}
+          onConfirm={() => void changeBuild()}
+        />
+      )}
+
+      {showIncompatibleMods && incompatibleActiveMods.length > 0 && (
+        <IncompatibleModsModal
+          gameBuild={server.gameBuild}
+          mods={incompatibleActiveMods}
+          onClose={() => setShowIncompatibleMods(false)}
+        />
+      )}
+
       {/* Missing Dependency Modal (Not in Library) */}
       {missingDependency && (
         <MissingDependencyModal
@@ -568,5 +608,25 @@ function getErrorMessage(error: unknown) {
     return JSON.stringify(error)
   }
 
-  return "Nao foi possivel testar o servidor."
+  return i18n.t("serverTest.fallbackError")
+}
+
+function createMissingActiveMod(modId: string): ZomboidMod {
+  return {
+    id: modId,
+    name: modId,
+    author: i18n.t("mods.unknownAuthor"),
+    version: "-",
+    workshopId: "",
+    description: i18n.t("mods.activeMissingDescription"),
+    size: "-",
+    isInstalled: false,
+    source: "missing",
+    path: "",
+    dependencies: [],
+    mapNames: [],
+    compatibleBuilds: [],
+    variants: [],
+    packagePath: "",
+  }
 }

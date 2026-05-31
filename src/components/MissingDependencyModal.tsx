@@ -1,7 +1,9 @@
 import { AlertCircle, AlertTriangle, Download, ExternalLink, Hash, RefreshCw, Settings, X } from "lucide-react"
 import { useEffect, useState, type FormEvent } from "react"
+import { useTranslation } from "react-i18next"
 
 import { invokeTauri } from "@/lib/tauri"
+import { i18n } from "@/i18n"
 import type { WorkshopDownloadResult } from "@/types/download"
 import type { ZomboidMod } from "@/types/mod"
 
@@ -22,6 +24,7 @@ function onlyDigits(value: string) {
 }
 
 export function MissingDependencyModal({ mod, dependencyId, onClose, onDownloaded, onOpenSettings }: MissingDependencyModalProps) {
+  const { t } = useTranslation()
   const [workshopId, setWorkshopId] = useState(onlyDigits(dependencyId) ? dependencyId : "")
   const [isDownloading, setIsDownloading] = useState(false)
   const [isCheckingSettings, setIsCheckingSettings] = useState(true)
@@ -29,18 +32,6 @@ export function MissingDependencyModal({ mod, dependencyId, onClose, onDownloade
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null)
   const canDownload = onlyDigits(workshopId)
-
-  const openSteamWorkshop = async () => {
-    setDownloadError(null)
-
-    try {
-      await invokeTauri<void>("open_steam_workshop", {
-        itemIdOrSearch: workshopId.trim() || dependencyId,
-      })
-    } catch (error) {
-      setDownloadError(getErrorMessage(error))
-    }
-  }
 
   const openSteamWorkshopExternal = async () => {
     setDownloadError(null)
@@ -63,12 +54,12 @@ export function MissingDependencyModal({ mod, dependencyId, onClose, onDownloade
     event?.preventDefault()
 
     if (!canDownload) {
-      setDownloadError("Informe o Workshop ID numerico do item para baixar com SteamCMD.")
+      setDownloadError(t("dependency.numericRequired"))
       return
     }
 
     if (!isSteamcmdConfigured) {
-      setDownloadError("Configure o SteamCMD antes de baixar dependencias da Steam Workshop.")
+      setDownloadError(t("dependency.steamcmdRequired"))
       return
     }
 
@@ -81,7 +72,7 @@ export function MissingDependencyModal({ mod, dependencyId, onClose, onDownloade
         workshopId: workshopId.trim(),
         forceValidate: false,
       })
-      setDownloadSuccess("Download concluido. Atualizando a biblioteca de mods...")
+      setDownloadSuccess(t("dependency.completed"))
       await onDownloaded?.(dependencyId)
     } catch (error) {
       setDownloadError(getErrorMessage(error))
@@ -129,7 +120,7 @@ export function MissingDependencyModal({ mod, dependencyId, onClose, onDownloade
             <div className="p-2 bg-red-500/20 text-red-500 rounded-xl">
               <AlertCircle size={24} />
             </div>
-            <h3 className="text-xl font-bold text-white">Mod nao encontrado</h3>
+            <h3 className="text-xl font-bold text-white">{t("dependency.missingTitle")}</h3>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full text-gray-400 transition-colors">
             <X size={20} />
@@ -138,8 +129,7 @@ export function MissingDependencyModal({ mod, dependencyId, onClose, onDownloade
 
         <div className="p-6">
           <p className="text-gray-400 text-sm mb-6">
-            O mod <span className="text-white font-bold">{mod.name}</span> requer uma dependencia que nao esta em sua
-            biblioteca:
+            {t("dependency.missingDescription", { name: mod.name })}
           </p>
 
           <div className="flex items-center gap-3 p-4 bg-red-500/5 border border-red-500/10 rounded-2xl mb-5">
@@ -147,7 +137,7 @@ export function MissingDependencyModal({ mod, dependencyId, onClose, onDownloade
               <Hash size={20} />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs text-gray-500 uppercase font-bold tracking-widest">ID da Dependencia</p>
+              <p className="text-xs text-gray-500 uppercase font-bold tracking-widest">{t("dependency.dependencyId")}</p>
               <p className="text-lg font-mono font-black text-white truncate">{dependencyId}</p>
             </div>
           </div>
@@ -157,9 +147,9 @@ export function MissingDependencyModal({ mod, dependencyId, onClose, onDownloade
               <div className="flex gap-3">
                 <AlertTriangle size={20} className="text-orange-400 shrink-0 mt-0.5" />
                 <div className="min-w-0">
-                  <p className="text-sm font-bold text-white">SteamCMD nao configurado</p>
+                  <p className="text-sm font-bold text-white">{t("dependency.steamcmdMissing")}</p>
                   <p className="mt-1 text-xs leading-relaxed text-gray-400">
-                    Para baixar esta dependencia da Steam Workshop, configure primeiro o caminho do steamcmd.exe.
+                    {t("dependency.steamcmdHint")}
                   </p>
                 </div>
               </div>
@@ -170,13 +160,13 @@ export function MissingDependencyModal({ mod, dependencyId, onClose, onDownloade
                   className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold text-white transition-all hover:bg-orange-600"
                 >
                   <Settings size={17} />
-                  Ir para configuracoes
+                  {t("dependency.openSettings")}
                 </button>
                 <button
                   onClick={onClose}
                   className="flex-1 rounded-xl border border-white/10 px-4 py-3 text-sm font-bold text-gray-400 transition-all hover:bg-white/5 hover:text-white"
                 >
-                  Fechar
+                  {t("common.close")}
                 </button>
               </div>
             </div>
@@ -184,18 +174,18 @@ export function MissingDependencyModal({ mod, dependencyId, onClose, onDownloade
 
           <form onSubmit={downloadWorkshopItem} className="mb-5">
             <label htmlFor="missing-workshop-id" className="block text-xs text-gray-500 uppercase font-bold tracking-widest mb-2">
-              Workshop ID para SteamCMD
+              {t("dependency.workshopIdLabel")}
             </label>
             <input
               id="missing-workshop-id"
               value={workshopId}
               onChange={(event) => setWorkshopId(event.target.value)}
               inputMode="numeric"
-              placeholder="Cole o ID numerico do item"
+              placeholder={t("dependency.workshopIdPlaceholder")}
               className="w-full bg-[#1e2327] border border-white/10 rounded-xl py-3 px-4 text-sm font-mono text-white focus:outline-none focus:border-orange-400/50 transition-all placeholder:text-gray-600"
             />
             <p className="mt-2 text-xs text-gray-500">
-              Se a dependencia veio como Mod ID, abra a busca na Workshop e cole aqui o ID numerico da pagina do item.
+              {t("dependency.workshopIdHint")}
             </p>
           </form>
 
@@ -213,18 +203,11 @@ export function MissingDependencyModal({ mod, dependencyId, onClose, onDownloade
 
           <div className="flex flex-col gap-3">
             <button
-              onClick={() => void openSteamWorkshop()}
-              className="w-full py-3 bg-[#2b3238] hover:bg-[#353c42] border border-white/10 text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2 group"
-            >
-              <ExternalLink size={18} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
-              Abrir Steam Workshop no app
-            </button>
-            <button
               onClick={() => void openSteamWorkshopExternal()}
               className="w-full py-3 bg-transparent hover:bg-white/5 border border-white/10 text-gray-300 hover:text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2 group"
             >
               <ExternalLink size={18} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
-              Abrir no navegador
+              {t("dependency.openBrowser")}
             </button>
             <button
               onClick={() => void downloadWorkshopItem()}
@@ -236,13 +219,13 @@ export function MissingDependencyModal({ mod, dependencyId, onClose, onDownloade
               }`}
             >
               {isDownloading ? <RefreshCw size={18} className="animate-spin" /> : <Download size={18} />}
-              {isDownloading ? "Baixando com SteamCMD..." : "Baixar com SteamCMD"}
+              {isDownloading ? t("dependency.downloading") : t("dependency.download")}
             </button>
             <button
               onClick={onClose}
               className="w-full py-3 bg-transparent border border-white/10 text-gray-400 hover:text-white hover:bg-white/5 font-bold rounded-xl transition-all"
             >
-              Voltar
+              {t("dependency.back")}
             </button>
           </div>
         </div>
@@ -260,5 +243,5 @@ function getErrorMessage(error: unknown) {
     return error
   }
 
-  return "Nao foi possivel baixar o item da Steam Workshop."
+  return i18n.t("dependency.fallbackError")
 }

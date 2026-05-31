@@ -1,22 +1,33 @@
 use super::performance::validate_game_executable_path;
+use crate::i18n::text;
 #[cfg(not(windows))]
 use std::fs;
 use std::{path::PathBuf, process::Command};
 
 #[cfg(windows)]
 pub(super) fn select_game_executable_impl() -> Result<Option<String>, String> {
-    let script = r#"
+    let script = format!(
+        r#"
 Add-Type -AssemblyName System.Windows.Forms
 $dialog = New-Object System.Windows.Forms.OpenFileDialog
-$dialog.Title = 'Selecionar executavel do Project Zomboid'
-$dialog.Filter = 'Project Zomboid (*.exe)|*.exe|Todos os arquivos (*.*)|*.*'
+$dialog.Title = '{}'
+$dialog.Filter = '{}'
 $dialog.CheckFileExists = $true
 $dialog.Multiselect = $false
-if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
   [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
   Write-Output $dialog.FileName
-}
-"#;
+}}
+"#,
+        text(
+            "Select Project Zomboid executable",
+            "Selecionar executavel do Project Zomboid"
+        ),
+        text(
+            "Project Zomboid (*.exe)|*.exe|All files (*.*)|*.*",
+            "Project Zomboid (*.exe)|*.exe|Todos os arquivos (*.*)|*.*"
+        )
+    );
 
     let output = Command::new("powershell.exe")
         .args([
@@ -25,16 +36,28 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
             "-ExecutionPolicy",
             "Bypass",
             "-Command",
-            script,
+            &script,
         ])
         .output()
-        .map_err(|error| format!("Nao foi possivel abrir o seletor de arquivos: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "{}: {error}",
+                text(
+                    "Could not open the file picker",
+                    "Nao foi possivel abrir o seletor de arquivos"
+                )
+            )
+        })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
 
         return Err(if stderr.is_empty() {
-            "Nao foi possivel selecionar o executavel do Project Zomboid.".to_string()
+            text(
+                "Could not select the Project Zomboid executable.",
+                "Nao foi possivel selecionar o executavel do Project Zomboid.",
+            )
+            .to_string()
         } else {
             stderr
         });
@@ -53,7 +76,11 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
 
 #[cfg(not(windows))]
 pub(super) fn select_game_executable_impl() -> Result<Option<String>, String> {
-    Err("Selecao de arquivo automatica esta disponivel apenas no Windows.".to_string())
+    Err(text(
+        "Automatic file selection is available only on Windows.",
+        "Selecao de arquivo automatica esta disponivel apenas no Windows.",
+    )
+    .to_string())
 }
 
 #[cfg(windows)]

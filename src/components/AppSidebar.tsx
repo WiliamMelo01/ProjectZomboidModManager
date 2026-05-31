@@ -1,4 +1,6 @@
 import { AppSidebarItem, type SidebarItem } from "@/components/AppSidebarItem"
+import { Logo } from "@/components/Logo"
+import { useTranslation } from "react-i18next"
 
 type AppSidebarProps = {
   activeTab: string
@@ -7,21 +9,15 @@ type AppSidebarProps = {
 }
 
 export function AppSidebar({ activeTab, items, onTabChange }: AppSidebarProps) {
+  const { t } = useTranslation()
   return (
     <nav className="flex h-full w-[18vw] min-w-[240px] flex-col gap-8 py-8 px-4 bg-[#1e2327] border-r border-white/5 shadow-2xl z-20">
       <div className="px-4 mb-4">
-        <h1 className="text-2xl font-black tracking-tighter flex items-center gap-2">
-          <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center shadow-[0_0_15px_rgba(249,115,22,0.3)]">
-            <span className="text-white text-lg">P</span>
-          </div>
-          <span className="bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent uppercase italic">
-            Z Manager
-          </span>
-        </h1>
+        <Logo />
       </div>
 
       <div className="flex-1 flex flex-col gap-1">
-        <p className="px-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Menu Principal</p>
+        <p className="px-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">{t("nav.mainMenu")}</p>
         <ul className="flex flex-col gap-1">
           {items.map((item) => (
             <AppSidebarItem

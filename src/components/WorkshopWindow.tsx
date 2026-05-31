@@ -1,6 +1,8 @@
 import { CheckCircle2, Copy, Download, ExternalLink, RefreshCw, Search } from "lucide-react"
 import { useMemo, useState } from "react"
+import { useTranslation } from "react-i18next"
 
+import { i18n } from "@/i18n"
 import { invokeTauri } from "@/lib/tauri"
 
 type WorkshopDownloadResult = {
@@ -13,6 +15,7 @@ function onlyDigits(value: string) {
 }
 
 export function WorkshopWindow() {
+  const { t } = useTranslation()
   const params = useMemo(() => {
     const hash = window.location.hash
     const queryIndex = hash.indexOf("?")
@@ -57,15 +60,15 @@ export function WorkshopWindow() {
 
     try {
       await navigator.clipboard.writeText(url)
-      setMessage("Link copiado.")
+      setMessage(t("workshopWindow.copied"))
     } catch {
-      setError("Nao foi possivel copiar o link.")
+      setError(t("workshopWindow.copyError"))
     }
   }
 
   async function downloadWithSteamCmd() {
     if (!canDownload) {
-      setError("Para baixar com SteamCMD, abra a pagina da Workshop e use o ID numerico do item.")
+      setError(t("workshopWindow.numericRequired"))
       return
     }
 
@@ -80,8 +83,8 @@ export function WorkshopWindow() {
       })
       setMessage(
         result.failedItems.length > 0
-          ? `Download concluido com ${result.failedItems.length} falha(s).`
-          : `${result.downloadedItems} item baixado com SteamCMD.`,
+          ? t("workshopWindow.failed", { count: result.failedItems.length })
+          : t("workshopWindow.downloaded", { count: result.downloadedItems }),
       )
     } catch (downloadError) {
       setError(getErrorMessage(downloadError))
@@ -101,16 +104,16 @@ export function WorkshopWindow() {
             <div className="min-w-0">
               <h1 className="text-2xl font-black uppercase italic tracking-tight">Steam Workshop</h1>
               <p className="mt-1 text-sm leading-relaxed text-gray-400">
-                A Steam nao renderizou corretamente dentro do WebView. Use as acoes abaixo para abrir o item e baixar com SteamCMD.
+                {t("workshopWindow.description")}
               </p>
             </div>
           </div>
 
           <div className="mb-6 rounded-2xl border border-white/5 bg-[#1e2327] p-4">
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">
-              {canDownload ? "Workshop ID" : "Busca"}
+              {canDownload ? "Workshop ID" : t("workshopWindow.search")}
             </p>
-            <p className="mt-2 break-all font-mono text-lg font-black text-white">{target || "Sem item informado"}</p>
+            <p className="mt-2 break-all font-mono text-lg font-black text-white">{target || t("workshopWindow.empty")}</p>
             <p className="mt-3 break-all font-mono text-xs text-gray-500">{url}</p>
           </div>
 
@@ -133,7 +136,7 @@ export function WorkshopWindow() {
               className="flex items-center justify-center gap-2 rounded-xl bg-orange-500 px-4 py-3 text-sm font-black uppercase italic tracking-wide text-white transition-colors hover:bg-orange-600"
             >
               <ExternalLink size={18} />
-              Navegador
+              {t("workshopWindow.browser")}
             </button>
             <button
               onClick={() => void openSteamClient()}
@@ -147,7 +150,7 @@ export function WorkshopWindow() {
               className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-[#1e2327] px-4 py-3 text-sm font-bold text-gray-200 transition-colors hover:bg-white/5 hover:text-white"
             >
               <Copy size={18} />
-              Copiar link
+              {t("workshopWindow.copyLink")}
             </button>
             <button
               disabled={!canDownload || isDownloading}
@@ -173,5 +176,5 @@ function getErrorMessage(error: unknown) {
     return error
   }
 
-  return "Nao foi possivel executar a acao."
+  return i18n.t("workshopWindow.fallbackError")
 }

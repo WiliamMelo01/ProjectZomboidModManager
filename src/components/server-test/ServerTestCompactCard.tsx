@@ -1,4 +1,5 @@
 import { AlertTriangle, CheckCircle2, Maximize2, RefreshCw, XCircle } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 import { formatDuration, getServerTestStatusStyle } from "@/lib/serverTest"
 import type { ServerTestResult } from "@/types/serverTest"
@@ -22,6 +23,7 @@ export function ServerTestCompactCard({
   hasDownloadProgressCard,
   onExpand,
 }: ServerTestCompactCardProps) {
+  const { t } = useTranslation()
   const statusStyle = getServerTestStatusStyle(result?.status, isTesting)
 
   return (
@@ -44,9 +46,9 @@ export function ServerTestCompactCard({
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-black text-white">Teste do servidor</p>
+          <p className="truncate text-sm font-black text-white">{t("serverTest.title")}</p>
           <p className="mt-1 truncate text-xs text-gray-400">
-            {serverId ?? "perfil"} · {formatDuration(elapsedSeconds)} · {logLineCount} linhas
+            {serverId ?? t("serverTest.profile")} · {formatDuration(elapsedSeconds)} · {logLineCount} {t("serverTest.lines")}
           </p>
         </div>
         <Maximize2 size={16} className="text-gray-500" />

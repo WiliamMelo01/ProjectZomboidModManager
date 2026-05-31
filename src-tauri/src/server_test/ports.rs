@@ -1,3 +1,4 @@
+use crate::i18n::text;
 use crate::models::{PortUsage, ServerPortCheck};
 use crate::util::{read_ini_value, read_text_lossy};
 use crate::zomboid_server_dir;
@@ -37,10 +38,22 @@ fn find_port_usages(ports: &[u16]) -> Result<Vec<PortUsage>, String> {
     let output = Command::new("netstat")
         .arg("-ano")
         .output()
-        .map_err(|error| format!("Nao foi possivel verificar portas em uso: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "{}: {error}",
+                text(
+                    "Could not check ports in use",
+                    "Nao foi possivel verificar portas em uso"
+                )
+            )
+        })?;
 
     if !output.status.success() {
-        return Err("Nao foi possivel verificar portas em uso com netstat.".to_string());
+        return Err(text(
+            "Could not check ports in use with netstat.",
+            "Nao foi possivel verificar portas em uso com netstat.",
+        )
+        .to_string());
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);

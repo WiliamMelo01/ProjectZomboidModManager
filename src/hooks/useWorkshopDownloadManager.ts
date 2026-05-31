@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event"
 import { useEffect, useMemo, useRef, useState } from "react"
 
+import { i18n } from "@/i18n"
 import { invokeTauri } from "@/lib/tauri"
 import type {
   DownloadListItem,
@@ -104,14 +105,14 @@ export function useWorkshopDownloadManager({
     )
 
     if (downloadResult.wasCancelled) {
-      setStatus({ type: "error", message: `Download cancelado. ${downloadResult.downloadedItems} itens foram concluídos.` })
+      setStatus({ type: "error", message: i18n.t("downloads.cancelledProgress", { count: downloadResult.downloadedItems }) })
     } else if (downloadResult.failedItems.length > 0) {
       setStatus({
         type: "error",
-        message: `${downloadResult.downloadedItems} de ${downloadResult.totalItems} itens foram baixados. ${downloadResult.failedItems.length} falharam.`,
+        message: i18n.t("downloads.progress", { downloaded: downloadResult.downloadedItems, total: downloadResult.totalItems, failed: downloadResult.failedItems.length }),
       })
     } else {
-      setStatus({ type: "success", message: `${downloadResult.downloadedItems} itens baixados com sucesso.` })
+      setStatus({ type: "success", message: i18n.t("downloads.success", { count: downloadResult.downloadedItems }) })
     }
 
     await onDownloadFinishedRef.current?.()
@@ -130,7 +131,7 @@ export function useWorkshopDownloadManager({
     setForceValidate(shouldValidate)
     setStatus({
       type: "info",
-      message: downloadType === "collection" ? `Consultando a coleção ${workshopId}...` : `Baixando item ${workshopId}...`,
+      message: downloadType === "collection" ? i18n.t("downloads.checkingCollection", { id: workshopId }) : i18n.t("downloads.downloadingItem", { id: workshopId }),
     })
 
     try {
@@ -163,7 +164,7 @@ export function useWorkshopDownloadManager({
     setIsResultModalOpen(false)
     setDownloadItems([])
     setIsDownloading(true)
-    setStatus({ type: "info", message: `Tentando baixar novamente ${workshopIds.length} itens...` })
+    setStatus({ type: "info", message: i18n.t("downloads.retrying", { count: workshopIds.length }) })
 
     try {
       const downloadResult = await invokeTauri<WorkshopDownloadResult>("download_steam_workshop_items", {
@@ -179,7 +180,7 @@ export function useWorkshopDownloadManager({
   }
 
   async function cancelDownload() {
-    setStatus({ type: "info", message: "Cancelando download..." })
+    setStatus({ type: "info", message: i18n.t("downloads.cancelling") })
 
     try {
       await invokeTauri<void>("cancel_steam_workshop_download")
@@ -197,10 +198,10 @@ export function useWorkshopDownloadManager({
     setIsResultModalOpen(downloadResult.failedItems.length > 0 || downloadResult.wasCancelled)
     setStatus(
       downloadResult.wasCancelled
-        ? { type: "error", message: `Download cancelado. ${downloadResult.downloadedItems} itens foram concluídos.` }
+        ? { type: "error", message: i18n.t("downloads.cancelledProgress", { count: downloadResult.downloadedItems }) }
         : downloadResult.failedItems.length > 0
-          ? { type: "error", message: `${downloadResult.downloadedItems} de ${downloadResult.totalItems} itens foram baixados. ${downloadResult.failedItems.length} falharam.` }
-          : { type: "success", message: `${downloadResult.downloadedItems} itens baixados com sucesso.` },
+          ? { type: "error", message: i18n.t("downloads.progress", { downloaded: downloadResult.downloadedItems, total: downloadResult.totalItems, failed: downloadResult.failedItems.length }) }
+          : { type: "success", message: i18n.t("downloads.success", { count: downloadResult.downloadedItems }) },
     )
   }
 
@@ -224,13 +225,15 @@ export type WorkshopDownloadManager = ReturnType<typeof useWorkshopDownloadManag
 function buildDownloadNotification(result: WorkshopDownloadResult): DownloadNotification {
   const failedCount = result.failedItems.length
   const title = result.wasCancelled
-    ? "Download da Workshop cancelado"
+    ? i18n.t("downloads.cancelledTitle")
     : failedCount > 0
-      ? "Download concluído com falhas"
-      : "Download da Workshop finalizado"
+      ? i18n.t("downloads.failedTitle")
+      : i18n.t("downloads.finishedTitle")
   const message = result.wasCancelled
-    ? `${result.downloadedItems} baixados e ${result.cancelledItems} cancelados.`
-    : `${result.downloadedItems} de ${result.totalItems} itens baixados${failedCount > 0 ? `; ${failedCount} falharam.` : "."}`
+    ? i18n.t("downloads.cancelled", { downloaded: result.downloadedItems, cancelled: result.cancelledItems })
+    : failedCount > 0
+      ? i18n.t("downloads.progress", { downloaded: result.downloadedItems, total: result.totalItems, failed: failedCount })
+      : i18n.t("downloads.success", { count: result.downloadedItems })
 
   return {
     title,
@@ -249,5 +252,5 @@ function buildDownloadNotification(result: WorkshopDownloadResult): DownloadNoti
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message
   if (typeof error === "string") return error
-  return "Não foi possível baixar o mod."
+  return i18n.t("downloads.fallbackError")
 }

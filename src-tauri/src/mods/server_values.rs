@@ -1,6 +1,7 @@
 use super::discovery::{find_mod_info_files, steam_workshop_dirs};
+use crate::models::BUILD_42;
 use crate::saved_custom_mod_dirs;
-use crate::util::{read_ini_value, read_text_lossy};
+use crate::util::{read_ini_value, read_text_lossy, split_mod_ids};
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -26,6 +27,30 @@ pub(crate) fn normalize_server_values(values: &[String]) -> Vec<String> {
     }
 
     normalized
+}
+
+pub(crate) fn parse_server_mod_ids(value: &str) -> Vec<String> {
+    let mod_ids = split_mod_ids(value)
+        .into_iter()
+        .map(|mod_id| mod_id.strip_prefix('\\').unwrap_or(&mod_id).to_string())
+        .collect::<Vec<_>>();
+
+    normalize_server_values(&mod_ids)
+}
+
+pub(crate) fn serialize_server_mod_ids(mod_ids: &[String], game_build: &str) -> String {
+    normalize_server_values(mod_ids)
+        .into_iter()
+        .map(|mod_id| mod_id.strip_prefix('\\').unwrap_or(&mod_id).to_string())
+        .map(|mod_id| {
+            if game_build.eq_ignore_ascii_case(BUILD_42) {
+                format!("\\{mod_id}")
+            } else {
+                mod_id
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(";")
 }
 
 pub(crate) fn resolve_server_workshop_ids(
@@ -134,4 +159,37 @@ fn collect_workshop_id_lookup(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::BUILD_41;
+
+    #[test]
+    fn serializes_b41_mod_ids_without_prefix() {
+        assert_eq!(
+            serialize_server_mod_ids(&["Example".to_string(), "Other".to_string()], BUILD_41),
+            "Example;Other"
+        );
+    }
+
+    #[test]
+    fn serializes_b42_mod_ids_with_backslash_prefix() {
+        assert_eq!(
+            serialize_server_mod_ids(
+                &["Example".to_string(), "1299328280/ToadTraits".to_string()],
+                BUILD_42
+            ),
+            "\\Example;\\1299328280/ToadTraits"
+        );
+    }
+
+    #[test]
+    fn parses_b42_mod_ids_without_exposing_ini_prefix() {
+        assert_eq!(
+            parse_server_mod_ids("\\Example;\\1299328280/ToadTraits"),
+            vec!["Example".to_string(), "1299328280/ToadTraits".to_string()]
+        );
+    }
 }

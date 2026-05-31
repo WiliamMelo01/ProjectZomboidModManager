@@ -1,4 +1,5 @@
 use super::api::{fetch_steam_workshop_item_names, validate_workshop_id};
+use crate::i18n::text;
 use crate::models::{WorkshopDownloadEvent, WorkshopDownloadFailedItem, WorkshopDownloadResult};
 use crate::mods::normalize_server_values;
 use crate::server_test::{kill_process_tree, spawn_output_reader};
@@ -35,7 +36,11 @@ pub(super) fn download_steam_workshop_items_impl(
     let total_items = workshop_ids.len();
 
     if workshop_ids.is_empty() {
-        return Err("Informe ao menos um item da Steam Workshop para baixar.".to_string());
+        return Err(text(
+            "Enter at least one Steam Workshop item to download.",
+            "Informe ao menos um item da Steam Workshop para baixar.",
+        )
+        .to_string());
     }
 
     for workshop_id in &workshop_ids {
@@ -107,12 +112,20 @@ fn workshop_download_state() -> &'static Mutex<Option<ActiveWorkshopDownload>> {
 }
 
 fn begin_workshop_download() -> Result<WorkshopDownloadGuard, String> {
-    let mut active_download = workshop_download_state()
-        .lock()
-        .map_err(|_| "Nao foi possivel acessar o estado dos downloads.".to_string())?;
+    let mut active_download = workshop_download_state().lock().map_err(|_| {
+        text(
+            "Could not access the download state.",
+            "Nao foi possivel acessar o estado dos downloads.",
+        )
+        .to_string()
+    })?;
 
     if active_download.is_some() {
-        return Err("Ja existe um download da Steam Workshop em andamento.".to_string());
+        return Err(text(
+            "A Steam Workshop download is already in progress.",
+            "Ja existe um download da Steam Workshop em andamento.",
+        )
+        .to_string());
     }
 
     *active_download = Some(ActiveWorkshopDownload {
@@ -125,9 +138,13 @@ fn begin_workshop_download() -> Result<WorkshopDownloadGuard, String> {
 
 pub(super) fn cancel_steam_workshop_download_impl() -> Result<(), String> {
     let pid = {
-        let mut active_download = workshop_download_state()
-            .lock()
-            .map_err(|_| "Nao foi possivel acessar o estado dos downloads.".to_string())?;
+        let mut active_download = workshop_download_state().lock().map_err(|_| {
+            text(
+                "Could not access the download state.",
+                "Nao foi possivel acessar o estado dos downloads.",
+            )
+            .to_string()
+        })?;
         let Some(active_download) = active_download.as_mut() else {
             return Ok(());
         };
@@ -187,7 +204,8 @@ fn run_steamcmd_workshop_pass(
         Err(error) => {
             let _ = fs::remove_file(&script_path);
             return Err(format!(
-                "Nao foi possivel executar {}: {error}",
+                "{} {}: {error}",
+                text("Could not run", "Nao foi possivel executar"),
                 steamcmd_path.display()
             ));
         }
@@ -217,7 +235,15 @@ fn run_steamcmd_workshop_pass(
 
         if child
             .try_wait()
-            .map_err(|error| format!("Nao foi possivel consultar o SteamCMD: {error}"))?
+            .map_err(|error| {
+                format!(
+                    "{}: {error}",
+                    text(
+                        "Could not inspect SteamCMD",
+                        "Nao foi possivel consultar o SteamCMD"
+                    )
+                )
+            })?
             .is_some()
         {
             break;
@@ -289,7 +315,13 @@ fn create_steamcmd_workshop_script(
     let script_path = env::temp_dir().join(format!("pzmm-steamcmd-{timestamp}.txt"));
 
     fs::write(&script_path, lines.join("\r\n")).map_err(|error| {
-        format!("Nao foi possivel criar o script temporario do SteamCMD: {error}")
+        format!(
+            "{}: {error}",
+            text(
+                "Could not create the temporary SteamCMD script",
+                "Nao foi possivel criar o script temporario do SteamCMD"
+            )
+        )
     })?;
 
     Ok(script_path)

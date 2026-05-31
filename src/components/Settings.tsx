@@ -1,19 +1,24 @@
 import { Cpu, Folder, RefreshCw, Save } from "lucide-react"
 import { useEffect, useState } from "react"
+import { useTranslation } from "react-i18next"
 
+import { LanguageSettingsSection } from "@/components/settings/LanguageSettingsSection"
 import { GamePerformanceSection } from "@/components/settings/GamePerformanceSection"
 import { ModLocationsSection } from "@/components/settings/ModLocationsSection"
 import { RamTips } from "@/components/settings/RamTips"
 import { SteamCmdSettingsSection } from "@/components/settings/SteamCmdSettingsSection"
 import { invokeTauri } from "@/lib/tauri"
-import type { AppSettings, ModLocation, ZomboidInstallationStatus } from "@/types/settings"
+import { setLanguagePreference } from "@/i18n"
+import type { AppSettings, LanguagePreference, ModLocation, ZomboidInstallationStatus } from "@/types/settings"
 
 export function Settings() {
+  const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<"mods" | "ram">("mods")
   const [steamCmdPath, setSteamCmdPath] = useState("")
   const [gameExecutablePath, setGameExecutablePath] = useState("")
   const [clientRam, setClientRam] = useState("4.00")
   const [serverRam, setServerRam] = useState("4.00")
+  const [languagePreference, setLanguagePreferenceState] = useState<LanguagePreference>("auto")
   const [totalSystemRam, setTotalSystemRam] = useState(16)
 
   const [modLocations, setModLocations] = useState<ModLocation[]>([])
@@ -65,7 +70,7 @@ export function Settings() {
       applySettings(settings)
       await scanZomboidInstallation(settings.gameExecutablePath)
       setModLocations(await invokeTauri<ModLocation[]>("get_mod_locations"))
-      setMessage("Configuracoes salvas.")
+      setMessage(t("settings.saved"))
     } catch (saveError) {
       setError(getErrorMessage(saveError))
     } finally {
@@ -83,7 +88,7 @@ export function Settings() {
       if (selectedPath) {
         setGameExecutablePath(selectedPath)
         await scanZomboidInstallation(selectedPath)
-        setMessage("Executavel selecionado. Salve para confirmar.")
+        setMessage(t("settings.selectedExecutable"))
       }
     } catch (browseError) {
       setError(getErrorMessage(browseError))
@@ -96,7 +101,7 @@ export function Settings() {
 
     try {
       const openedPath = await invokeTauri<string>("open_steam_zomboid_folder")
-      setMessage(`Pasta aberta: ${openedPath}`)
+      setMessage(t("settings.openedFolder", { path: openedPath }))
     } catch (openError) {
       setError(getErrorMessage(openError))
     }
@@ -131,9 +136,9 @@ export function Settings() {
 
       if (detectedPath) {
         setSteamCmdPath(detectedPath)
-        setMessage("SteamCMD encontrado. Salve para usar este caminho nos downloads.")
+        setMessage(t("settings.steamcmd.detected"))
       } else {
-        setError("SteamCMD nao foi encontrado automaticamente.")
+        setError(t("settings.steamcmd.notFound"))
       }
     } catch (detectError) {
       setError(getErrorMessage(detectError))
@@ -149,7 +154,7 @@ export function Settings() {
 
       if (selectedPath) {
         setSteamCmdPath(selectedPath)
-        setMessage("SteamCMD selecionado. Salve para usar este caminho nos downloads.")
+        setMessage(t("settings.steamcmd.selected"))
       }
     } catch (browseError) {
       setError(getErrorMessage(browseError))
@@ -159,10 +164,10 @@ export function Settings() {
   function clearPath() {
     if (activeTab === "ram") {
       setGameExecutablePath("")
-      setMessage("Caminho do jogo limpo. Salve para confirmar.")
+      setMessage(t("settings.clearedGamePath"))
     } else {
       setSteamCmdPath("")
-      setMessage("Caminho limpo. Salve para voltar a usar deteccao automatica.")
+      setMessage(t("settings.clearedSteamcmdPath"))
     }
 
     setError(null)
@@ -175,6 +180,23 @@ export function Settings() {
     setGameExecutablePath(settings.gameExecutablePath ?? "")
     setClientRam(settings.clientRam ?? "4.00")
     setServerRam(settings.serverRam ?? "4.00")
+    setLanguagePreferenceState(settings.languagePreference ?? "auto")
+  }
+
+  async function changeLanguage(preference: LanguagePreference) {
+    const previousPreference = languagePreference
+    setLanguagePreferenceState(preference)
+    setMessage(null)
+    setError(null)
+
+    try {
+      await setLanguagePreference(preference)
+      setModLocations(await invokeTauri<ModLocation[]>("get_mod_locations"))
+      setMessage(t("language.saved"))
+    } catch (languageError) {
+      setLanguagePreferenceState(previousPreference)
+      setError(getErrorMessage(languageError))
+    }
   }
 
   const ramOptions = Array.from({ length: totalSystemRam * 4 }, (_, i) => ((i + 1) * 0.25).toFixed(2))
@@ -185,7 +207,7 @@ export function Settings() {
 
     try {
       setModLocations(await invokeTauri<ModLocation[]>("get_mod_locations"))
-      setMessage("Locais de mods atualizados.")
+      setMessage(t("settings.modLocations.refreshed"))
     } catch (refreshError) {
       setError(getErrorMessage(refreshError))
     }
@@ -208,7 +230,7 @@ export function Settings() {
           path: selectedPath,
         }),
       )
-      setMessage("Pasta de mods adicionada.")
+      setMessage(t("settings.modLocations.added"))
     } catch (addError) {
       setError(getErrorMessage(addError))
     } finally {
@@ -233,9 +255,11 @@ export function Settings() {
         <div className={`transition-all duration-500 ${activeTab === 'ram' ? 'lg:pr-80' : ''}`}>
           <div className="max-w-3xl">
             <div className="mb-8">
-              <h2 className="text-3xl font-black tracking-tight text-white uppercase italic">Configuracoes</h2>
-              <p className="text-gray-400 mt-1">Gerencie caminhos e desempenho do jogo e ferramentas.</p>
+              <h2 className="text-3xl font-black tracking-tight text-white uppercase italic">{t("settings.title")}</h2>
+              <p className="text-gray-400 mt-1">{t("settings.description")}</p>
             </div>
+
+            <LanguageSettingsSection preference={languagePreference} onChange={(preference) => void changeLanguage(preference)} />
 
             {/* Tab Navigation */}
             <div className="flex gap-4 p-1 bg-[#1e2327] rounded-2xl border border-white/5 mb-8">
@@ -246,7 +270,7 @@ export function Settings() {
                 }`}
               >
                 <Folder size={18} />
-                Mods & Downloads
+                {t("settings.modsDownloads")}
               </button>
               <button
                 onClick={() => setActiveTab("ram")}
@@ -255,7 +279,7 @@ export function Settings() {
                 }`}
               >
                 <Cpu size={18} />
-                Desempenho (RAM)
+                {t("settings.performance")}
               </button>
             </div>
 
@@ -313,7 +337,7 @@ export function Settings() {
                   onClick={clearPath}
                   className="rounded-2xl border border-white/10 px-6 py-4 text-sm font-bold text-gray-400 transition-all hover:bg-white/5 hover:text-white"
                 >
-                  Limpar caminho
+                  {t("settings.clearPath")}
                 </button>
                 <button
                   disabled={isLoading || isSaving}
@@ -321,7 +345,7 @@ export function Settings() {
                   className="flex items-center justify-center gap-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-400 hover:to-orange-500 disabled:from-white/10 disabled:to-white/10 disabled:text-gray-500 text-white px-8 py-4 rounded-2xl font-black uppercase italic tracking-wider transition-all shadow-lg shadow-orange-500/20 active:scale-95"
                 >
                   {isSaving ? <RefreshCw size={20} className="animate-spin" /> : <Save size={20} />}
-                  <span>{isSaving ? "Salvando" : "Salvar configuracoes"}</span>
+                  <span>{isSaving ? t("settings.saving") : t("settings.save")}</span>
                 </button>
               </div>
             </div>
@@ -346,5 +370,5 @@ function getErrorMessage(error: unknown) {
     return error
   }
 
-  return "Nao foi possivel carregar as configuracoes."
+  return "Could not load settings."
 }

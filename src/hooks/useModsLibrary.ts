@@ -29,7 +29,7 @@ export function useModsLibrary() {
         setMods(foundMods)
         setModsCount(foundMods.length)
         setHasLoadedMods(true)
-        writeModsLibraryCache(foundMods)
+        void writeModsLibraryCache(foundMods)
         return foundMods
       } catch (error) {
         setModsError(getErrorMessage(error))
@@ -72,7 +72,7 @@ export function useModsLibrary() {
             : mod,
         )
 
-        writeModsLibraryCache(updatedMods)
+        void writeModsLibraryCache(updatedMods)
         return updatedMods
       })
     } catch (error) {

@@ -1,8 +1,11 @@
 import type { ZomboidMod } from "@/types/mod"
 
 const MODS_LIBRARY_CACHE_KEY = "pzmm:mods-library"
-const MODS_LIBRARY_CACHE_VERSION = 2
+const MODS_LIBRARY_CACHE_VERSION = 3
+const MODS_LIBRARY_COMPATIBLE_CACHE_VERSIONS = new Set([2, MODS_LIBRARY_CACHE_VERSION])
 const MODS_LIBRARY_CACHE_LIMIT = 30
+const MOD_IMAGE_THUMBNAIL_WIDTH = 320
+const MOD_IMAGE_THUMBNAIL_HEIGHT = 160
 
 export type ModsLibraryCache = {
   version: number
@@ -49,7 +52,7 @@ export function readModsLibraryCache(): ModsLibraryCache | null {
     const cache = JSON.parse(rawCache) as Partial<ModsLibraryCache>
 
     if (
-      cache.version !== MODS_LIBRARY_CACHE_VERSION ||
+      !MODS_LIBRARY_COMPATIBLE_CACHE_VERSIONS.has(cache.version ?? 0) ||
       typeof cache.cachedAt !== "string" ||
       typeof cache.totalModsCount !== "number" ||
       !Array.isArray(cache.mods) ||
@@ -66,16 +69,83 @@ export function readModsLibraryCache(): ModsLibraryCache | null {
   }
 }
 
-export function writeModsLibraryCache(mods: ZomboidMod[]) {
+function createImageThumbnail(imageUrl: string) {
+  if (!imageUrl.startsWith("data:image/")) {
+    return Promise.resolve(imageUrl)
+  }
+
+  return new Promise<string | undefined>((resolve) => {
+    const image = new Image()
+
+    image.onerror = () => resolve(undefined)
+    image.onload = () => {
+      const scale = Math.min(
+        1,
+        MOD_IMAGE_THUMBNAIL_WIDTH / image.width,
+        MOD_IMAGE_THUMBNAIL_HEIGHT / image.height,
+      )
+      const width = Math.max(1, Math.round(image.width * scale))
+      const height = Math.max(1, Math.round(image.height * scale))
+      const canvas = document.createElement("canvas")
+      const context = canvas.getContext("2d")
+
+      if (!context) {
+        resolve(undefined)
+        return
+      }
+
+      try {
+        canvas.width = width
+        canvas.height = height
+        context.drawImage(image, 0, 0, width, height)
+        resolve(canvas.toDataURL("image/jpeg", 0.7))
+      } catch {
+        resolve(undefined)
+      }
+    }
+    image.src = imageUrl
+  })
+}
+
+async function compactCachedMods(mods: ZomboidMod[]) {
+  return Promise.all(
+    mods.slice(0, MODS_LIBRARY_CACHE_LIMIT).map(async (mod) => ({
+      ...mod,
+      imageUrl: mod.imageUrl ? await createImageThumbnail(mod.imageUrl) : undefined,
+    })),
+  )
+}
+
+function persistCache(cache: ModsLibraryCache) {
+  try {
+    window.localStorage.setItem(MODS_LIBRARY_CACHE_KEY, JSON.stringify(cache))
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function writeModsLibraryCache(mods: ZomboidMod[]) {
   try {
     const cache: ModsLibraryCache = {
       version: MODS_LIBRARY_CACHE_VERSION,
       cachedAt: new Date().toISOString(),
       totalModsCount: mods.length,
-      mods: mods.slice(0, MODS_LIBRARY_CACHE_LIMIT),
+      mods: await compactCachedMods(mods),
     }
 
-    window.localStorage.setItem(MODS_LIBRARY_CACHE_KEY, JSON.stringify(cache))
+    if (persistCache(cache)) {
+      return
+    }
+
+    // Preserve the instant first page even when the WebView exposes an unusually small quota.
+    for (let index = cache.mods.length - 1; index >= 0; index -= 1) {
+      cache.mods[index] = { ...cache.mods[index], imageUrl: undefined }
+
+      if (persistCache(cache)) {
+        return
+      }
+    }
   } catch {
     // The live backend scan remains the source of truth if browser storage is unavailable or full.
   }

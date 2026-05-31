@@ -2,6 +2,7 @@ import { AlertCircle, Download, Hash, PackageCheck, User } from "lucide-react"
 
 import { isLocalMod } from "@/lib/modDependencies"
 import type { ZomboidMod } from "@/types/mod"
+import { ModBadges } from "@/components/mods/ModBadges"
 
 type ModCardProps = {
   mod: ZomboidMod
@@ -71,6 +72,9 @@ export function ModCard({ mod, onInstall }: ModCardProps) {
         </div>
 
         <p className="text-xs text-gray-400 line-clamp-2 mb-6 h-8">{mod.description}</p>
+        <div className="mb-4 min-h-5">
+          <ModBadges badges={mod.badges} />
+        </div>
 
         <div className="grid grid-cols-2 gap-3 mb-3">
           <div className="bg-[#22272b] p-2 rounded-lg border border-white/5">

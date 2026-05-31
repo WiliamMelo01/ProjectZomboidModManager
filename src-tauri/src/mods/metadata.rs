@@ -84,6 +84,7 @@ pub(super) fn add_mod_from_info(
     let mod_dir = mod_info_path.parent().unwrap_or(mod_info_path);
     let image_url = find_mod_image_url(content.as_ref(), mod_dir);
     let map_names = find_mod_map_names(mod_dir);
+    let badges = find_mod_badges(mod_dir, &map_names);
 
     mods.push(ZomboidMod {
         id: mod_id,
@@ -99,9 +100,42 @@ pub(super) fn add_mod_from_info(
         image_url,
         dependencies,
         map_names,
+        badges,
     });
 
     Ok(Some(normalized_mod_id))
+}
+
+fn find_mod_badges(mod_dir: &Path, map_names: &[String]) -> Vec<String> {
+    let media_dir = mod_dir.join("media");
+    let mut badges = Vec::new();
+
+    if !map_names.is_empty() {
+        badges.push("map".to_string());
+    }
+
+    if media_dir
+        .join("lua")
+        .join("shared")
+        .join("Translate")
+        .is_dir()
+    {
+        badges.push("translation".to_string());
+    }
+
+    if media_dir.join("scripts").join("vehicles").is_dir() {
+        badges.push("vehicles".to_string());
+    }
+
+    if media_dir.join("clothing").is_dir() {
+        badges.push("clothing".to_string());
+    }
+
+    if media_dir.join("lua").is_dir() {
+        badges.push("lua".to_string());
+    }
+
+    badges
 }
 
 fn find_mod_map_names(mod_dir: &Path) -> Vec<String> {
@@ -197,5 +231,41 @@ mod tests {
         let _ = fs::remove_dir_all(mod_dir);
 
         assert_eq!(map_names, vec!["RavenCreek".to_string()]);
+    }
+
+    #[test]
+    fn identifies_structural_mod_badges() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let mod_dir = std::env::temp_dir().join(format!("pzmm-badges-test-{timestamp}"));
+
+        fs::create_dir_all(
+            mod_dir
+                .join("media")
+                .join("lua")
+                .join("shared")
+                .join("Translate"),
+        )
+        .expect("translation directory should be created");
+        fs::create_dir_all(mod_dir.join("media").join("scripts").join("vehicles"))
+            .expect("vehicles directory should be created");
+        fs::create_dir_all(mod_dir.join("media").join("clothing"))
+            .expect("clothing directory should be created");
+
+        let badges = find_mod_badges(&mod_dir, &["RavenCreek".to_string()]);
+        let _ = fs::remove_dir_all(mod_dir);
+
+        assert_eq!(
+            badges,
+            vec![
+                "map".to_string(),
+                "translation".to_string(),
+                "vehicles".to_string(),
+                "clothing".to_string(),
+                "lua".to_string(),
+            ]
+        );
     }
 }

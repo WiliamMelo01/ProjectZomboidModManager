@@ -100,6 +100,69 @@ pub(crate) fn update_zomboid_server_mods(
 }
 
 #[tauri::command]
+pub(crate) fn install_zomboid_server_map(
+    server_id: String,
+    mod_path: String,
+) -> Result<(), String> {
+    let server_path = zomboid_server_dir()?.join(format!("{server_id}.ini"));
+
+    if !server_path.exists() {
+        return Err(format!(
+            "Arquivo do servidor nao encontrado: {}",
+            server_path.display()
+        ));
+    }
+
+    let map_names = find_mod_map_names(Path::new(&mod_path))?;
+
+    if map_names.is_empty() {
+        return Err("Este mod nao possui mapas em media/maps.".to_string());
+    }
+
+    let content = read_text_lossy(&server_path)?;
+    let current_maps = read_ini_value(&content, "Map")
+        .map(|value| split_mod_ids(&value))
+        .unwrap_or_default();
+    let maps = normalize_server_values(
+        &map_names
+            .into_iter()
+            .chain(current_maps)
+            .collect::<Vec<_>>(),
+    );
+    let updated_content = replace_or_append_ini_value(&content, "Map", &maps.join(";"));
+
+    fs::write(&server_path, updated_content)
+        .map_err(|error| format!("Nao foi possivel salvar {}: {error}", server_path.display()))
+}
+
+fn find_mod_map_names(mod_path: &Path) -> Result<Vec<String>, String> {
+    let maps_dir = mod_path.join("media").join("maps");
+
+    if !maps_dir.exists() || !maps_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let entries = fs::read_dir(&maps_dir)
+        .map_err(|error| format!("Nao foi possivel ler {}: {error}", maps_dir.display()))?;
+    let mut map_names = Vec::new();
+
+    for entry in entries {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+
+        if !path.is_dir() || !path.join("map.info").is_file() {
+            continue;
+        }
+
+        if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+            map_names.push(name.to_string());
+        }
+    }
+
+    Ok(normalize_server_values(&map_names))
+}
+
+#[tauri::command]
 pub(crate) async fn create_zomboid_server(
     app: tauri::AppHandle,
     name: String,
@@ -210,4 +273,31 @@ fn sanitize_server_id(value: &str) -> String {
         .collect::<String>()
         .trim_matches('_')
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn finds_only_map_folders_with_map_info() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let mod_dir = std::env::temp_dir().join(format!("pzmm-map-test-{timestamp}"));
+        let valid_map_dir = mod_dir.join("media").join("maps").join("BedfordFalls");
+        let ignored_map_dir = mod_dir.join("media").join("maps").join("IncompleteMap");
+
+        fs::create_dir_all(&valid_map_dir).expect("valid map directory should be created");
+        fs::create_dir_all(&ignored_map_dir).expect("ignored map directory should be created");
+        fs::write(valid_map_dir.join("map.info"), "title=Bedford Falls")
+            .expect("map.info should be created");
+
+        let map_names = find_mod_map_names(&mod_dir).expect("map folders should be read");
+        let _ = fs::remove_dir_all(mod_dir);
+
+        assert_eq!(map_names, vec!["BedfordFalls".to_string()]);
+    }
 }

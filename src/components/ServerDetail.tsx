@@ -73,6 +73,7 @@ export function ServerDetail({
   const [portConflictCheck, setPortConflictCheck] = useState<ServerPortCheck | null>(null)
   const [isCheckingPorts, setIsCheckingPorts] = useState(false)
   const [isKillingPorts, setIsKillingPorts] = useState(false)
+  const [mapInstallError, setMapInstallError] = useState<string | null>(null)
 
   const [isActivatedExpanded, setIsActivatedExpanded] = useState(true)
   const [isAvailableExpanded, setIsAvailableExpanded] = useState(true)
@@ -200,6 +201,35 @@ export function ServerDetail({
 
     await onActivateMods([...pendingActivation.dependenciesToActivate, pendingActivation.mod])
     setPendingActivation(null)
+  }
+
+  const handleInstallMapClick = async (mod: ZomboidMod) => {
+    const dependencyPlan = buildActivationDependencyPlan(mod, safeMods, activatedModIds)
+
+    if (dependencyPlan.missingDependencyId) {
+      setMissingDependency({ mod, dependencyId: dependencyPlan.missingDependencyId })
+      return
+    }
+
+    setMapInstallError(null)
+
+    try {
+      const modsToInstall = !isLocalMod(mod)
+        ? [...dependencyPlan.dependenciesToInstall, mod]
+        : dependencyPlan.dependenciesToInstall
+
+      if (modsToInstall.length > 0) {
+        await onInstallMods(modsToInstall)
+      }
+
+      await invokeTauri("install_zomboid_server_map", {
+        serverId: server.id,
+        modPath: mod.path,
+      })
+      await onActivateMods([...dependencyPlan.dependenciesToActivate, mod])
+    } catch (error) {
+      setMapInstallError(getErrorMessage(error))
+    }
   }
 
   const testServer = async (skipPortCheck = false) => {
@@ -332,6 +362,11 @@ export function ServerDetail({
 
       {/* Lists */}
       <div className="flex flex-col gap-6 pb-10">
+        {mapInstallError && (
+          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-5 py-4 text-sm text-red-300">
+            {mapInstallError}
+          </div>
+        )}
 
         <ServerModList
           title="Mods Ativados"
@@ -352,6 +387,7 @@ export function ServerDetail({
           action="activate"
           onToggleExpanded={() => setIsAvailableExpanded(!isAvailableExpanded)}
           onAction={handleActivateClick}
+          onInstallMap={(mod) => void handleInstallMapClick(mod)}
         />
       </div>
 

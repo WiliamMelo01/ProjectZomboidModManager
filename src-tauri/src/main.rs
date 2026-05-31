@@ -26,7 +26,10 @@ use server_test::{
     check_zomboid_server_ports, kill_processes_by_pid, start_zomboid_server_test,
     test_zomboid_server,
 };
-use servers::{create_zomboid_server, list_zomboid_servers, update_zomboid_server_mods};
+use servers::{
+    create_zomboid_server, install_zomboid_server_map, list_zomboid_servers,
+    update_zomboid_server_mods,
+};
 use settings::{
     add_mod_location, detect_steamcmd_path, get_app_settings, get_mod_locations, push_mod_location,
     save_app_settings, select_mod_folder, select_steamcmd_path,
@@ -459,6 +462,7 @@ fn main() {
             kill_processes_by_pid,
             create_zomboid_server,
             update_zomboid_server_mods,
+            install_zomboid_server_map,
             list_zomboid_mods,
             count_zomboid_mods,
             install_zomboid_mod,

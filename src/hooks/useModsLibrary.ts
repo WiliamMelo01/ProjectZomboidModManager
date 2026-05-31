@@ -1,48 +1,19 @@
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
 
 import { getErrorMessage } from "@/lib/errors"
-import {
-  hydrateModsLibraryImages,
-  readModsLibraryCache,
-  writeModsLibraryCache,
-  writeModsLibraryImagesCache,
-} from "@/lib/modsCache"
+import { readModsLibraryCache, writeModsLibraryCache } from "@/lib/modsCache"
 import { invokeTauri } from "@/lib/tauri"
 import type { ZomboidMod } from "@/types/mod"
 
 export function useModsLibrary() {
   const [cachedMods] = useState(readModsLibraryCache)
-  const [mods, setMods] = useState<ZomboidMod[]>(cachedMods ?? [])
-  const [modsCount, setModsCount] = useState(cachedMods?.length ?? 0)
+  const [mods, setMods] = useState<ZomboidMod[]>(cachedMods?.mods ?? [])
+  const [modsCount, setModsCount] = useState(cachedMods?.totalModsCount ?? 0)
   const [modsError, setModsError] = useState<string | null>(null)
   const [isLoadingMods, setIsLoadingMods] = useState(false)
   const [isInstallingAllMods, setIsInstallingAllMods] = useState(false)
   const [hasLoadedMods, setHasLoadedMods] = useState(cachedMods !== null)
   const modsLoadPromiseRef = useRef<Promise<ZomboidMod[]> | null>(null)
-
-  useEffect(() => {
-    if (hasLoadedMods) {
-      writeModsLibraryCache(mods)
-    }
-  }, [hasLoadedMods, mods])
-
-  useEffect(() => {
-    if (!cachedMods) {
-      return
-    }
-
-    void hydrateModsLibraryImages(cachedMods).then((hydratedMods) => {
-      const cachedImages = new Map(
-        hydratedMods.filter((mod) => mod.imageUrl).map((mod) => [mod.path, mod.imageUrl]),
-      )
-
-      if (cachedImages.size > 0) {
-        setMods((currentMods) =>
-          currentMods.map((mod) => mod.imageUrl ? mod : { ...mod, imageUrl: cachedImages.get(mod.path) }),
-        )
-      }
-    })
-  }, [cachedMods])
 
   async function loadMods() {
     if (modsLoadPromiseRef.current) {
@@ -58,7 +29,7 @@ export function useModsLibrary() {
         setMods(foundMods)
         setModsCount(foundMods.length)
         setHasLoadedMods(true)
-        void writeModsLibraryImagesCache(foundMods)
+        writeModsLibraryCache(foundMods)
         return foundMods
       } catch (error) {
         setModsError(getErrorMessage(error))
@@ -94,13 +65,16 @@ export function useModsLibrary() {
       }
       const installedModIds = new Set(modsToMove.map((mod) => mod.id.toLowerCase()))
 
-      setMods((currentMods) =>
-        currentMods.map((mod) =>
+      setMods((currentMods) => {
+        const updatedMods = currentMods.map((mod) =>
           installedModIds.has(mod.id.toLowerCase())
             ? { ...mod, isInstalled: true, source: mod.source === "steam" ? "local" : mod.source }
             : mod,
-        ),
-      )
+        )
+
+        writeModsLibraryCache(updatedMods)
+        return updatedMods
+      })
     } catch (error) {
       setModsError(getErrorMessage(error))
       throw error

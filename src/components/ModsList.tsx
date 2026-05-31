@@ -1,5 +1,5 @@
-import { AlertCircle, CheckCircle2, Download, Info, RefreshCw, Search, X } from "lucide-react"
-import { useState } from "react"
+import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Download, Info, RefreshCw, Search, X } from "lucide-react"
+import { useEffect, useState } from "react"
 
 import { MissingDependencyModal } from "@/components/MissingDependencyModal"
 import { ModCard } from "@/components/mods/ModCard"
@@ -19,6 +19,8 @@ type ModsListProps = {
   onSearchChange: (value: string) => void
 }
 
+const MODS_PER_PAGE = 30
+
 export function ModsList({
   mods,
   isLoading,
@@ -32,6 +34,7 @@ export function ModsList({
   onSearchChange,
 }: ModsListProps) {
   const [filterStatus, setFilterStatus] = useState<"all" | "local" | "steam">("all")
+  const [currentPage, setCurrentPage] = useState(1)
   const [pendingInstall, setPendingInstall] = useState<{ mod: ZomboidMod; dependencies: ZomboidMod[] } | null>(null)
   const [missingDependency, setMissingDependency] = useState<{ mod: ZomboidMod; dependencyId: string } | null>(null)
   const steamCount = mods.filter((mod) => !isLocalMod(mod)).length
@@ -54,6 +57,16 @@ export function ModsList({
 
     return matchesSearch && matchesFilter
   })
+  const totalPages = Math.max(1, Math.ceil(filteredMods.length / MODS_PER_PAGE))
+  const paginatedMods = filteredMods.slice((currentPage - 1) * MODS_PER_PAGE, currentPage * MODS_PER_PAGE)
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [filterStatus, searchQuery])
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(page, totalPages))
+  }, [totalPages])
 
   const handleInstallClick = async (mod: ZomboidMod) => {
     const dependencyPlan = buildInstallDependencyPlan(mod, mods)
@@ -166,7 +179,7 @@ export function ModsList({
 
       <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 pb-8">
-          {filteredMods.map((mod) => (
+          {paginatedMods.map((mod) => (
             <ModCard
               key={`${mod.source}:${mod.workshopId}:${mod.id}:${mod.path}`}
               mod={mod}
@@ -183,6 +196,31 @@ export function ModsList({
           )}
         </div>
       </div>
+
+      {filteredMods.length > MODS_PER_PAGE && (
+        <div className="flex items-center justify-center gap-4 border-t border-white/5 pt-4">
+          <button
+            disabled={currentPage === 1}
+            onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+            className="flex items-center gap-2 rounded-xl border border-white/5 bg-[#2b3238] px-4 py-2 text-sm font-bold text-gray-300 transition-colors hover:border-orange-400/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <ChevronLeft size={16} />
+            Anterior
+          </button>
+          <span className="text-sm text-gray-400">
+            Pagina <span className="font-bold text-white">{currentPage}</span> de{" "}
+            <span className="font-bold text-white">{totalPages}</span>
+          </span>
+          <button
+            disabled={currentPage === totalPages}
+            onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+            className="flex items-center gap-2 rounded-xl border border-white/5 bg-[#2b3238] px-4 py-2 text-sm font-bold text-gray-300 transition-colors hover:border-orange-400/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Proxima
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      )}
 
       {/* Dependency Modal (Found in Library) */}
       {pendingInstall && (

@@ -108,10 +108,17 @@ pub(super) fn add_mod_from_info(
 
 fn find_mod_badges(mod_dir: &Path, map_names: &[String]) -> Vec<String> {
     let media_dir = mod_dir.join("media");
-    let mut badges = Vec::new();
 
     if !map_names.is_empty() {
-        badges.push("map".to_string());
+        return vec!["map".to_string()];
+    }
+
+    if media_dir.join("scripts").join("vehicles").is_dir() {
+        return vec!["vehicles".to_string()];
+    }
+
+    if media_dir.join("clothing").is_dir() {
+        return vec!["clothing".to_string()];
     }
 
     if media_dir
@@ -120,22 +127,14 @@ fn find_mod_badges(mod_dir: &Path, map_names: &[String]) -> Vec<String> {
         .join("Translate")
         .is_dir()
     {
-        badges.push("translation".to_string());
-    }
-
-    if media_dir.join("scripts").join("vehicles").is_dir() {
-        badges.push("vehicles".to_string());
-    }
-
-    if media_dir.join("clothing").is_dir() {
-        badges.push("clothing".to_string());
+        return vec!["translation".to_string()];
     }
 
     if media_dir.join("lua").is_dir() {
-        badges.push("lua".to_string());
+        return vec!["lua".to_string()];
     }
 
-    badges
+    Vec::new()
 }
 
 fn find_mod_map_names(mod_dir: &Path) -> Vec<String> {
@@ -234,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn identifies_structural_mod_badges() {
+    fn prioritizes_map_badge_over_auxiliary_content() {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -257,15 +256,33 @@ mod tests {
         let badges = find_mod_badges(&mod_dir, &["RavenCreek".to_string()]);
         let _ = fs::remove_dir_all(mod_dir);
 
-        assert_eq!(
-            badges,
-            vec![
-                "map".to_string(),
-                "translation".to_string(),
-                "vehicles".to_string(),
-                "clothing".to_string(),
-                "lua".to_string(),
-            ]
-        );
+        assert_eq!(badges, vec!["map".to_string()]);
+    }
+
+    #[test]
+    fn prioritizes_vehicle_badge_over_auxiliary_content() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let mod_dir = std::env::temp_dir().join(format!("pzmm-vehicle-badge-test-{timestamp}"));
+
+        fs::create_dir_all(
+            mod_dir
+                .join("media")
+                .join("lua")
+                .join("shared")
+                .join("Translate"),
+        )
+        .expect("translation directory should be created");
+        fs::create_dir_all(mod_dir.join("media").join("scripts").join("vehicles"))
+            .expect("vehicles directory should be created");
+        fs::create_dir_all(mod_dir.join("media").join("clothing"))
+            .expect("clothing directory should be created");
+
+        let badges = find_mod_badges(&mod_dir, &[]);
+        let _ = fs::remove_dir_all(mod_dir);
+
+        assert_eq!(badges, vec!["vehicles".to_string()]);
     }
 }

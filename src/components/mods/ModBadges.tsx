@@ -8,15 +8,15 @@ const BADGES = {
   lua: { label: "Lua", icon: Terminal, className: "border-purple-400/20 bg-purple-400/10 text-purple-300" },
 } as const
 
+const BADGE_PRIORITY = ["map", "vehicles", "clothing", "translation", "lua"] as const
+
 type ModBadgesProps = {
   badges?: string[]
 }
 
 export function ModBadges({ badges = [] }: ModBadgesProps) {
-  const knownBadges = badges.flatMap((badge) => {
-    const config = BADGES[badge as keyof typeof BADGES]
-    return config ? [config] : []
-  })
+  const primaryBadge = BADGE_PRIORITY.find((badge) => badges.includes(badge))
+  const knownBadges = primaryBadge ? [BADGES[primaryBadge]] : []
 
   if (knownBadges.length === 0) {
     return null

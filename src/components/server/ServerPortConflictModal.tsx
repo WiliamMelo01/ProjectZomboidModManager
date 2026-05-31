@@ -15,11 +15,14 @@ type PortUsage = {
 type ServerPortConflictModalProps = {
   check: ServerPortCheck
   isKilling: boolean
+  operation?: "test" | "start"
   onCancel: () => void
   onConfirm: () => void
 }
 
-export function ServerPortConflictModal({ check, isKilling, onCancel, onConfirm }: ServerPortConflictModalProps) {
+export function ServerPortConflictModal({ check, isKilling, operation = "test", onCancel, onConfirm }: ServerPortConflictModalProps) {
+  const operationLabel = operation === "start" ? "iniciar" : "testar"
+
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md animate-in fade-in duration-300">
       <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-orange-500/20 bg-[#22272b] shadow-2xl animate-in zoom-in-95 duration-300">
@@ -29,7 +32,7 @@ export function ServerPortConflictModal({ check, isKilling, onCancel, onConfirm 
             <div>
               <h3 className="text-xl font-black text-white">Portas em uso</h3>
               <p className="mt-1 text-sm text-gray-400">
-                O teste precisa das portas {check.ports.join(", ")}. Encerre os processos abaixo antes de iniciar.
+                Para {operationLabel} o servidor, as portas {check.ports.join(", ")} precisam estar livres. Encerre os processos abaixo antes de continuar.
               </p>
             </div>
           </div>
@@ -68,7 +71,7 @@ export function ServerPortConflictModal({ check, isKilling, onCancel, onConfirm 
             className="flex items-center justify-center gap-2 rounded-xl bg-red-500 px-5 py-3 text-sm font-black text-white transition-colors hover:bg-red-600 disabled:opacity-60"
           >
             {isKilling ? <RefreshCw size={18} className="animate-spin" /> : <XCircle size={18} />}
-            Encerrar processos e testar
+            Encerrar processos e {operationLabel}
           </button>
         </div>
       </div>

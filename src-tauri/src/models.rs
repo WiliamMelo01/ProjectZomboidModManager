@@ -111,6 +111,13 @@ pub(crate) struct ServerTestStarted {
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct ZomboidServerStarted {
+    pub(crate) server_id: String,
+    pub(crate) pid: u32,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct PortUsage {
     pub(crate) port: u16,
     pub(crate) protocol: String,

@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub(super) fn resolve_zomboid_game_dir() -> Result<Option<PathBuf>, String> {
+pub(crate) fn resolve_zomboid_game_dir() -> Result<Option<PathBuf>, String> {
     if let Some(game_executable_path) = read_config_value("game_executable_path")? {
         let executable = PathBuf::from(game_executable_path);
 
@@ -25,7 +25,7 @@ pub(super) fn resolve_zomboid_game_dir() -> Result<Option<PathBuf>, String> {
         .find(|path| path.exists() && path.is_dir()))
 }
 
-pub(super) fn validate_server_mod_dependencies(
+pub(crate) fn validate_server_mod_dependencies(
     server_id: &str,
     server_path: &Path,
 ) -> Result<Option<ServerTestResult>, String> {

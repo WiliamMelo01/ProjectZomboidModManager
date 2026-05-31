@@ -11,6 +11,7 @@ mod process;
 mod runner;
 
 use ports::check_zomboid_server_ports_impl;
+pub(crate) use preflight::{resolve_zomboid_game_dir, validate_server_mod_dependencies};
 use process::kill_processes_by_pid_impl;
 pub(crate) use process::{kill_process_tree, spawn_output_reader};
 use runner::{test_zomboid_server_impl, test_zomboid_server_impl_with_line_callback};

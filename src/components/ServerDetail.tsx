@@ -1,4 +1,4 @@
-import { ArrowLeft, Play, RefreshCw, Search, Server } from "lucide-react"
+import { ArrowLeft, CircleCheck, CircleX, Play, Power, RefreshCw, Search, Server } from "lucide-react"
 import { useState } from "react"
 
 import { MissingDependencyModal } from "@/components/MissingDependencyModal"
@@ -71,7 +71,10 @@ export function ServerDetail({
   const [showMoveWarning, setShowMoveWarning] = useState<MoveModRequest | null>(null)
   const [dontShowAgainMove, setDontShowAgainMove] = useState(false)
   const [isTestingServer, setIsTestingServer] = useState(false)
+  const [isStartingServer, setIsStartingServer] = useState(false)
+  const [serverStartStatus, setServerStartStatus] = useState<{ type: "success" | "error"; message: string } | null>(null)
   const [portConflictCheck, setPortConflictCheck] = useState<ServerPortCheck | null>(null)
+  const [pendingPortAction, setPendingPortAction] = useState<"test" | "start">("test")
   const [isCheckingPorts, setIsCheckingPorts] = useState(false)
   const [isKillingPorts, setIsKillingPorts] = useState(false)
   const [mapInstallError, setMapInstallError] = useState<string | null>(null)
@@ -250,6 +253,7 @@ export function ServerDetail({
         })
 
         if (check.usages.length > 0) {
+          setPendingPortAction("test")
           setPortConflictCheck(check)
           return
         }
@@ -275,7 +279,47 @@ export function ServerDetail({
     }
   }
 
-  const killPortConflictsAndTest = async () => {
+  const startServer = async (skipPortCheck = false) => {
+    if (!skipPortCheck) {
+      setIsCheckingPorts(true)
+
+      try {
+        const check = await invokeTauri<ServerPortCheck>("check_zomboid_server_ports", {
+          serverId: server.id,
+        })
+
+        if (check.usages.length > 0) {
+          setPendingPortAction("start")
+          setPortConflictCheck(check)
+          return
+        }
+      } catch (error) {
+        setServerStartStatus({ type: "error", message: getErrorMessage(error) })
+        return
+      } finally {
+        setIsCheckingPorts(false)
+      }
+    }
+
+    setIsStartingServer(true)
+    setServerStartStatus(null)
+
+    try {
+      await invokeTauri("start_zomboid_server", {
+        serverId: server.id,
+      })
+      setServerStartStatus({
+        type: "success",
+        message: "Servidor iniciado em um novo console. A inicializacao pode levar alguns instantes.",
+      })
+    } catch (error) {
+      setServerStartStatus({ type: "error", message: getErrorMessage(error) })
+    } finally {
+      setIsStartingServer(false)
+    }
+  }
+
+  const killPortConflictsAndContinue = async () => {
     if (!portConflictCheck) {
       return
     }
@@ -287,9 +331,17 @@ export function ServerDetail({
         pids: Array.from(new Set(portConflictCheck.usages.map((usage) => usage.pid))),
       })
       setPortConflictCheck(null)
-      await testServer(true)
+      if (pendingPortAction === "start") {
+        await startServer(true)
+      } else {
+        await testServer(true)
+      }
     } catch (error) {
-      window.dispatchEvent(new CustomEvent("pzmm-open-server-test-panel", { detail: { serverId: server.id, error: getErrorMessage(error) } }))
+      if (pendingPortAction === "start") {
+        setServerStartStatus({ type: "error", message: getErrorMessage(error) })
+      } else {
+        window.dispatchEvent(new CustomEvent("pzmm-open-server-test-panel", { detail: { serverId: server.id, error: getErrorMessage(error) } }))
+      }
     } finally {
       setIsKillingPorts(false)
     }
@@ -332,8 +384,16 @@ export function ServerDetail({
 
           <div className="flex flex-wrap gap-3 relative z-10">
              <button
+                onClick={() => void startServer()}
+                disabled={isStartingServer || isCheckingPorts || isCurrentServerTesting}
+                className="flex items-center gap-2 rounded-xl border border-green-500/20 bg-green-500/10 px-4 py-2 text-sm font-black text-green-400 transition-all hover:bg-green-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+             >
+                {isStartingServer ? <RefreshCw size={18} className="animate-spin" /> : <Power size={18} />}
+                <span>{isStartingServer ? "Iniciando" : "Iniciar servidor"}</span>
+             </button>
+             <button
                 onClick={() => void testServer()}
-                disabled={isCurrentServerTesting || isCheckingPorts}
+                disabled={isCurrentServerTesting || isCheckingPorts || isStartingServer}
                 className="flex items-center gap-2 rounded-xl border border-orange-500/20 bg-orange-500/10 px-4 py-2 text-sm font-black text-orange-400 transition-all hover:bg-orange-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
              >
                 {isCurrentServerTesting || isCheckingPorts ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
@@ -368,6 +428,19 @@ export function ServerDetail({
         {mapInstallError && (
           <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-5 py-4 text-sm text-red-300">
             {mapInstallError}
+          </div>
+        )}
+
+        {serverStartStatus && (
+          <div className={`flex items-center gap-3 rounded-2xl border px-5 py-4 text-sm ${
+            serverStartStatus.type === "success"
+              ? "border-green-500/20 bg-green-500/10 text-green-300"
+              : "border-red-500/20 bg-red-500/10 text-red-300"
+          }`}>
+            {serverStartStatus.type === "success"
+              ? <CircleCheck size={18} className="shrink-0" />
+              : <CircleX size={18} className="shrink-0" />}
+            {serverStartStatus.message}
           </div>
         )}
 
@@ -409,8 +482,9 @@ export function ServerDetail({
         <ServerPortConflictModal
           check={portConflictCheck}
           isKilling={isKillingPorts}
+          operation={pendingPortAction}
           onCancel={() => setPortConflictCheck(null)}
-          onConfirm={() => void killPortConflictsAndTest()}
+          onConfirm={() => void killPortConflictsAndContinue()}
         />
       )}
 

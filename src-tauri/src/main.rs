@@ -11,6 +11,7 @@ use tauri::{path::BaseDirectory, Manager};
 mod game;
 mod models;
 mod mods;
+mod server_launch;
 mod server_test;
 mod servers;
 mod settings;
@@ -22,6 +23,7 @@ use game::{
 };
 use models::*;
 use mods::{count_zomboid_mods, install_zomboid_mod, list_zomboid_mods};
+use server_launch::start_zomboid_server;
 use server_test::{
     check_zomboid_server_ports, kill_processes_by_pid, start_zomboid_server_test,
     test_zomboid_server,
@@ -456,6 +458,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             list_zomboid_servers,
+            start_zomboid_server,
             test_zomboid_server,
             start_zomboid_server_test,
             check_zomboid_server_ports,

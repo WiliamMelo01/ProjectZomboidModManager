@@ -8,6 +8,7 @@ use super::process::{kill_process_tree, spawn_output_reader};
 use crate::i18n::text;
 use crate::models::{ServerTestResult, BUILD_42};
 use crate::servers::read_zomboid_server_build;
+use crate::util::hide_command_window;
 use crate::zomboid_server_dir;
 use std::{
     fs,
@@ -119,7 +120,8 @@ where
     let test_bat_path = create_server_test_batch(&game_dir, &bat_path, server_id)?;
     command = format!("cmd.exe /C call \"{}\"", test_bat_path.display());
     let started_at = Instant::now();
-    let mut child = Command::new("cmd.exe")
+    let mut command_process = Command::new("cmd.exe");
+    let mut child = hide_command_window(&mut command_process)
         .arg("/C")
         .arg("call")
         .arg(&test_bat_path)
@@ -179,7 +181,7 @@ where
             break;
         }
 
-        thread::sleep(Duration::from_millis(200));
+        thread::sleep(Duration::from_millis(50));
     }
 
     while let Ok(line) = receiver.try_recv() {

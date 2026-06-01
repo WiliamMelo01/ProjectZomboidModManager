@@ -28,10 +28,21 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [timeoutSeconds, setTimeoutSeconds] = useState(180)
   const onNotificationRef = useRef(onNotification)
+  const serverIdRef = useRef(serverId)
+  const tRef = useRef(t)
+  const logEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     onNotificationRef.current = onNotification
   }, [onNotification])
+
+  useEffect(() => {
+    serverIdRef.current = serverId
+  }, [serverId])
+
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
 
   useEffect(() => {
     let unlisten: (() => void) | null = null
@@ -41,6 +52,7 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
       const payload = event.payload
 
       if (payload.event === "started") {
+        serverIdRef.current = payload.serverId
         setServerId(payload.serverId)
         setIsTesting(true)
         setResult(null)
@@ -55,7 +67,7 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
         return
       }
 
-      if (payload.serverId !== serverId && serverId !== null && payload.event !== "started") {
+      if (payload.serverId !== serverIdRef.current && serverIdRef.current !== null && payload.event !== "started") {
         return
       }
 
@@ -74,7 +86,7 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
         setIsOpen(true)
 
         onNotificationRef.current?.({
-          title: t("serverTest.finishedTitle"),
+          title: tRef.current("serverTest.finishedTitle"),
           message: payload.result.summary,
           tone: payload.result.status === "passed" ? "success" : payload.result.status === "failed" ? "error" : "warning",
           action: { type: "server-test", serverId: payload.serverId },
@@ -83,14 +95,14 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
       }
 
       if (payload.event === "error") {
-        const message = payload.error ?? t("serverTest.fallbackError")
+        const message = payload.error ?? tRef.current("serverTest.fallbackError")
         setServerId(payload.serverId)
         setError(message)
         setIsTesting(false)
         setStartedAt(null)
         setIsOpen(true)
         onNotificationRef.current?.({
-          title: t("serverTest.failedTitle"),
+          title: tRef.current("serverTest.failedTitle"),
           message,
           tone: "error",
           action: { type: "server-test", serverId: payload.serverId },
@@ -108,7 +120,13 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
       isDisposed = true
       unlisten?.()
     }
-  }, [serverId])
+  }, [])
+
+  useEffect(() => {
+    if (isTesting) {
+      logEndRef.current?.scrollIntoView({ block: "end" })
+    }
+  }, [isTesting, logLines])
 
   useEffect(() => {
     if (!isTesting || !startedAt) {
@@ -303,11 +321,14 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
                 </div>
                 <div className="max-h-80 overflow-y-auto whitespace-pre-wrap p-4 font-mono text-xs leading-relaxed custom-scrollbar">
                   {visibleLogs.length ? (
-                    visibleLogs.map((line, index) => (
-                      <div key={`${index}:${line.slice(0, 24)}`} className={getLogLineClassName(line)}>
-                        {line}
-                      </div>
-                    ))
+                    <>
+                      {visibleLogs.map((line, index) => (
+                        <div key={`${index}:${line.slice(0, 24)}`} className={getLogLineClassName(line)}>
+                          {line}
+                        </div>
+                      ))}
+                      <div ref={logEndRef} />
+                    </>
                   ) : (
                     <p className="text-gray-500">{t("serverTest.waitingOutput")}</p>
                   )}

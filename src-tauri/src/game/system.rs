@@ -1,5 +1,6 @@
 use super::performance::validate_game_executable_path;
 use crate::i18n::text;
+use crate::util::hide_command_window;
 #[cfg(not(windows))]
 use std::fs;
 use std::{path::PathBuf, process::Command};
@@ -29,7 +30,8 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
         )
     );
 
-    let output = Command::new("powershell.exe")
+    let mut command = Command::new("powershell.exe");
+    let output = hide_command_window(&mut command)
         .args([
             "-NoProfile",
             "-STA",
@@ -85,7 +87,8 @@ pub(super) fn select_game_executable_impl() -> Result<Option<String>, String> {
 
 #[cfg(windows)]
 pub(super) fn get_system_ram_impl() -> Result<u32, String> {
-    let output = Command::new("powershell.exe")
+    let mut command = Command::new("powershell.exe");
+    let output = hide_command_window(&mut command)
         .args([
             "-NoProfile",
             "-Command",

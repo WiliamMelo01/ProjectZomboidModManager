@@ -1,5 +1,6 @@
 use crate::i18n::text;
 use crate::models::{PortUsage, ServerPortCheck};
+use crate::util::hide_command_window;
 use crate::util::{read_ini_value, read_text_lossy};
 use crate::zomboid_server_dir;
 use std::{collections::HashSet, process::Command};
@@ -35,7 +36,8 @@ fn server_ports_for_id(server_id: &str) -> Result<Vec<u16>, String> {
 }
 
 fn find_port_usages(ports: &[u16]) -> Result<Vec<PortUsage>, String> {
-    let output = Command::new("netstat")
+    let mut command = Command::new("netstat");
+    let output = hide_command_window(&mut command)
         .arg("-ano")
         .output()
         .map_err(|error| {
@@ -115,7 +117,8 @@ fn parse_netstat_port(local_address: &str) -> Option<u16> {
 }
 
 fn process_name_for_pid(pid: u32) -> String {
-    let output = Command::new("tasklist")
+    let mut command = Command::new("tasklist");
+    let output = hide_command_window(&mut command)
         .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
         .output();
     let Ok(output) = output else {

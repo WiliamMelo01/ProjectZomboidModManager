@@ -1,6 +1,7 @@
 use crate::game::{apply_performance_settings, normalize_ram_gb, validate_game_executable_path};
 use crate::i18n::{mod_location_label, text, validate_language_preference, LANGUAGE_AUTO};
 use crate::models::{AppSettings, ModLocation};
+use crate::util::hide_command_window;
 use crate::{
     app_settings_path, ensure_managed_steamcmd, find_steamcmd_path, read_config_value,
     read_configured_steamcmd_path, read_saved_custom_mod_locations, read_saved_mod_locations,
@@ -405,7 +406,8 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
 }}
 "#, text("Select steamcmd.exe", "Selecionar steamcmd.exe"), text("SteamCMD (steamcmd.exe)|steamcmd.exe|Executables (*.exe)|*.exe|All files (*.*)|*.*", "SteamCMD (steamcmd.exe)|steamcmd.exe|Executaveis (*.exe)|*.exe|Todos os arquivos (*.*)|*.*"));
 
-    let output = Command::new("powershell.exe")
+    let mut command = Command::new("powershell.exe");
+    let output = hide_command_window(&mut command)
         .args([
             "-NoProfile",
             "-STA",
@@ -478,7 +480,8 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
         )
     );
 
-    let output = Command::new("powershell.exe")
+    let mut command = Command::new("powershell.exe");
+    let output = hide_command_window(&mut command)
         .args([
             "-NoProfile",
             "-STA",

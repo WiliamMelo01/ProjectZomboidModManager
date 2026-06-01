@@ -1,4 +1,5 @@
 use crate::i18n::text;
+use crate::util::hide_command_window;
 use std::{
     collections::HashSet,
     io::{BufRead, BufReader},
@@ -28,7 +29,9 @@ pub(crate) fn spawn_output_reader<R>(
 }
 
 pub(crate) fn kill_process_tree(pid: u32) -> Result<(), String> {
-    Command::new("taskkill")
+    let mut command = Command::new("taskkill");
+
+    hide_command_window(&mut command)
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())

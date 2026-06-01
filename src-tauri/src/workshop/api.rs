@@ -1,4 +1,5 @@
 use crate::i18n::text;
+use crate::util::hide_command_window;
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
@@ -118,7 +119,8 @@ pub(super) fn fetch_steam_workshop_collection_items(
 }
 
 fn run_powershell_json_request(script: &str, action: &str) -> Result<Value, String> {
-    let output = Command::new("powershell.exe")
+    let mut command = Command::new("powershell.exe");
+    let output = hide_command_window(&mut command)
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .output()
         .map_err(|error| {

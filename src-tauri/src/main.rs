@@ -7,6 +7,7 @@ use std::{
     process::Command,
 };
 use tauri::{path::BaseDirectory, Manager};
+use util::hide_command_window;
 
 rust_i18n::i18n!("locales", fallback = "en");
 
@@ -244,7 +245,8 @@ fn steamcmd_zip_resource_path(app: &tauri::AppHandle) -> Result<PathBuf, String>
 }
 
 fn extract_zip_with_powershell(zip_path: &Path, target_dir: &Path) -> Result<(), String> {
-    let output = Command::new("powershell.exe")
+    let mut command = Command::new("powershell.exe");
+    let output = hide_command_window(&mut command)
         .args([
             "-NoProfile",
             "-ExecutionPolicy",

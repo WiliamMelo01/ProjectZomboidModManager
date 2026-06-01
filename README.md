@@ -1,45 +1,47 @@
+[**English**](README.md) | [Português (Brasil)](README.pt-BR.md)
+
 <div align="center">
 
 # PZ Manager
 
-### Gerencie mods de servidores multiplayer de Project Zomboid sem editar configurações manualmente.
+### Manage Project Zomboid multiplayer server mods without editing configuration files manually.
 
-[![Versão](https://img.shields.io/badge/versão-0.0.1-6d5dfc?style=for-the-badge)](package.json)
-![Plataforma](https://img.shields.io/badge/plataforma-Windows-0078D4?style=for-the-badge&logo=windows)
+[![Version](https://img.shields.io/badge/version-0.0.1-6d5dfc?style=for-the-badge)](package.json)
+![Platform](https://img.shields.io/badge/platform-Windows-0078D4?style=for-the-badge&logo=windows)
 ![Desktop](https://img.shields.io/badge/desktop-Tauri-24C8D8?style=for-the-badge&logo=tauri&logoColor=white)
-![Status](https://img.shields.io/badge/status-em%20desenvolvimento-F59E0B?style=for-the-badge)
+![Status](https://img.shields.io/badge/status-in%20development-F59E0B?style=for-the-badge)
 
 </div>
 
 ---
 
-## Sobre
+## About
 
-O **PZ Manager** é um aplicativo desktop para organizar mods de servidores de **Project Zomboid**. Ele encontra perfis existentes, monta uma biblioteca a partir de mods locais e da Steam Workshop, atualiza arquivos `.ini` e executa um teste de inicialização com logs em tempo real.
+**PZ Manager** is a desktop application for organizing **Project Zomboid** server mods. It finds existing profiles, builds a library from local mods and Steam Workshop items, updates `.ini` files, and runs startup tests with real-time logs.
 
-O aplicativo suporta perfis para **Build 41** e **Build 42**. Cada servidor mantém sua própria build, lista de mods e itens da Workshop.
+The application supports **Build 41** and **Build 42** profiles. Each server keeps its own build, mod list, and Workshop items.
 
-## Funcionalidades
+## Features
 
-| Recurso | O que você pode fazer |
+| Feature | What you can do |
 | --- | --- |
-| **Servidores** | Criar perfis, listar servidores existentes, pesquisar, ocultar perfis e clonar listas entre servidores da mesma build. |
-| **B41 e B42** | Escolher a build por perfil, trocar a versão com confirmação e identificar mods incompatíveis. |
-| **Mods ativos** | Ativar, desativar e reorganizar mods com atualização automática do arquivo `.ini`. |
-| **Dependências** | Detectar dependências ausentes, instalar itens necessários e validar a ordem de carregamento. |
-| **Biblioteca** | Encontrar mods locais, itens da Steam Workshop e mods armazenados em pastas personalizadas. |
-| **Downloads** | Baixar mods individuais ou coleções completas usando SteamCMD com login anônimo. |
-| **Diagnóstico** | Testar a inicialização do servidor, acompanhar logs e identificar conflitos de porta. |
-| **Configurações** | Detectar Project Zomboid e SteamCMD, ajustar RAM, idioma e diretórios monitorados. |
-| **Idiomas** | Usar inglês ou português brasileiro, com detecção automática e troca imediata. |
+| **Servers** | Create profiles, list existing servers, search, hide profiles, and clone lists between servers using the same build. |
+| **B41 and B42** | Choose a build per profile, change versions with confirmation, and identify incompatible mods. |
+| **Active mods** | Enable, disable, and reorder mods with automatic `.ini` updates. |
+| **Dependencies** | Detect missing dependencies, install required items, and validate load order. |
+| **Library** | Find local mods, Steam Workshop items, and mods stored in custom folders. |
+| **Downloads** | Download individual mods or complete collections through SteamCMD with anonymous login. |
+| **Diagnostics** | Test server startup, follow logs, and identify port conflicts. |
+| **Settings** | Detect Project Zomboid and SteamCMD, adjust RAM, language, and monitored directories. |
+| **Languages** | Use English or Brazilian Portuguese with automatic detection and instant switching. |
 
-## Suporte B41 e B42
+## B41 and B42 Support
 
-Perfis antigos sem metadados continuam abrindo como **B41**. Novos perfis permitem escolher entre `B41` e `B42`.
+Existing profiles without metadata continue to open as **B41**. New profiles let you choose between `B41` and `B42`.
 
-Na biblioteca, cada mod recebe badges de compatibilidade. Pacotes híbridos aparecem uma única vez mesmo quando possuem variantes para as duas builds.
+Each library mod receives compatibility badges. Hybrid packages appear only once even when they provide variants for both builds.
 
-O suporte à B42 preserva a estrutura versionada dos pacotes:
+B42 support preserves the versioned package structure:
 
 ```text
 mods/
@@ -51,97 +53,123 @@ mods/
         └── mod.info
 ```
 
-Ao ativar mods:
+When enabling mods:
 
-- Perfis B41 escrevem o Mod ID tradicional em `Mods=`.
-- Perfis B42 escrevem o ID da variante compatível.
-- `WorkshopItems=` mantém Workshop IDs únicos.
-- Mods incompatíveis continuam visíveis para remoção manual.
-- O preflight do teste bloqueia dependências ausentes, ordem inválida e mods incompatíveis.
+- B41 profiles write the traditional Mod ID to `Mods=`.
+- B42 profiles write the compatible variant ID.
+- `WorkshopItems=` keeps unique Workshop IDs.
+- Incompatible mods remain visible for manual removal.
+- The test preflight blocks missing dependencies, invalid order, and incompatible mods.
 
-## Biblioteca e SteamCMD
+## Library and SteamCMD
 
-O aplicativo lê mods instalados em `Zomboid/mods`, bibliotecas Steam e diretórios personalizados.
+The application reads installed mods from `Zomboid/mods`, Steam libraries, and custom directories.
 
-Ao trazer um mod para a pasta local, o pacote completo é copiado. Isso preserva variantes B41, diretórios versionados B42, conteúdo compartilhado em `common` e o marcador `.pzmm-workshop-id`.
+When moving a mod to the local folder, the complete package is copied. This preserves B41 variants, versioned B42 directories, shared `common` content, and the `.pzmm-workshop-id` marker.
 
-Downloads aceitam Workshop ID numérico ou URL:
+Downloads accept a numeric Workshop ID or URL:
 
-- Item individual ou coleção pública.
-- Progresso item a item.
-- Cancelamento durante o download.
-- Nova tentativa somente para itens que falharam.
-- Validação completa opcional para investigar arquivos corrompidos.
-- Atualização automática da biblioteca ao finalizar.
+- Individual item or public collection.
+- Per-item progress.
+- Cancellation during download.
+- Retry only failed items.
+- Optional full validation for investigating corrupted files.
+- Automatic library refresh when finished.
 
-## Teste do servidor
+## Server Test
 
-O diagnóstico executa uma inicialização controlada e exibe os logs em tempo real. Antes de iniciar, o aplicativo:
+Diagnostics run a controlled startup and display logs in real time. Before starting, the application:
 
-1. Valida mods ativos e dependências.
-2. Verifica a ordem de carregamento.
-3. Verifica compatibilidade com B41 ou B42.
-4. Procura conflitos nas portas configuradas.
+1. Validates active mods and dependencies.
+2. Checks load order.
+3. Checks compatibility with B41 or B42.
+4. Searches for conflicts on configured ports.
 
-A B42 possui um timeout maior porque a inicialização pode levar mais tempo.
+B42 has a longer timeout because startup may take more time.
 
-## Internacionalização
+## Internationalization
 
-O idioma pode ser alterado em **Configurações**:
+The language can be changed in **Settings**:
 
-- `Automático`: usa `pt-BR` quando o sistema estiver em qualquer idioma `pt-*`; caso contrário usa inglês.
+- `Automatic`: uses `pt-BR` when the system language matches `pt-*`; otherwise uses English.
 - `English`
 - `Português (Brasil)`
 
-A preferência é salva em `settings.ini` e aplicada imediatamente.
+The preference is saved to `settings.ini` and applied immediately.
 
-| Camada | Implementação |
+| Layer | Implementation |
 | --- | --- |
-| Frontend React | [`i18next`](https://www.i18next.com/) e [`react-i18next`](https://react.i18next.com/) |
-| Backend Rust e menu nativo | [`rust-i18n`](https://docs.rs/rust-i18n/latest/rust_i18n/) |
-| Catálogo frontend | `src/i18n/resources.ts` |
-| Catálogo backend | `src-tauri/locales/app.yml` |
+| React frontend | [`i18next`](https://www.i18next.com/) and [`react-i18next`](https://react.i18next.com/) |
+| Rust backend and native menu | [`rust-i18n`](https://docs.rs/rust-i18n/latest/rust_i18n/) |
+| Frontend catalog | `src/i18n/resources.ts` |
+| Backend catalog | `src-tauri/locales/app.yml` |
 
-## Primeiros passos
+## Getting Started
 
-1. Abra **Configurações** e confira se o SteamCMD foi localizado.
-2. Verifique se o executável do Project Zomboid foi detectado.
-3. Escolha o idioma desejado ou mantenha a detecção automática.
-4. Adicione diretórios personalizados caso mantenha mods fora das pastas padrão.
-5. Atualize a biblioteca.
-6. Crie um servidor selecionando a build e os mods.
-7. Revise dependências e execute um teste de inicialização.
+1. Open **Settings** and confirm that SteamCMD was found.
+2. Check that the Project Zomboid executable was detected.
+3. Choose your preferred language or keep automatic detection.
+4. Add custom directories if you store mods outside the default folders.
+5. Refresh the library.
+6. Create a server and select its build and mods.
+7. Review dependencies and run a startup test.
 
-## Desenvolvimento
+## Interface
 
-### Pré-requisitos
+<p align="center">
+  <a href="docs/images/server.png"><img src="docs/images/server.png" alt="Server list" width="48%"></a>
+  <a href="docs/images/server-detail.png"><img src="docs/images/server-detail.png" alt="Server details" width="48%"></a>
+</p>
 
-- Windows 10 ou 11
-- [Node.js](https://nodejs.org/) com npm
+<p align="center">
+  <a href="docs/images/mods.png"><img src="docs/images/mods.png" alt="Mod library" width="48%"></a>
+  <a href="docs/images/download-mod.png"><img src="docs/images/download-mod.png" alt="Workshop mod download" width="48%"></a>
+</p>
+
+<p align="center">
+  <a href="docs/images/download-collection.png"><img src="docs/images/download-collection.png" alt="Workshop collection download" width="48%"></a>
+  <a href="docs/images/settings.png"><img src="docs/images/settings.png" alt="Mod and SteamCMD settings" width="48%"></a>
+</p>
+
+<p align="center">
+  <a href="docs/images/performance.png"><img src="docs/images/performance.png" alt="Performance settings" width="48%"></a>
+  <a href="docs/images/server-test-success.png"><img src="docs/images/server-test-success.png" alt="Completed server test" width="48%"></a>
+</p>
+
+<p align="center">
+  <a href="docs/images/server-test-error.png"><img src="docs/images/server-test-error.png" alt="Server dependency validation" width="48%"></a>
+</p>
+
+## Development
+
+### Prerequisites
+
+- Windows 10 or 11
+- [Node.js](https://nodejs.org/) with npm
 - [Rust](https://www.rust-lang.org/tools/install)
-- [Dependências do Tauri para Windows](https://v2.tauri.app/start/prerequisites/)
-- Project Zomboid instalado para utilizar todas as funcionalidades
+- [Tauri prerequisites for Windows](https://v2.tauri.app/start/prerequisites/)
+- Project Zomboid installed to use all features
 
-### Executando localmente
+### Running Locally
 
 ```powershell
 npm install
 npm run tauri:dev
 ```
 
-Para trabalhar somente na interface:
+To work only on the interface:
 
 ```powershell
 npm run dev
 ```
 
-Para gerar o build desktop:
+To generate a desktop build:
 
 ```powershell
 npm run tauri:build
 ```
 
-### Validação
+### Validation
 
 ```powershell
 npm run build
@@ -152,35 +180,36 @@ cd ..
 git diff --check
 ```
 
-## Tecnologias
+## Technologies
 
-| Camada | Tecnologias |
+| Layer | Technologies |
 | --- | --- |
-| Interface | React 19, TypeScript e Vite 8 |
-| Estilos | Tailwind CSS 4 |
-| Componentes e ícones | Base UI, shadcn e Lucide React |
-| Aplicativo desktop | Tauri 2 |
-| Backend local | Rust |
-| Downloads da Workshop | SteamCMD |
-| Internacionalização | i18next, react-i18next e rust-i18n |
+| Interface | React 19, TypeScript, and Vite 8 |
+| Styling | Tailwind CSS 4 |
+| Components and icons | Base UI, shadcn, and Lucide React |
+| Desktop application | Tauri 2 |
+| Local backend | Rust |
+| Workshop downloads | SteamCMD |
+| Internationalization | i18next, react-i18next, and rust-i18n |
 
-## Estrutura do projeto
+## Project Structure
 
 ```text
 .
-├── resources/             # Arquivos de exemplo e recursos empacotados
-├── src/                   # Interface React, componentes, tipos e catálogos frontend
+├── resources/             # Example files and bundled resources
+├── src/                   # React interface, components, types, and frontend catalogs
 ├── src-tauri/
-│   ├── locales/           # Catálogos rust-i18n do backend
-│   └── src/               # Backend Rust e comandos Tauri
-├── package.json           # Dependências e scripts do frontend
-└── README.md              # Documentação principal
+│   ├── locales/           # Backend rust-i18n catalogs
+│   └── src/               # Rust backend and Tauri commands
+├── package.json           # Frontend dependencies and scripts
+├── README.pt-BR.md        # Brazilian Portuguese documentation
+└── README.md              # Main English documentation
 ```
 
-## Estado atual
+## Current Status
 
-O projeto está em desenvolvimento ativo e o foco atual é Windows. O status dos servidores listados começa como offline; o diagnóstico detalhado acontece ao executar o teste do servidor.
+The project is under active development and currently focused on Windows. Listed servers initially appear as offline; detailed diagnostics run when you execute the server test.
 
-## Licença
+## License
 
-Este repositório ainda não possui um arquivo de licença. Antes de reutilizar ou redistribuir o código, confirme os termos aplicáveis com o autor do projeto.
+This repository does not have a license file yet. Before reusing or redistributing the code, confirm the applicable terms with the project author.

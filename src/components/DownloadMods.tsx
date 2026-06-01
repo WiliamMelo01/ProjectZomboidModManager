@@ -9,10 +9,11 @@ import {
   Settings,
   ShieldCheck,
   Square,
+  Terminal,
   X,
   XCircle,
 } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { WorkshopDownloadManager } from "@/hooks/useWorkshopDownloadManager"
@@ -47,6 +48,7 @@ export function DownloadMods({ manager, onOpenSettings }: DownloadModsProps) {
   const [isCheckingSettings, setIsCheckingSettings] = useState(true)
   const [isSteamcmdConfigured, setIsSteamcmdConfigured] = useState(false)
   const [resolvedSteamcmdPath, setResolvedSteamcmdPath] = useState<string | null>(null)
+  const logEndRef = useRef<HTMLDivElement>(null)
   const workshopId = useMemo(() => extractWorkshopId(workshopInput), [workshopInput])
   const canDownload = Boolean(workshopId) && isSteamcmdConfigured && !manager.isDownloading && !isCheckingSettings
 
@@ -81,6 +83,10 @@ export function DownloadMods({ manager, onOpenSettings }: DownloadModsProps) {
   useEffect(() => {
     void loadSettings()
   }, [])
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ block: "end" })
+  }, [manager.steamCmdLogLines])
 
   return (
     <div className="h-full overflow-y-auto bg-[#22272b] p-8 text-white custom-scrollbar">
@@ -169,6 +175,21 @@ export function DownloadMods({ manager, onOpenSettings }: DownloadModsProps) {
             </div>
             <div className="max-h-72 space-y-2 overflow-y-auto pr-2 custom-scrollbar">
               {manager.downloadItems.map((item) => <DownloadItemRow key={item.workshopId} item={item} />)}
+            </div>
+          </section>
+        )}
+
+        {manager.steamCmdLogLines.length > 0 && (
+          <section className="mt-6 overflow-hidden rounded-3xl border border-white/5 bg-[#111417]">
+            <div className="flex items-center gap-2 border-b border-white/5 px-5 py-4 text-gray-300">
+              <Terminal size={16} className="text-orange-400" />
+              <h3 className="text-xs font-black uppercase tracking-widest">{t("downloads.steamcmdLog")}</h3>
+            </div>
+            <div className="max-h-72 overflow-y-auto whitespace-pre-wrap p-5 font-mono text-xs leading-relaxed text-gray-400 custom-scrollbar">
+              {manager.steamCmdLogLines.map((line, index) => (
+                <div key={`${index}:${line.slice(0, 24)}`}>{line}</div>
+              ))}
+              <div ref={logEndRef} />
             </div>
           </section>
         )}

@@ -3,6 +3,7 @@ use crate::i18n::text;
 use crate::models::{WorkshopDownloadEvent, WorkshopDownloadFailedItem, WorkshopDownloadResult};
 use crate::mods::normalize_server_values;
 use crate::server_test::{kill_process_tree, spawn_output_reader};
+use crate::util::hide_command_window;
 use crate::{ensure_managed_steamcmd, find_steamcmd_path};
 use std::{
     collections::{HashMap, HashSet},
@@ -193,7 +194,15 @@ fn run_steamcmd_workshop_pass(
         command.current_dir(steamcmd_dir);
     }
 
-    let child_result = command
+    emit_steamcmd_log_line(
+        app,
+        &format!(
+            "[PZMM] {}",
+            text("Starting SteamCMD...", "Iniciando o SteamCMD...")
+        ),
+    );
+
+    let child_result = hide_command_window(&mut command)
         .args(["+runscript", &script_path.display().to_string()])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -223,6 +232,7 @@ fn run_steamcmd_workshop_pass(
 
     loop {
         while let Ok(line) = receiver.try_recv() {
+            emit_steamcmd_log_line(app, &line);
             process_steamcmd_workshop_line(
                 app,
                 &line,
@@ -249,13 +259,14 @@ fn run_steamcmd_workshop_pass(
             break;
         }
 
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(50));
     }
 
     set_active_workshop_download_pid(None);
     let _ = fs::remove_file(&script_path);
 
     while let Ok(line) = receiver.try_recv() {
+        emit_steamcmd_log_line(app, &line);
         process_steamcmd_workshop_line(
             app,
             &line,
@@ -287,6 +298,10 @@ fn run_steamcmd_workshop_pass(
         completed_items,
         failed_items,
     })
+}
+
+fn emit_steamcmd_log_line(app: &tauri::AppHandle, line: &str) {
+    let _ = app.emit("workshop-download-log", line);
 }
 
 fn create_steamcmd_workshop_script(

@@ -41,6 +41,7 @@ export function useWorkshopDownloadManager({
   const [isDownloading, setIsDownloading] = useState(false)
   const [status, setStatus] = useState<WorkshopDownloadStatus | null>(null)
   const [downloadItems, setDownloadItems] = useState<DownloadListItem[]>([])
+  const [steamCmdLogLines, setSteamCmdLogLines] = useState<string[]>([])
   const [result, setResult] = useState<WorkshopDownloadResult | null>(null)
   const [isResultModalOpen, setIsResultModalOpen] = useState(false)
   const [forceValidate, setForceValidate] = useState(false)
@@ -62,6 +63,7 @@ export function useWorkshopDownloadManager({
 
   useEffect(() => {
     let dispose: (() => void) | null = null
+    let disposeLog: (() => void) | null = null
 
     void listen<WorkshopDownloadEvent>("workshop-download-event", ({ payload }) => {
       setDownloadItems((items) => {
@@ -77,7 +79,16 @@ export function useWorkshopDownloadManager({
       dispose = unlisten
     })
 
-    return () => dispose?.()
+    void listen<string>("workshop-download-log", ({ payload }) => {
+      setSteamCmdLogLines((lines) => [...lines, payload].slice(-320))
+    }).then((unlisten) => {
+      disposeLog = unlisten
+    })
+
+    return () => {
+      dispose?.()
+      disposeLog?.()
+    }
   }, [])
 
   const progress = useMemo(() => {
@@ -125,6 +136,7 @@ export function useWorkshopDownloadManager({
     }
 
     setDownloadItems([])
+    setSteamCmdLogLines([])
     setResult(null)
     setIsResultModalOpen(false)
     setIsDownloading(true)
@@ -163,6 +175,7 @@ export function useWorkshopDownloadManager({
     setResult(null)
     setIsResultModalOpen(false)
     setDownloadItems([])
+    setSteamCmdLogLines([])
     setIsDownloading(true)
     setStatus({ type: "info", message: i18n.t("downloads.retrying", { count: workshopIds.length }) })
 
@@ -209,6 +222,7 @@ export function useWorkshopDownloadManager({
     isDownloading,
     status,
     downloadItems,
+    steamCmdLogLines,
     result,
     isResultModalOpen,
     progress,

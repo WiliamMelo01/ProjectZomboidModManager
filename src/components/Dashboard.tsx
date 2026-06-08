@@ -1,4 +1,4 @@
-import { Activity, ChevronRight, Eye, EyeOff, FolderOpen, Plus, RefreshCw, Server, Users, Wifi } from "lucide-react"
+import { Activity, ChevronRight, Eye, EyeOff, FolderOpen, Plus, RefreshCw, Server, Trash2, Users, Wifi } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -12,6 +12,7 @@ type DashboardProps = {
   onCreateServer: () => void
   searchQuery: string
   onServerClick: (server: ZomboidServer) => void
+  onDeleteServer: (server: ZomboidServer) => Promise<void>
 }
 
 const HIDDEN_SERVERS_KEY = "pzmm_hidden_servers"
@@ -23,13 +24,16 @@ export function Dashboard({
   onRefresh,
   onCreateServer,
   searchQuery,
-  onServerClick
+  onServerClick,
+  onDeleteServer,
 }: DashboardProps) {
   const { t } = useTranslation()
   const [hiddenServerIds, setHiddenServerIds] = useState<Set<string>>(new Set())
   const [showHidden, setShowHidden] = useState(false)
   const [filterBuild, setFilterBuild] = useState<"all" | GameBuild>("all")
   const [contextMenu, setContextMenu] = useState<{ server: ZomboidServer; x: number; y: number } | null>(null)
+  const [pendingDeleteServer, setPendingDeleteServer] = useState<ZomboidServer | null>(null)
+  const [isDeletingServer, setIsDeletingServer] = useState(false)
 
   useEffect(() => {
     const stored = window.localStorage.getItem(HIDDEN_SERVERS_KEY)
@@ -40,6 +44,7 @@ export function Dashboard({
         console.error("Failed to parse hidden servers", e)
       }
     }
+
   }, [])
 
   const toggleHideServer = (serverId: string) => {
@@ -57,6 +62,23 @@ export function Dashboard({
   const handleContextMenu = (event: React.MouseEvent, server: ZomboidServer) => {
     event.preventDefault()
     setContextMenu({ server, x: event.clientX, y: event.clientY })
+  }
+
+  const requestDeleteServer = (server: ZomboidServer) => {
+    setPendingDeleteServer(server)
+    setContextMenu(null)
+  }
+
+  const confirmDeleteServer = async () => {
+    if (!pendingDeleteServer) return
+
+    setIsDeletingServer(true)
+    try {
+      await onDeleteServer(pendingDeleteServer)
+      setPendingDeleteServer(null)
+    } finally {
+      setIsDeletingServer(false)
+    }
   }
 
   const normalizedSearch = searchQuery.trim().toLowerCase()
@@ -194,8 +216,91 @@ export function Dashboard({
               </>
             )}
           </button>
+          <button
+            onClick={() => requestDeleteServer(contextMenu.server)}
+            className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200"
+          >
+            <Trash2 size={16} />
+            {t("dashboard.delete")}
+          </button>
         </div>
       )}
+
+      {pendingDeleteServer && (
+        <DeleteServerModal
+          server={pendingDeleteServer}
+          isDeleting={isDeletingServer}
+          onCancel={() => {
+            if (!isDeletingServer) {
+              setPendingDeleteServer(null)
+            }
+          }}
+          onConfirm={() => void confirmDeleteServer()}
+        />
+      )}
+    </div>
+  )
+}
+
+function DeleteServerModal({
+  server,
+  isDeleting,
+  onCancel,
+  onConfirm,
+}: {
+  server: ZomboidServer
+  isDeleting: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const { t } = useTranslation()
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md"
+      onClick={onCancel}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="w-full max-w-md rounded-3xl border border-white/10 bg-[#22272b] p-6 shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start gap-4">
+          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-3 text-red-300">
+            <Trash2 size={24} />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-xl font-black text-white">{t("dashboard.deleteTitle")}</h3>
+            <p className="mt-2 text-sm leading-relaxed text-gray-400">
+              {t("dashboard.deleteBody", { name: server.name })}
+            </p>
+            <p className="mt-3 break-all rounded-xl border border-white/5 bg-[#1e2327] px-3 py-2 font-mono text-xs text-gray-500">
+              {server.fileName}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            disabled={isDeleting}
+            onClick={onCancel}
+            className="rounded-xl border border-white/10 px-4 py-2 text-sm font-bold text-gray-300 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {t("common.cancel")}
+          </button>
+          <button
+            type="button"
+            disabled={isDeleting}
+            onClick={onConfirm}
+            className="flex items-center justify-center gap-2 rounded-xl bg-red-500 px-4 py-2 text-sm font-black text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isDeleting ? <RefreshCw size={16} className="animate-spin" /> : <Trash2 size={16} />}
+            {isDeleting ? t("dashboard.deleting") : t("dashboard.deleteConfirm")}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

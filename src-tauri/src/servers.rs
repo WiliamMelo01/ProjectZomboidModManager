@@ -1,5 +1,5 @@
 use crate::i18n::text;
-use crate::models::{ZomboidServer, BUILD_41, BUILD_42};
+use crate::models::{DeleteServerResult, ZomboidServer, BUILD_41, BUILD_42};
 use crate::mods::{
     normalize_server_values, parse_server_mod_ids, resolve_server_workshop_ids,
     serialize_server_mod_ids,
@@ -11,6 +11,7 @@ use std::{
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
 #[tauri::command]
 pub(crate) async fn list_zomboid_servers() -> Result<Vec<ZomboidServer>, String> {
@@ -86,6 +87,147 @@ pub(crate) fn open_zomboid_server_file(server_id: String) -> Result<(), String> 
     }
 
     open_file_external(&canonical_server_path)
+}
+
+#[tauri::command]
+pub(crate) async fn delete_zomboid_server(server_id: String) -> Result<DeleteServerResult, String> {
+    run_blocking(move || delete_zomboid_server_impl(&server_id)).await
+}
+
+fn delete_zomboid_server_impl(server_id: &str) -> Result<DeleteServerResult, String> {
+    let server_dir = zomboid_server_dir()?;
+    let server_path = server_dir.join(format!("{server_id}.ini"));
+
+    if !server_path.exists() || !server_path.is_file() {
+        return Err(format!(
+            "{}: {}",
+            text(
+                "Server file not found",
+                "Arquivo do servidor nao encontrado"
+            ),
+            server_path.display()
+        ));
+    }
+
+    let files = server_profile_files(&server_dir, server_id)?;
+    if files.is_empty() {
+        return Err(text(
+            "Server file not found",
+            "Arquivo do servidor nao encontrado",
+        )
+        .to_string());
+    }
+
+    let backup_dir = unique_server_backup_dir(server_id)?;
+    fs::create_dir_all(&backup_dir)
+        .map_err(|error| format!("Nao foi possivel criar {}: {error}", backup_dir.display()))?;
+
+    for source in files {
+        let file_name = source.file_name().ok_or_else(|| {
+            text("Invalid server file.", "Arquivo de servidor invalido.").to_string()
+        })?;
+        let target = backup_dir.join(file_name);
+        fs::rename(&source, &target).map_err(|error| {
+            format!(
+                "{} {}: {error}",
+                text("Could not move", "Nao foi possivel mover"),
+                source.display()
+            )
+        })?;
+    }
+
+    remove_zomboid_server_build(server_id)?;
+
+    Ok(DeleteServerResult {
+        backup_path: backup_dir.display().to_string(),
+    })
+}
+
+fn server_profile_files(server_dir: &Path, server_id: &str) -> Result<Vec<PathBuf>, String> {
+    let canonical_server_dir = server_dir.canonicalize().map_err(|error| {
+        format!(
+            "{} {}: {error}",
+            text("Could not access", "Nao foi possivel acessar"),
+            server_dir.display()
+        )
+    })?;
+
+    let entries = fs::read_dir(server_dir).map_err(|error| {
+        format!(
+            "{} {}: {error}",
+            text("Could not read", "Nao foi possivel ler"),
+            server_dir.display()
+        )
+    })?;
+
+    let mut files = Vec::new();
+    let ini_name = format!("{server_id}.ini");
+    let lua_prefix = format!("{server_id}_");
+
+    for entry in entries {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        let is_profile_ini = file_name == ini_name;
+        let is_profile_lua = file_name.starts_with(&lua_prefix)
+            && path.extension().and_then(|extension| extension.to_str()) == Some("lua");
+
+        if !is_profile_ini && !is_profile_lua {
+            continue;
+        }
+
+        let canonical_path = path.canonicalize().map_err(|error| {
+            format!(
+                "{} {}: {error}",
+                text("Could not access", "Nao foi possivel acessar"),
+                path.display()
+            )
+        })?;
+
+        if !canonical_path.starts_with(&canonical_server_dir) || !canonical_path.is_file() {
+            return Err(text("Invalid server file.", "Arquivo de servidor invalido.").to_string());
+        }
+
+        files.push(canonical_path);
+    }
+
+    files.sort();
+    Ok(files)
+}
+
+fn unique_server_backup_dir(server_id: &str) -> Result<PathBuf, String> {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("Falha ao gerar timestamp do backup: {error}"))?
+        .as_secs();
+    let backup_root = app_config_dir()?.join("server-backups");
+    let backup_id = sanitize_server_id(server_id);
+    let backup_id = if backup_id.is_empty() {
+        "server"
+    } else {
+        &backup_id
+    };
+    let base_dir = backup_root.join(format!("{backup_id}-{timestamp}"));
+
+    if !base_dir.exists() {
+        return Ok(base_dir);
+    }
+
+    for suffix in 1..1000 {
+        let candidate = backup_root.join(format!("{backup_id}-{timestamp}-{suffix}"));
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+
+    Err(text(
+        "Could not create a unique backup folder.",
+        "Nao foi possivel criar uma pasta de backup unica.",
+    )
+    .to_string())
 }
 
 fn read_zomboid_server_from_path(path: &Path) -> Result<ZomboidServer, String> {
@@ -433,6 +575,36 @@ fn write_zomboid_server_build(server_id: &str, game_build: &str) -> Result<(), S
         .map_err(|error| format!("Nao foi possivel salvar {}: {error}", path.display()))
 }
 
+fn remove_zomboid_server_build(server_id: &str) -> Result<(), String> {
+    let path = server_builds_path()?;
+    if !path.is_file() {
+        return Ok(());
+    }
+
+    let mut builds = read_server_builds()?;
+    if builds.remove(server_id).is_none() {
+        return Ok(());
+    }
+
+    let mut entries = builds.into_iter().collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.0.to_lowercase().cmp(&right.0.to_lowercase()));
+    let content = entries
+        .into_iter()
+        .map(|(id, build)| format!("{id}={build}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    fs::write(
+        &path,
+        if content.is_empty() {
+            String::new()
+        } else {
+            format!("{content}\n")
+        },
+    )
+    .map_err(|error| format!("Nao foi possivel salvar {}: {error}", path.display()))
+}
+
 fn server_display_name(file_stem: &str, public_name: Option<String>) -> String {
     if let Some(public_name) = public_name.map(|value| value.trim().to_string()) {
         if !public_name.is_empty() && !public_name.eq_ignore_ascii_case("My PZ Server") {
@@ -469,7 +641,29 @@ fn sanitize_server_id(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{
+        env,
+        sync::{Mutex, OnceLock},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn unique_temp_dir(name: &str) -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        env::temp_dir().join(format!("{name}-{timestamp}"))
+    }
+
+    fn configure_test_env(root: &Path) {
+        env::set_var("LOCALAPPDATA", root.join("localappdata"));
+        env::set_var("USERPROFILE", root.join("profile"));
+    }
 
     #[test]
     fn finds_only_map_folders_with_map_info() {
@@ -494,9 +688,82 @@ mod tests {
 
     #[test]
     fn defaults_profiles_without_metadata_to_b41() {
+        let _guard = env_lock()
+            .lock()
+            .expect("test env lock should be available");
+        let root = unique_temp_dir("pzmm-build-default-test");
+        configure_test_env(&root);
+
         assert_eq!(
             read_zomboid_server_build("pzmm-profile-without-metadata-test").unwrap(),
             BUILD_41
         );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn delete_server_moves_profile_files_to_backup_and_removes_build_metadata() {
+        let _guard = env_lock()
+            .lock()
+            .expect("test env lock should be available");
+        let root = unique_temp_dir("pzmm-delete-server-test");
+        configure_test_env(&root);
+        let server_dir = zomboid_server_dir().expect("server dir should resolve");
+        fs::create_dir_all(&server_dir).expect("server dir should be created");
+
+        fs::write(server_dir.join("MyServer.ini"), "PublicName=My Server")
+            .expect("server ini should be written");
+        fs::write(
+            server_dir.join("MyServer_SandboxVars.lua"),
+            "SandboxVars = {}",
+        )
+        .expect("sandbox file should be written");
+        fs::write(server_dir.join("MyServer_spawnregions.lua"), "return {}")
+            .expect("spawnregions file should be written");
+        fs::write(server_dir.join("MyServer_spawnpoints.lua"), "return {}")
+            .expect("spawnpoints file should be written");
+        fs::write(server_dir.join("MyServer_notes.txt"), "keep")
+            .expect("unrelated extension should be written");
+        fs::write(server_dir.join("OtherServer.ini"), "PublicName=Other")
+            .expect("other server should be written");
+        write_zomboid_server_build("MyServer", BUILD_42).expect("build metadata should be saved");
+
+        let result = delete_zomboid_server_impl("MyServer").expect("server should be moved");
+        let backup_dir = PathBuf::from(result.backup_path);
+
+        assert!(!server_dir.join("MyServer.ini").exists());
+        assert!(!server_dir.join("MyServer_SandboxVars.lua").exists());
+        assert!(!server_dir.join("MyServer_spawnregions.lua").exists());
+        assert!(!server_dir.join("MyServer_spawnpoints.lua").exists());
+        assert!(server_dir.join("MyServer_notes.txt").exists());
+        assert!(server_dir.join("OtherServer.ini").exists());
+        assert!(backup_dir.join("MyServer.ini").exists());
+        assert!(backup_dir.join("MyServer_SandboxVars.lua").exists());
+        assert!(backup_dir.join("MyServer_spawnregions.lua").exists());
+        assert!(backup_dir.join("MyServer_spawnpoints.lua").exists());
+        assert!(!read_server_builds()
+            .expect("build metadata should be readable")
+            .contains_key("MyServer"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn delete_server_fails_when_ini_is_missing() {
+        let _guard = env_lock()
+            .lock()
+            .expect("test env lock should be available");
+        let root = unique_temp_dir("pzmm-delete-missing-server-test");
+        configure_test_env(&root);
+        fs::create_dir_all(zomboid_server_dir().expect("server dir should resolve"))
+            .expect("server dir should be created");
+
+        let error =
+            delete_zomboid_server_impl("MissingServer").expect_err("missing server should fail");
+
+        assert!(error.contains("Server file not found") || error.contains("Arquivo do servidor"));
+
+        let _ = fs::remove_dir_all(root);
     }
 }

@@ -35,7 +35,7 @@ use server_test::{
     test_zomboid_server,
 };
 use servers::{
-    create_zomboid_server, install_zomboid_server_map, list_zomboid_servers,
+    create_zomboid_server, delete_zomboid_server, install_zomboid_server_map, list_zomboid_servers,
     open_zomboid_server_file, update_zomboid_server_build, update_zomboid_server_mods,
 };
 use settings::{
@@ -473,6 +473,7 @@ fn main() {
             check_zomboid_server_ports,
             kill_processes_by_pid,
             create_zomboid_server,
+            delete_zomboid_server,
             open_zomboid_server_file,
             update_zomboid_server_build,
             update_zomboid_server_mods,

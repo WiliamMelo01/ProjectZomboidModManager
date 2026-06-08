@@ -29,6 +29,10 @@ type ServerTestEvent = {
   event: "started" | "line" | "finished" | "error"
 }
 
+type DeleteServerResult = {
+  backupPath: string
+}
+
 function App() {
   if (window.location.hash.startsWith("#/workshop")) {
     return <WorkshopWindow />
@@ -238,6 +242,31 @@ function App() {
     setServers((currentServers) => currentServers.map((item) => item.id === server.id ? updatedServer : item))
   }
 
+  async function deleteServer(server: ZomboidServer) {
+    try {
+      const result = await invokeTauri<DeleteServerResult>("delete_zomboid_server", {
+        serverId: server.id,
+      })
+
+      setServers((currentServers) => currentServers.filter((item) => item.id !== server.id))
+      setSelectedServer((current) => current?.id === server.id ? null : current)
+      await loadServers()
+      addNotification({
+        title: t("dashboard.deleteSuccessTitle"),
+        message: t("dashboard.deleteSuccessBody", { name: server.name, backupPath: result.backupPath }),
+        tone: "success",
+      })
+    } catch (error) {
+      const message = getErrorMessage(error)
+      setServersError(message)
+      addNotification({
+        title: t("dashboard.deleteErrorTitle"),
+        message: t("dashboard.deleteErrorBody", { name: server.name, error: message }),
+        tone: "error",
+      })
+    }
+  }
+
   async function scanData() {
     await loadServers()
 
@@ -415,6 +444,7 @@ function App() {
                 onRefresh={loadServers}
                 onCreateServer={() => setIsCreateServerModalOpen(true)}
                 searchQuery={searchQuery}
+                onDeleteServer={deleteServer}
                 onServerClick={(server) => {
                   setSelectedServer(server)
                   void ensureModsLoaded()

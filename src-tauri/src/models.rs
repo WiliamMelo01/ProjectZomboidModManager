@@ -18,6 +18,12 @@ pub(crate) struct ZomboidServer {
     pub(crate) game_build: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeleteServerResult {
+    pub(crate) backup_path: String,
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ZomboidMod {

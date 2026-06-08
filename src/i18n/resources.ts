@@ -127,6 +127,11 @@ export const resources = {
         installMap: "Install as map",
         activate: "Activate mod",
         deactivate: "Deactivate mod",
+        version: "Version",
+        source: "Source",
+        path: "Local path",
+        dependencies: "Dependencies",
+        maps: "Maps",
       },
       dashboard: {
         title: "Servers",
@@ -512,6 +517,11 @@ export const resources = {
         installMap: "Instalar como mapa",
         activate: "Ativar mod",
         deactivate: "Desativar mod",
+        version: "Vers?o",
+        source: "Origem",
+        path: "Caminho local",
+        dependencies: "Depend?ncias",
+        maps: "Mapas",
       },
       dashboard: {
         title: "Servidores",

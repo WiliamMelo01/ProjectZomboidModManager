@@ -289,6 +289,7 @@ export const resources = {
         statusPassed: "No critical failures",
         statusFailed: "Failures found",
         statusSetupError: "Incomplete configuration",
+        dependencyFeedbackTitle: "Dependency fixes needed",
       },
       loadingMods: {
         description: "We are syncing your mods and servers. This may take a few seconds...",
@@ -692,6 +693,7 @@ export const resources = {
         statusPassed: "Sem falhas críticas",
         statusFailed: "Falhas encontradas",
         statusSetupError: "Configuração incompleta",
+        dependencyFeedbackTitle: "Correções de dependência necessárias",
       },
       loadingMods: {
         description: "Estamos sincronizando sua lista de mods e servidores. Isso pode levar alguns segundos...",

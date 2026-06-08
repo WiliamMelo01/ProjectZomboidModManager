@@ -168,6 +168,7 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
   }
 
   const visibleLogs = result?.logLines ?? logLines
+  const dependencyFeedback = result ? getDependencyFeedback(result.logLines) : null
   const statusStyle = getServerTestStatusStyle(result?.status, isTesting)
   const widthClass = panelSize === "wide" ? "w-[min(94vw,1040px)]" : "w-[min(92vw,720px)]"
 
@@ -228,11 +229,19 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
                   {t("serverTest.title")}
                 </h3>
               </div>
-              <p className="mt-0.5 truncate text-sm text-gray-400">
-                {isTesting
-                  ? `${serverId ?? t("serverTest.profile")} - ${formatDuration(elapsedSeconds)} - ${logLines.length} ${t("serverTest.lines")}`
-                  : error ?? result?.summary ?? t("serverTest.waiting")}
-              </p>
+              {isTesting ? (
+                <p className="mt-0.5 truncate text-sm text-gray-400">
+                  {`${serverId ?? t("serverTest.profile")} - ${formatDuration(elapsedSeconds)} - ${logLines.length} ${t("serverTest.lines")}`}
+                </p>
+              ) : result?.status === "passed" ? (
+                <p className="mt-1 text-base font-black leading-snug text-green-200">
+                  {result.summary}
+                </p>
+              ) : (
+                <p className="mt-0.5 truncate text-sm text-gray-400">
+                  {error ?? result?.summary ?? t("serverTest.waiting")}
+                </p>
+              )}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
@@ -281,6 +290,29 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
                     <p className={`mt-1 text-sm font-bold ${result.criticalCount > 0 ? "text-red-300" : result.warningCount > 0 ? "text-yellow-300" : "text-white"}`}>
                       {t("serverTest.warningSummary", { critical: result.criticalCount, warnings: result.warningCount })}
                     </p>
+                  </div>
+                </div>
+              )}
+
+              {dependencyFeedback && (
+                <div className="mb-4 rounded-2xl border border-red-500/20 bg-red-500/10 p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle size={20} className="mt-0.5 shrink-0 text-red-300" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-black text-red-100">{t("serverTest.dependencyFeedbackTitle")}</p>
+                      <div className="mt-2 space-y-1 text-sm leading-relaxed text-red-100/90">
+                        {dependencyFeedback.help.map((line) => (
+                          <p key={line}>{line}</p>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 space-y-2">
+                    {dependencyFeedback.issues.map((line) => (
+                      <div key={line} className="rounded-xl border border-red-500/20 bg-black/20 px-3 py-2 text-sm text-red-100">
+                        {stripLogPrefix(line)}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -351,4 +383,21 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
       </div>
     </div>
   )
+}
+
+function getDependencyFeedback(logLines: string[]) {
+  const help = logLines
+    .filter((line) => line.startsWith("[HELP]"))
+    .map(stripLogPrefix)
+  const issues = logLines.filter((line) => line.startsWith("[ERR]"))
+
+  if (help.length === 0 || issues.length === 0) {
+    return null
+  }
+
+  return { help, issues }
+}
+
+function stripLogPrefix(line: string) {
+  return line.replace(/^\[[^\]]+\]\s*/, "")
 }

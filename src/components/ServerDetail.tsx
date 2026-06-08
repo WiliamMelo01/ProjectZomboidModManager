@@ -15,6 +15,7 @@ import {
   type PendingActivation,
 } from "@/components/server/ServerDetailModals"
 import { ServerModContextMenu } from "@/components/server/ServerModContextMenu"
+import { ServerModDetailsModal } from "@/components/server/ServerModDetailsModal"
 import { ServerModList } from "@/components/server/ServerModList"
 import { ServerPortConflictModal } from "@/components/server/ServerPortConflictModal"
 import { buildActivationDependencyPlan, isLocalMod, normalizeModId } from "@/lib/modDependencies"
@@ -88,6 +89,7 @@ export function ServerDetail({
   const [isChangingBuild, setIsChangingBuild] = useState(false)
   const [pendingBuild, setPendingBuild] = useState<"b41" | "b42" | null>(null)
   const [showIncompatibleMods, setShowIncompatibleMods] = useState(false)
+  const [selectedMod, setSelectedMod] = useState<ZomboidMod | null>(null)
 
   const [isActivatedExpanded, setIsActivatedExpanded] = useState(true)
   const [isAvailableExpanded, setIsAvailableExpanded] = useState(true)
@@ -471,6 +473,7 @@ export function ServerDetail({
           action="deactivate"
           onToggleExpanded={() => setIsActivatedExpanded(!isActivatedExpanded)}
           onAction={handleDeactivateClick}
+          onSelect={setSelectedMod}
           onContextMenu={handleActiveModContextMenu}
           incompatibleModIds={incompatibleActiveIdSet}
         />
@@ -483,6 +486,7 @@ export function ServerDetail({
           action="activate"
           onToggleExpanded={() => setIsAvailableExpanded(!isAvailableExpanded)}
           onAction={handleActivateClick}
+          onSelect={setSelectedMod}
           onInstallMap={setPendingMapInstall}
           paginate
           paginationResetKey={`${server.id}:${server.gameBuild}:${search}`}
@@ -498,6 +502,10 @@ export function ServerDetail({
           onClose={() => setContextMenu(null)}
           onMove={(position) => void moveActiveMod(position)}
         />
+      )}
+
+      {selectedMod && (
+        <ServerModDetailsModal mod={selectedMod} onClose={() => setSelectedMod(null)} />
       )}
 
       {portConflictCheck && (

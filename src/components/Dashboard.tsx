@@ -1,4 +1,4 @@
-import { Activity, ChevronRight, Eye, EyeOff, FolderOpen, Plus, RefreshCw, Server, Trash2, Users, Wifi } from "lucide-react"
+import { Activity, ChevronRight, Eye, EyeOff, FolderOpen, Plus, RefreshCw, Server, Star, Trash2, Users, Wifi } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -16,6 +16,7 @@ type DashboardProps = {
 }
 
 const HIDDEN_SERVERS_KEY = "pzmm_hidden_servers"
+const FAVORITE_SERVERS_KEY = "pzmm_favorite_servers"
 
 export function Dashboard({
   servers,
@@ -29,6 +30,7 @@ export function Dashboard({
 }: DashboardProps) {
   const { t } = useTranslation()
   const [hiddenServerIds, setHiddenServerIds] = useState<Set<string>>(new Set())
+  const [favoriteServerIds, setFavoriteServerIds] = useState<Set<string>>(new Set())
   const [showHidden, setShowHidden] = useState(false)
   const [filterBuild, setFilterBuild] = useState<"all" | GameBuild>("all")
   const [contextMenu, setContextMenu] = useState<{ server: ZomboidServer; x: number; y: number } | null>(null)
@@ -45,6 +47,14 @@ export function Dashboard({
       }
     }
 
+    const storedFavorites = window.localStorage.getItem(FAVORITE_SERVERS_KEY)
+    if (storedFavorites) {
+      try {
+        setFavoriteServerIds(new Set(JSON.parse(storedFavorites)))
+      } catch (e) {
+        console.error("Failed to parse favorite servers", e)
+      }
+    }
   }, [])
 
   const toggleHideServer = (serverId: string) => {
@@ -56,6 +66,18 @@ export function Dashboard({
     }
     setHiddenServerIds(next)
     window.localStorage.setItem(HIDDEN_SERVERS_KEY, JSON.stringify(Array.from(next)))
+    setContextMenu(null)
+  }
+
+  const toggleFavoriteServer = (serverId: string) => {
+    const next = new Set(favoriteServerIds)
+    if (next.has(serverId)) {
+      next.delete(serverId)
+    } else {
+      next.add(serverId)
+    }
+    setFavoriteServerIds(next)
+    window.localStorage.setItem(FAVORITE_SERVERS_KEY, JSON.stringify(Array.from(next)))
     setContextMenu(null)
   }
 
@@ -94,8 +116,20 @@ export function Dashboard({
     return matchesBuild && matchesSearch
   })
 
-  const visibleServers = allFiltered.filter(s => !hiddenServerIds.has(s.id))
-  const hiddenServers = allFiltered.filter(s => hiddenServerIds.has(s.id))
+  const sortFavoriteServersFirst = (items: ZomboidServer[]) =>
+    [...items].sort((left, right) => {
+      const leftFavorite = favoriteServerIds.has(left.id)
+      const rightFavorite = favoriteServerIds.has(right.id)
+
+      if (leftFavorite !== rightFavorite) {
+        return leftFavorite ? -1 : 1
+      }
+
+      return left.name.toLowerCase().localeCompare(right.name.toLowerCase())
+    })
+
+  const visibleServers = sortFavoriteServersFirst(allFiltered.filter(s => !hiddenServerIds.has(s.id)))
+  const hiddenServers = sortFavoriteServersFirst(allFiltered.filter(s => hiddenServerIds.has(s.id)))
 
   return (
     <div className="p-8 h-full overflow-y-auto custom-scrollbar relative" onClick={() => setContextMenu(null)}>
@@ -154,6 +188,7 @@ export function Dashboard({
             server={server}
             onClick={() => onServerClick(server)}
             onContextMenu={(e) => handleContextMenu(e, server)}
+            isFavorite={favoriteServerIds.has(server.id)}
           />
         ))}
 
@@ -187,6 +222,7 @@ export function Dashboard({
                 onClick={() => onServerClick(server)}
                 onContextMenu={(e) => handleContextMenu(e, server)}
                 isHidden
+                isFavorite={favoriteServerIds.has(server.id)}
               />
             ))}
           </div>
@@ -200,6 +236,16 @@ export function Dashboard({
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(e) => e.stopPropagation()}
         >
+          <button
+            onClick={() => toggleFavoriteServer(contextMenu.server.id)}
+            className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-orange-500/10 hover:text-orange-300"
+          >
+            <Star
+              size={16}
+              className={favoriteServerIds.has(contextMenu.server.id) ? "fill-orange-300 text-orange-300" : ""}
+            />
+            {favoriteServerIds.has(contextMenu.server.id) ? t("dashboard.unfavorite") : t("dashboard.favorite")}
+          </button>
           <button
             onClick={() => toggleHideServer(contextMenu.server.id)}
             className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-orange-500/10 hover:text-orange-300"
@@ -309,12 +355,14 @@ function ServerCard({
   server,
   onClick,
   onContextMenu,
-  isHidden
+  isHidden,
+  isFavorite
 }: {
   server: ZomboidServer;
   onClick: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
   isHidden?: boolean
+  isFavorite?: boolean
 }) {
   const { t } = useTranslation()
   const isOnline = server.status === "online"
@@ -340,7 +388,12 @@ function ServerCard({
           <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? "bg-green-400 animate-pulse" : "bg-red-400"}`} />
           {server.status.toUpperCase()}
         </div>
-        <span className="text-xs text-gray-500 font-mono">{server.fileName}</span>
+        <div className="flex min-w-0 items-center gap-2">
+          {isFavorite && (
+            <Star size={15} className="shrink-0 fill-orange-300 text-orange-300" />
+          )}
+          <span className="truncate text-xs text-gray-500 font-mono">{server.fileName}</span>
+        </div>
       </div>
 
       <div className="flex items-center gap-3 mb-6">

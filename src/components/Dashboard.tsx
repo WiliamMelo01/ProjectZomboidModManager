@@ -2,7 +2,7 @@ import { Activity, ChevronRight, Eye, EyeOff, FolderOpen, Plus, RefreshCw, Serve
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
-import type { ZomboidServer } from "@/types/server"
+import type { GameBuild, ZomboidServer } from "@/types/server"
 
 type DashboardProps = {
   servers: ZomboidServer[]
@@ -28,6 +28,7 @@ export function Dashboard({
   const { t } = useTranslation()
   const [hiddenServerIds, setHiddenServerIds] = useState<Set<string>>(new Set())
   const [showHidden, setShowHidden] = useState(false)
+  const [filterBuild, setFilterBuild] = useState<"all" | GameBuild>("all")
   const [contextMenu, setContextMenu] = useState<{ server: ZomboidServer; x: number; y: number } | null>(null)
 
   useEffect(() => {
@@ -61,12 +62,14 @@ export function Dashboard({
   const normalizedSearch = searchQuery.trim().toLowerCase()
 
   const allFiltered = servers.filter((server) => {
-    if (!normalizedSearch) return true
-    return (
+    const matchesBuild = filterBuild === "all" || server.gameBuild === filterBuild
+    const matchesSearch =
+      !normalizedSearch ||
       server.name.toLowerCase().includes(normalizedSearch) ||
       server.fileName.toLowerCase().includes(normalizedSearch) ||
       server.port.includes(searchQuery)
-    )
+
+    return matchesBuild && matchesSearch
   })
 
   const visibleServers = allFiltered.filter(s => !hiddenServerIds.has(s.id))
@@ -74,19 +77,36 @@ export function Dashboard({
 
   return (
     <div className="p-8 h-full overflow-y-auto custom-scrollbar relative" onClick={() => setContextMenu(null)}>
-      <div className="flex justify-between items-center mb-8">
+      <div className="flex flex-col justify-between gap-6 mb-8 lg:flex-row lg:items-center">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">{t("dashboard.title")}</h2>
           <p className="text-gray-400 mt-1">{t("dashboard.description")}</p>
         </div>
 
-        <button
-          className="flex items-center gap-2 bg-[#2b3238] border border-white/5 text-gray-300 hover:text-white hover:border-orange-400/30 px-4 py-2 rounded-xl transition-all"
-          onClick={onRefresh}
-        >
-          <RefreshCw size={18} className={isLoading ? "animate-spin" : ""} />
-          {t("common.refresh")}
-        </button>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="flex bg-[#2b3238] p-1 rounded-xl border border-white/5 shadow-inner">
+            {(["all", "b41", "b42"] as const).map((build) => (
+              <button
+                key={build}
+                type="button"
+                onClick={() => setFilterBuild(build)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-all ${
+                  filterBuild === build ? "bg-orange-500 text-white shadow-lg" : "text-gray-400 hover:text-white"
+                }`}
+              >
+                {build === "all" ? t("dashboard.versions") : build}
+              </button>
+            ))}
+          </div>
+
+          <button
+            className="flex items-center justify-center gap-2 bg-[#2b3238] border border-white/5 text-gray-300 hover:text-white hover:border-orange-400/30 px-4 py-2 rounded-xl transition-all"
+            onClick={onRefresh}
+          >
+            <RefreshCw size={18} className={isLoading ? "animate-spin" : ""} />
+            {t("common.refresh")}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -102,7 +122,9 @@ export function Dashboard({
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
-        {!isLoading && !error && visibleServers.length === 0 && <EmptyServerCard hasSearch={Boolean(normalizedSearch)} />}
+        {!isLoading && !error && visibleServers.length === 0 && (
+          <EmptyServerCard hasSearch={Boolean(normalizedSearch)} hasBuildFilter={filterBuild !== "all"} />
+        )}
 
         {visibleServers.map((server) => (
           <ServerCard
@@ -256,8 +278,13 @@ function ServerCard({
 }
 
 
-function EmptyServerCard({ hasSearch }: { hasSearch: boolean }) {
+function EmptyServerCard({ hasSearch, hasBuildFilter }: { hasSearch: boolean; hasBuildFilter: boolean }) {
   const { t } = useTranslation()
+  const messageKey = hasSearch
+    ? "dashboard.emptySearch"
+    : hasBuildFilter
+      ? "dashboard.emptyBuild"
+      : "dashboard.emptyHint"
 
   return (
     <div className="min-h-[220px] flex flex-col items-center justify-center gap-4 bg-[#2b3238] border border-white/5 rounded-2xl p-6 text-center">
@@ -267,7 +294,7 @@ function EmptyServerCard({ hasSearch }: { hasSearch: boolean }) {
       <div>
         <p className="text-lg font-semibold">{t("dashboard.noServers")}</p>
         <p className="text-sm text-gray-500">
-          {t(hasSearch ? "dashboard.emptySearch" : "dashboard.emptyHint")}
+          {t(messageKey)}
         </p>
       </div>
     </div>

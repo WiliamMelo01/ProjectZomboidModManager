@@ -433,9 +433,17 @@ pub(crate) async fn create_zomboid_server(
     mod_ids: Vec<String>,
     workshop_ids: Vec<String>,
     game_build: String,
+    max_players: u32,
 ) -> Result<ZomboidServer, String> {
     run_blocking(move || {
-        create_zomboid_server_impl(&app, &name, &mod_ids, &workshop_ids, &game_build)
+        create_zomboid_server_impl(
+            &app,
+            &name,
+            &mod_ids,
+            &workshop_ids,
+            &game_build,
+            max_players,
+        )
     })
     .await
 }
@@ -446,12 +454,14 @@ fn create_zomboid_server_impl(
     mod_ids: &[String],
     workshop_ids: &[String],
     game_build: &str,
+    max_players: u32,
 ) -> Result<ZomboidServer, String> {
     let name = name.trim();
 
     if name.is_empty() {
         return Err(text("Enter a server name.", "Informe um nome para o servidor.").to_string());
     }
+    let max_players = validate_max_players(max_players)?;
 
     let server_id = sanitize_server_id(name);
 
@@ -498,6 +508,8 @@ fn create_zomboid_server_impl(
     let normalized_workshop_ids = resolve_server_workshop_ids(mod_ids, workshop_ids)?;
     let ini_content = read_text_lossy(&template_ini)?;
     let ini_content = replace_or_append_ini_value(&ini_content, "PublicName", name);
+    let ini_content =
+        replace_or_append_ini_value(&ini_content, "MaxPlayers", &max_players.to_string());
     let ini_content = replace_or_append_ini_value(&ini_content, "Mods", &normalized_mod_ids);
     let ini_content = replace_or_append_ini_value(
         &ini_content,
@@ -522,8 +534,112 @@ fn create_zomboid_server_impl(
     read_zomboid_server_from_path(&server_path)
 }
 
+#[tauri::command]
+pub(crate) async fn update_zomboid_server_settings(
+    server_id: String,
+    public_name: String,
+    max_players: u32,
+    default_port: String,
+) -> Result<ZomboidServer, String> {
+    run_blocking(move || {
+        update_zomboid_server_settings_impl(&server_id, &public_name, max_players, &default_port)
+    })
+    .await
+}
+
+fn update_zomboid_server_settings_impl(
+    server_id: &str,
+    public_name: &str,
+    max_players: u32,
+    default_port: &str,
+) -> Result<ZomboidServer, String> {
+    let public_name = public_name.trim();
+    if public_name.is_empty() {
+        return Err(text("Enter a server name.", "Informe um nome para o servidor.").to_string());
+    }
+
+    let max_players = validate_max_players(max_players)?;
+    let default_port = validate_port(default_port, "DefaultPort")?;
+    let server_dir = zomboid_server_dir()?;
+    let server_path = server_dir.join(format!("{server_id}.ini"));
+
+    if !server_path.exists() || !server_path.is_file() {
+        return Err(format!(
+            "{}: {}",
+            text(
+                "Server file not found",
+                "Arquivo do servidor nao encontrado"
+            ),
+            server_path.display()
+        ));
+    }
+
+    let canonical_server_dir = server_dir.canonicalize().map_err(|error| {
+        format!(
+            "{} {}: {error}",
+            text("Could not access", "Nao foi possivel acessar"),
+            server_dir.display()
+        )
+    })?;
+    let canonical_server_path = server_path.canonicalize().map_err(|error| {
+        format!(
+            "{} {}: {error}",
+            text("Could not access", "Nao foi possivel acessar"),
+            server_path.display()
+        )
+    })?;
+
+    if !canonical_server_path.starts_with(&canonical_server_dir) {
+        return Err(text("Invalid server file.", "Arquivo de servidor invalido.").to_string());
+    }
+
+    let content = read_text_lossy(&canonical_server_path)?;
+    let content = replace_or_append_ini_value(&content, "PublicName", public_name);
+    let content = replace_or_append_ini_value(&content, "MaxPlayers", &max_players.to_string());
+    let content = replace_or_append_ini_value(&content, "DefaultPort", &default_port.to_string());
+
+    fs::write(&canonical_server_path, content).map_err(|error| {
+        format!(
+            "Nao foi possivel salvar {}: {error}",
+            canonical_server_path.display()
+        )
+    })?;
+
+    read_zomboid_server_from_path(&canonical_server_path)
+}
+
 fn server_builds_path() -> Result<PathBuf, String> {
     Ok(app_config_dir()?.join("server-builds.ini"))
+}
+
+fn validate_max_players(max_players: u32) -> Result<u32, String> {
+    if (1..=100).contains(&max_players) {
+        return Ok(max_players);
+    }
+
+    Err(text(
+        "Max players must be between 1 and 100.",
+        "A quantidade de jogadores deve ficar entre 1 e 100.",
+    )
+    .to_string())
+}
+
+fn validate_port(value: &str, label: &str) -> Result<u16, String> {
+    let port = value.trim().parse::<u16>().map_err(|_| {
+        format!(
+            "{} {label}.",
+            text("Enter a valid port for", "Informe uma porta valida para")
+        )
+    })?;
+
+    if port == 0 {
+        return Err(format!(
+            "{} {label}.",
+            text("Enter a valid port for", "Informe uma porta valida para")
+        ));
+    }
+
+    Ok(port)
 }
 
 fn normalize_game_build(game_build: &str) -> Result<&'static str, String> {
@@ -763,6 +879,62 @@ mod tests {
             delete_zomboid_server_impl("MissingServer").expect_err("missing server should fail");
 
         assert!(error.contains("Server file not found") || error.contains("Arquivo do servidor"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn update_server_settings_writes_ini_values() {
+        let _guard = env_lock()
+            .lock()
+            .expect("test env lock should be available");
+        let root = unique_temp_dir("pzmm-update-server-settings-test");
+        configure_test_env(&root);
+        let server_dir = zomboid_server_dir().expect("server dir should resolve");
+        fs::create_dir_all(&server_dir).expect("server dir should be created");
+        let server_path = server_dir.join("SettingsServer.ini");
+
+        fs::write(
+            &server_path,
+            "PublicName=Old Name\nMaxPlayers=8\nDefaultPort=16261\n",
+        )
+        .expect("server ini should be written");
+
+        let server = update_zomboid_server_settings_impl(
+            "SettingsServer",
+            "New Name",
+            24,
+            "16271",
+        )
+        .expect("server settings should be updated");
+        let content = read_text_lossy(&server_path).expect("server ini should be readable");
+
+        assert_eq!(server.name, "New Name");
+        assert_eq!(server.max_players, 24);
+        assert_eq!(server.port, "16271");
+        assert!(content.contains("PublicName=New Name"));
+        assert!(content.contains("MaxPlayers=24"));
+        assert!(content.contains("DefaultPort=16271"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn update_server_settings_rejects_invalid_player_count() {
+        let _guard = env_lock()
+            .lock()
+            .expect("test env lock should be available");
+        let root = unique_temp_dir("pzmm-update-server-settings-invalid-test");
+        configure_test_env(&root);
+        let server_dir = zomboid_server_dir().expect("server dir should resolve");
+        fs::create_dir_all(&server_dir).expect("server dir should be created");
+        fs::write(server_dir.join("SettingsServer.ini"), "PublicName=Old Name\n")
+            .expect("server ini should be written");
+
+        let error = update_zomboid_server_settings_impl("SettingsServer", "New Name", 0, "16261")
+            .expect_err("invalid player count should fail");
+
+        assert!(error.contains("Max players") || error.contains("jogadores"));
 
         let _ = fs::remove_dir_all(root);
     }

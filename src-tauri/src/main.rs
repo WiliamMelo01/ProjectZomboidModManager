@@ -37,6 +37,7 @@ use server_test::{
 use servers::{
     create_zomboid_server, delete_zomboid_server, install_zomboid_server_map, list_zomboid_servers,
     open_zomboid_server_file, update_zomboid_server_build, update_zomboid_server_mods,
+    update_zomboid_server_settings,
 };
 use settings::{
     add_mod_location, detect_steamcmd_path, get_app_settings, get_mod_locations, push_mod_location,
@@ -477,6 +478,7 @@ fn main() {
             open_zomboid_server_file,
             update_zomboid_server_build,
             update_zomboid_server_mods,
+            update_zomboid_server_settings,
             install_zomboid_server_map,
             list_zomboid_mods,
             count_zomboid_mods,

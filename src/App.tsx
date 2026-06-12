@@ -11,6 +11,7 @@ import { DownloadMods } from "@/components/DownloadMods"
 import { DownloadProgressCard } from "@/components/DownloadProgressCard"
 import { LoadingModsPanel } from "@/components/LoadingModsPanel"
 import { ModsList } from "@/components/ModsList"
+import { ServerConfigurationModal } from "@/components/ServerConfigurationModal"
 import { ServerDetail } from "@/components/ServerDetail"
 import { ServerTestPanel } from "@/components/ServerTestPanel"
 import { Settings as SettingsView } from "@/components/Settings"
@@ -39,6 +40,7 @@ function App() {
   }
 
   const [isCreateServerModalOpen, setIsCreateServerModalOpen] = useState(false)
+  const [serverConfigTarget, setServerConfigTarget] = useState<ZomboidServer | null>(null)
   const [activeTab, setActiveTab] = useState("dashboard")
   const [selectedServer, setSelectedServer] = useState<ZomboidServer | null>(null)
   const [servers, setServers] = useState<ZomboidServer[]>([])
@@ -190,7 +192,7 @@ function App() {
     }
   }
 
-  async function createServer(data: { name: string; modIds: string[]; gameBuild: "b41" | "b42" }) {
+  async function createServer(data: { name: string; modIds: string[]; gameBuild: "b41" | "b42"; maxPlayers: number }) {
     const resolvedModIds = data.modIds.flatMap((modId) => {
       const mod = mods.find((item) => item.id === modId)
       const resolved = mod ? resolveModForBuild(mod, data.gameBuild) : findModForServerId(mods, modId, data.gameBuild)
@@ -202,6 +204,7 @@ function App() {
       modIds: resolvedModIds,
       workshopIds,
       gameBuild: data.gameBuild,
+      maxPlayers: data.maxPlayers,
     })
 
     setServers((currentServers) =>
@@ -210,7 +213,27 @@ function App() {
       ),
     )
     setSelectedServer(createdServer)
+    setServerConfigTarget(createdServer)
     setActiveTab("dashboard")
+  }
+
+  async function updateServerSettings(data: { publicName: string; maxPlayers: number; defaultPort: string }) {
+    if (!serverConfigTarget) return
+
+    const updatedServer = await invokeTauri<ZomboidServer>("update_zomboid_server_settings", {
+      serverId: serverConfigTarget.id,
+      publicName: data.publicName,
+      maxPlayers: data.maxPlayers,
+      defaultPort: data.defaultPort,
+    })
+
+    setServers((currentServers) =>
+      currentServers.map((server) => server.id === updatedServer.id ? updatedServer : server).sort((left, right) =>
+        left.name.toLowerCase().localeCompare(right.name.toLowerCase()),
+      ),
+    )
+    setSelectedServer((currentServer) => currentServer?.id === updatedServer.id ? updatedServer : currentServer)
+    setServerConfigTarget(updatedServer)
   }
 
   async function installDownloadedDependencyForServer(server: ZomboidServer, dependencyId: string) {
@@ -484,6 +507,13 @@ function App() {
         existingServers={servers}
         availableMods={mods}
         onCreate={createServer}
+      />
+
+      <ServerConfigurationModal
+        isOpen={serverConfigTarget !== null}
+        server={serverConfigTarget}
+        onClose={() => setServerConfigTarget(null)}
+        onSave={updateServerSettings}
       />
 
       <ServerTestPanel

@@ -3,7 +3,7 @@ use serde::Serialize;
 pub(crate) const BUILD_41: &str = "b41";
 pub(crate) const BUILD_42: &str = "b42";
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ZomboidServer {
     pub(crate) id: String,

@@ -1,4 +1,4 @@
-import { Box, ChevronLeft, ChevronRight, Copy, Plus, Save, Server, X } from "lucide-react"
+import { Box, ChevronLeft, ChevronRight, Copy, Plus, Save, Server, Users, X } from "lucide-react"
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -12,13 +12,14 @@ type CreateServerModalProps = {
   onClose: () => void
   existingServers: ZomboidServer[]
   availableMods: ZomboidMod[]
-  onCreate?: (data: { name: string; modIds: string[]; gameBuild: GameBuild }) => Promise<void> | void
+  onCreate?: (data: { name: string; modIds: string[]; gameBuild: GameBuild; maxPlayers: number }) => Promise<void> | void
 }
 
 export function CreateServerModal({ isOpen, onClose, existingServers, availableMods, onCreate }: CreateServerModalProps) {
   const { t } = useTranslation()
   const [step, setStep] = useState(1)
   const [serverName, setServerName] = useState("")
+  const [maxPlayers, setMaxPlayers] = useState(16)
   const [gameBuild, setGameBuild] = useState<GameBuild>("b41")
   const [modSelectionMode, setModSelectionMode] = useState<"checklist" | "clone">("checklist")
   const [selectedModIds, setSelectedModIds] = useState<Set<string>>(new Set())
@@ -63,9 +64,10 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
     setError(null)
 
     try {
-      await onCreate?.({ name: serverName, modIds: finalModIds, gameBuild })
+      await onCreate?.({ name: serverName, modIds: finalModIds, gameBuild, maxPlayers })
       setStep(1)
       setServerName("")
+      setMaxPlayers(16)
       setSelectedModIds(new Set())
       setCloneSourceId("")
       setGameBuild("b41")
@@ -123,6 +125,26 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
                 <p className="text-xs text-gray-400 leading-relaxed">
                   {t("createServer.tip")}
                 </p>
+              </div>
+
+              <div className="space-y-3">
+                <label className="ml-1 text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">
+                  {t("createServer.maxPlayers")}
+                </label>
+                <div className="relative group/input">
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 transition-colors group-focus-within/input:text-orange-400">
+                    <Users size={18} />
+                  </div>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={maxPlayers}
+                    onChange={(event) => setMaxPlayers(clampNumber(event.target.valueAsNumber, 1, 100, 16))}
+                    className="w-full rounded-2xl border border-white/5 bg-[#1e2327] py-4 pl-12 pr-4 text-lg transition-all focus:border-orange-400/50 focus:outline-none focus:ring-1 focus:ring-orange-400/20"
+                  />
+                </div>
+                <p className="ml-1 text-xs text-gray-500">{t("createServer.maxPlayersHint")}</p>
               </div>
               <div className="space-y-3">
                 <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">
@@ -262,7 +284,7 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
 
           {step === 1 ? (
             <button
-              disabled={!serverName.trim()}
+              disabled={!serverName.trim() || maxPlayers < 1 || maxPlayers > 100}
               onClick={handleNext}
               className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-700 disabled:text-gray-500 text-white px-8 py-3 rounded-2xl font-black uppercase italic tracking-wider transition-all shadow-lg shadow-orange-500/20 active:scale-95"
             >
@@ -283,6 +305,14 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
       </div>
     </div>
   )
+}
+
+function clampNumber(value: number, min: number, max: number, fallback: number) {
+  if (!Number.isFinite(value)) {
+    return fallback
+  }
+
+  return Math.min(max, Math.max(min, Math.trunc(value)))
 }
 
 function getErrorMessage(error: unknown) {

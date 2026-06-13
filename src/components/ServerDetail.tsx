@@ -1,4 +1,4 @@
-import { ArrowLeft, FilePenLine, Play, RefreshCw, Search, Server } from "lucide-react"
+import { ArrowLeft, FilePenLine, Play, RefreshCw, Search, Server, Settings } from "lucide-react"
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -15,6 +15,7 @@ import {
   type PendingActivation,
 } from "@/components/server/ServerDetailModals"
 import { ServerModContextMenu } from "@/components/server/ServerModContextMenu"
+import { ServerModDetailsModal } from "@/components/server/ServerModDetailsModal"
 import { ServerModList } from "@/components/server/ServerModList"
 import { ServerPortConflictModal } from "@/components/server/ServerPortConflictModal"
 import { buildActivationDependencyPlan, isLocalMod, normalizeModId } from "@/lib/modDependencies"
@@ -38,6 +39,7 @@ type ServerDetailProps = {
   onOpenSettings?: () => void
   runningServerTestId?: string | null
   onChangeBuild: (gameBuild: "b41" | "b42") => Promise<void>
+  onConfigureServer: (server: ZomboidServer) => void
 }
 
 const MOVE_MOD_WARNING_KEY = "pzmm_move_mod_warning_modal_seen"
@@ -68,6 +70,7 @@ export function ServerDetail({
   onOpenSettings,
   runningServerTestId,
   onChangeBuild,
+  onConfigureServer,
 }: ServerDetailProps) {
   const { t } = useTranslation()
   const [search, setSearch] = useState("")
@@ -88,6 +91,7 @@ export function ServerDetail({
   const [isChangingBuild, setIsChangingBuild] = useState(false)
   const [pendingBuild, setPendingBuild] = useState<"b41" | "b42" | null>(null)
   const [showIncompatibleMods, setShowIncompatibleMods] = useState(false)
+  const [selectedMod, setSelectedMod] = useState<ZomboidMod | null>(null)
 
   const [isActivatedExpanded, setIsActivatedExpanded] = useState(true)
   const [isAvailableExpanded, setIsAvailableExpanded] = useState(true)
@@ -405,6 +409,14 @@ export function ServerDetail({
 
           <div className="flex flex-wrap gap-3 relative z-10">
              <button
+                type="button"
+                onClick={() => onConfigureServer(server)}
+                className="flex items-center gap-2 rounded-xl border border-white/10 bg-[#22272b] px-4 py-2 text-sm font-black text-gray-300 transition-all hover:border-orange-400/30 hover:text-orange-300"
+             >
+                <Settings size={18} />
+                <span>{t("serverDetail.configure")}</span>
+             </button>
+             <button
                 onClick={() => void testServer()}
                 disabled={isCurrentServerTesting || isCheckingPorts}
                 className="flex items-center gap-2 rounded-xl border border-orange-500/20 bg-orange-500/10 px-4 py-2 text-sm font-black text-orange-400 transition-all hover:bg-orange-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
@@ -471,6 +483,7 @@ export function ServerDetail({
           action="deactivate"
           onToggleExpanded={() => setIsActivatedExpanded(!isActivatedExpanded)}
           onAction={handleDeactivateClick}
+          onSelect={setSelectedMod}
           onContextMenu={handleActiveModContextMenu}
           incompatibleModIds={incompatibleActiveIdSet}
         />
@@ -483,6 +496,7 @@ export function ServerDetail({
           action="activate"
           onToggleExpanded={() => setIsAvailableExpanded(!isAvailableExpanded)}
           onAction={handleActivateClick}
+          onSelect={setSelectedMod}
           onInstallMap={setPendingMapInstall}
           paginate
           paginationResetKey={`${server.id}:${server.gameBuild}:${search}`}
@@ -498,6 +512,10 @@ export function ServerDetail({
           onClose={() => setContextMenu(null)}
           onMove={(position) => void moveActiveMod(position)}
         />
+      )}
+
+      {selectedMod && (
+        <ServerModDetailsModal mod={selectedMod} onClose={() => setSelectedMod(null)} />
       )}
 
       {portConflictCheck && (

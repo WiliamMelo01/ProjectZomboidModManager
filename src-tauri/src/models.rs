@@ -1,9 +1,9 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub(crate) const BUILD_41: &str = "b41";
 pub(crate) const BUILD_42: &str = "b42";
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ZomboidServer {
     pub(crate) id: String,
@@ -16,6 +16,67 @@ pub(crate) struct ZomboidServer {
     pub(crate) active_mod_ids: Vec<String>,
     pub(crate) status: String,
     pub(crate) game_build: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeleteServerResult {
+    pub(crate) backup_path: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ServerIniSettings {
+    pub(crate) public_name: String,
+    pub(crate) public_description: String,
+    pub(crate) password: String,
+    pub(crate) max_players: u32,
+    pub(crate) default_port: String,
+    pub(crate) udp_port: String,
+    pub(crate) is_public: bool,
+    pub(crate) is_open: bool,
+    pub(crate) pvp: bool,
+    pub(crate) pause_empty: bool,
+    pub(crate) global_chat: bool,
+    pub(crate) display_user_name: bool,
+    pub(crate) safety_system: bool,
+    pub(crate) voice_enable: bool,
+    pub(crate) steam_vac: bool,
+    pub(crate) upnp: bool,
+    pub(crate) ping_limit: u32,
+    pub(crate) save_world_every_minutes: u32,
+    pub(crate) hours_for_loot_respawn: u32,
+    pub(crate) player_safehouse: bool,
+    pub(crate) admin_safehouse: bool,
+    pub(crate) backups_count: u32,
+    pub(crate) backups_on_start: bool,
+    pub(crate) backups_period: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ServerLuaSetting {
+    pub(crate) path: String,
+    pub(crate) key: String,
+    pub(crate) section: String,
+    pub(crate) value: String,
+    pub(crate) value_kind: String,
+    pub(crate) default_value: Option<String>,
+    pub(crate) options: Vec<ServerLuaSettingOption>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ServerLuaSettingOption {
+    pub(crate) value: String,
+    pub(crate) label: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ServerLuaSettings {
+    pub(crate) file_name: String,
+    pub(crate) settings: Vec<ServerLuaSetting>,
 }
 
 #[derive(Serialize, Clone)]

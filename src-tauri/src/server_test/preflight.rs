@@ -100,6 +100,25 @@ pub(crate) fn validate_server_mod_dependencies(
         return Ok(None);
     }
 
+    let issue_count = issues.len();
+    let mut log_lines = vec![
+        format!(
+            "[HELP] {}",
+            text(
+                "Fix the items below before starting the server.",
+                "Corrija os itens abaixo antes de iniciar o servidor."
+            )
+        ),
+        format!(
+            "[HELP] {}",
+            text(
+                "Dependencies must be active and appear before the mods that require them in Mods=.",
+                "As dependencias precisam estar ativas e aparecer antes dos mods que dependem delas em Mods=."
+            )
+        ),
+    ];
+    log_lines.extend(issues);
+
     Ok(Some(ServerTestResult {
         status: "failed".to_string(),
         summary: format!(
@@ -108,7 +127,7 @@ pub(crate) fn validate_server_mod_dependencies(
                 "Dependency validation found",
                 "Validacao de dependencias encontrou"
             ),
-            issues.len(),
+            issue_count,
             text(
                 "issue(s) before starting the server",
                 "problema(s) antes de iniciar o servidor"
@@ -124,8 +143,11 @@ pub(crate) fn validate_server_mod_dependencies(
             )
         ),
         warning_count: 0,
-        critical_count: issues.len(),
-        log_lines: tail_log_lines(issues, 240),
+        critical_count: log_lines
+            .iter()
+            .filter(|line| line.starts_with("[ERR]"))
+            .count(),
+        log_lines: tail_log_lines(log_lines, 240),
     }))
 }
 

@@ -13,6 +13,7 @@ type ServerModListProps = {
   action: "activate" | "deactivate"
   onToggleExpanded: () => void
   onAction: (mod: ZomboidMod) => void
+  onSelect: (mod: ZomboidMod) => void
   onInstallMap?: (mod: ZomboidMod) => void
   onContextMenu?: (event: MouseEvent<HTMLDivElement>, mod: ZomboidMod) => void
   incompatibleModIds?: Set<string>
@@ -30,6 +31,7 @@ export function ServerModList({
   action,
   onToggleExpanded,
   onAction,
+  onSelect,
   onInstallMap,
   onContextMenu,
   incompatibleModIds = new Set(),
@@ -91,7 +93,11 @@ export function ServerModList({
                 : "bg-[#2b3238]/50 border border-white/5 hover:bg-[#2b3238]"
             }`}
           >
-            <div className={`flex items-center gap-4 min-w-0 ${isActiveList ? "" : "opacity-70 group-hover:opacity-100 transition-opacity"}`}>
+            <button
+              type="button"
+              onClick={() => onSelect(mod)}
+              className={`flex min-w-0 flex-1 items-center gap-4 text-left ${isActiveList ? "" : "opacity-70 transition-opacity group-hover:opacity-100"}`}
+            >
               <div className="w-20 h-20 rounded-xl bg-[#1e2327] overflow-hidden shrink-0 border border-white/5 shadow-lg">
                 {mod.imageUrl ? (
                   <img src={mod.imageUrl} alt={mod.name} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
@@ -131,7 +137,7 @@ export function ServerModList({
                   )}
                 </div>
               </div>
-            </div>
+            </button>
             <div className="flex shrink-0 items-center gap-1">
               {!isActiveList && onInstallMap && mod.mapNames && mod.mapNames.length > 0 && (
                 <button

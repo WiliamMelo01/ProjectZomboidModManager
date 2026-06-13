@@ -1,8 +1,10 @@
 import { Download, FolderSync, Settings, Search, Bell, RefreshCw } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { WorkshopDownloadResult } from "@/types/download"
+
+const TOAST_VISIBLE_MS = 5000
 
 export type AppNotificationAction =
   | { type: "server-test"; serverId: string }
@@ -45,8 +47,24 @@ export function AppHeader({
 }: AppHeaderProps) {
   const { t, i18n } = useTranslation()
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
-  const latestNotification = notifications.find((notification) => !notification.isRead) ?? null
+  const [visibleToastId, setVisibleToastId] = useState<string | null>(null)
+  const newestNotificationId = notifications[0]?.id ?? null
+  const visibleToast = notifications.find((notification) => notification.id === visibleToastId) ?? null
   const unreadCount = notifications.filter((notification) => !notification.isRead).length
+
+  useEffect(() => {
+    if (!newestNotificationId) {
+      setVisibleToastId(null)
+      return
+    }
+
+    setVisibleToastId(newestNotificationId)
+    const timeout = window.setTimeout(() => {
+      setVisibleToastId((currentId) => currentId === newestNotificationId ? null : currentId)
+    }, TOAST_VISIBLE_MS)
+
+    return () => window.clearTimeout(timeout)
+  }, [newestNotificationId])
 
   return (
     <header className="sticky top-0 z-10 w-full px-8 py-4 flex items-center justify-between bg-[#22272b]/80 backdrop-blur-md border-b border-white/5">
@@ -98,24 +116,27 @@ export function AppHeader({
             )}
           </button>
 
-          {latestNotification && (
+          {visibleToast && (
             <button
-              onClick={() => onNotificationClick?.(latestNotification)}
+              onClick={() => {
+                onNotificationClick?.(visibleToast)
+                setVisibleToastId(null)
+              }}
               className={`absolute right-0 top-12 z-30 w-80 rounded-2xl border p-4 text-left shadow-2xl shadow-black/40 transition-all ${
                 isNotificationsOpen ? "hidden" : "block"
               } ${
-                latestNotification.tone === "success"
+                visibleToast.tone === "success"
                   ? "border-green-500/20 bg-[#1e2a24]"
-                  : latestNotification.tone === "error"
+                  : visibleToast.tone === "error"
                     ? "border-red-500/20 bg-[#2a1e20]"
                     : "border-yellow-500/20 bg-[#2b291e]"
               }`}
             >
               <div className="flex items-start justify-between gap-3">
-                <p className="text-sm font-black text-white">{latestNotification.title}</p>
-                <span className="shrink-0 text-[10px] font-bold text-gray-400">{formatNotificationTime(latestNotification.createdAt, i18n.language)}</span>
+                <p className="text-sm font-black text-white">{visibleToast.title}</p>
+                <span className="shrink-0 text-[10px] font-bold text-gray-400">{formatNotificationTime(visibleToast.createdAt, i18n.language)}</span>
               </div>
-              <p className="mt-1 line-clamp-2 text-xs text-gray-300">{latestNotification.message}</p>
+              <p className="mt-1 line-clamp-2 text-xs text-gray-300">{visibleToast.message}</p>
             </button>
           )}
 

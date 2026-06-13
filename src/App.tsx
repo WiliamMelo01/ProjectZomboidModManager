@@ -11,6 +11,7 @@ import { DownloadMods } from "@/components/DownloadMods"
 import { DownloadProgressCard } from "@/components/DownloadProgressCard"
 import { LoadingModsPanel } from "@/components/LoadingModsPanel"
 import { ModsList } from "@/components/ModsList"
+import { ServerConfigurationModal } from "@/components/ServerConfigurationModal"
 import { ServerDetail } from "@/components/ServerDetail"
 import { ServerTestPanel } from "@/components/ServerTestPanel"
 import { Settings as SettingsView } from "@/components/Settings"
@@ -22,11 +23,15 @@ import { findModForServerId, resolveModForBuild } from "@/lib/modBuilds"
 import { getActiveDependencyChain, getWorkshopIdsForModIds } from "@/lib/serverMods"
 import { invokeTauri } from "@/lib/tauri"
 import type { ZomboidMod } from "@/types/mod"
-import type { ZomboidServer } from "@/types/server"
+import type { ServerIniSettings, ZomboidServer } from "@/types/server"
 
 type ServerTestEvent = {
   serverId: string
   event: "started" | "line" | "finished" | "error"
+}
+
+type DeleteServerResult = {
+  backupPath: string
 }
 
 function App() {
@@ -35,6 +40,7 @@ function App() {
   }
 
   const [isCreateServerModalOpen, setIsCreateServerModalOpen] = useState(false)
+  const [serverConfigTarget, setServerConfigTarget] = useState<ZomboidServer | null>(null)
   const [activeTab, setActiveTab] = useState("dashboard")
   const [selectedServer, setSelectedServer] = useState<ZomboidServer | null>(null)
   const [servers, setServers] = useState<ZomboidServer[]>([])
@@ -186,7 +192,7 @@ function App() {
     }
   }
 
-  async function createServer(data: { name: string; modIds: string[]; gameBuild: "b41" | "b42" }) {
+  async function createServer(data: { name: string; modIds: string[]; gameBuild: "b41" | "b42"; maxPlayers: number }) {
     const resolvedModIds = data.modIds.flatMap((modId) => {
       const mod = mods.find((item) => item.id === modId)
       const resolved = mod ? resolveModForBuild(mod, data.gameBuild) : findModForServerId(mods, modId, data.gameBuild)
@@ -198,6 +204,7 @@ function App() {
       modIds: resolvedModIds,
       workshopIds,
       gameBuild: data.gameBuild,
+      maxPlayers: data.maxPlayers,
     })
 
     setServers((currentServers) =>
@@ -206,7 +213,25 @@ function App() {
       ),
     )
     setSelectedServer(createdServer)
+    setServerConfigTarget(createdServer)
     setActiveTab("dashboard")
+  }
+
+  async function updateServerSettings(settings: ServerIniSettings) {
+    if (!serverConfigTarget) return
+
+    const updatedServer = await invokeTauri<ZomboidServer>("update_zomboid_server_settings", {
+      serverId: serverConfigTarget.id,
+      settings,
+    })
+
+    setServers((currentServers) =>
+      currentServers.map((server) => server.id === updatedServer.id ? updatedServer : server).sort((left, right) =>
+        left.name.toLowerCase().localeCompare(right.name.toLowerCase()),
+      ),
+    )
+    setSelectedServer((currentServer) => currentServer?.id === updatedServer.id ? updatedServer : currentServer)
+    setServerConfigTarget(updatedServer)
   }
 
   async function installDownloadedDependencyForServer(server: ZomboidServer, dependencyId: string) {
@@ -236,6 +261,31 @@ function App() {
     const updatedServer = { ...server, gameBuild }
     setSelectedServer(updatedServer)
     setServers((currentServers) => currentServers.map((item) => item.id === server.id ? updatedServer : item))
+  }
+
+  async function deleteServer(server: ZomboidServer) {
+    try {
+      const result = await invokeTauri<DeleteServerResult>("delete_zomboid_server", {
+        serverId: server.id,
+      })
+
+      setServers((currentServers) => currentServers.filter((item) => item.id !== server.id))
+      setSelectedServer((current) => current?.id === server.id ? null : current)
+      await loadServers()
+      addNotification({
+        title: t("dashboard.deleteSuccessTitle"),
+        message: t("dashboard.deleteSuccessBody", { name: server.name, backupPath: result.backupPath }),
+        tone: "success",
+      })
+    } catch (error) {
+      const message = getErrorMessage(error)
+      setServersError(message)
+      addNotification({
+        title: t("dashboard.deleteErrorTitle"),
+        message: t("dashboard.deleteErrorBody", { name: server.name, error: message }),
+        tone: "error",
+      })
+    }
   }
 
   async function scanData() {
@@ -405,6 +455,7 @@ function App() {
                   onOpenSettings={() => setActiveTab("settings")}
                   runningServerTestId={runningServerTestId}
                   onChangeBuild={(gameBuild) => changeServerBuild(selectedServer, gameBuild)}
+                  onConfigureServer={setServerConfigTarget}
                 />
               )
             ) : (
@@ -415,6 +466,8 @@ function App() {
                 onRefresh={loadServers}
                 onCreateServer={() => setIsCreateServerModalOpen(true)}
                 searchQuery={searchQuery}
+                onDeleteServer={deleteServer}
+                onConfigureServer={setServerConfigTarget}
                 onServerClick={(server) => {
                   setSelectedServer(server)
                   void ensureModsLoaded()
@@ -454,6 +507,13 @@ function App() {
         existingServers={servers}
         availableMods={mods}
         onCreate={createServer}
+      />
+
+      <ServerConfigurationModal
+        isOpen={serverConfigTarget !== null}
+        server={serverConfigTarget}
+        onClose={() => setServerConfigTarget(null)}
+        onSave={updateServerSettings}
       />
 
       <ServerTestPanel

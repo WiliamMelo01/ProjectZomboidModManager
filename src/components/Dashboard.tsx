@@ -1,4 +1,4 @@
-import { Activity, ChevronRight, Eye, EyeOff, FolderOpen, Plus, RefreshCw, Server, Star, Trash2, Users, Wifi } from "lucide-react"
+import { Activity, ChevronRight, Eye, EyeOff, FolderOpen, Plus, RefreshCw, Server, Settings, Star, Trash2, Users, Wifi } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -12,6 +12,7 @@ type DashboardProps = {
   onCreateServer: () => void
   searchQuery: string
   onServerClick: (server: ZomboidServer) => void
+  onConfigureServer: (server: ZomboidServer) => void
   onDeleteServer: (server: ZomboidServer) => Promise<void>
 }
 
@@ -26,6 +27,7 @@ export function Dashboard({
   onCreateServer,
   searchQuery,
   onServerClick,
+  onConfigureServer,
   onDeleteServer,
 }: DashboardProps) {
   const { t } = useTranslation()
@@ -88,6 +90,11 @@ export function Dashboard({
 
   const requestDeleteServer = (server: ZomboidServer) => {
     setPendingDeleteServer(server)
+    setContextMenu(null)
+  }
+
+  const configureServer = (server: ZomboidServer) => {
+    onConfigureServer(server)
     setContextMenu(null)
   }
 
@@ -261,6 +268,13 @@ export function Dashboard({
                 {t("dashboard.hide")}
               </>
             )}
+          </button>
+          <button
+            onClick={() => configureServer(contextMenu.server)}
+            className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-orange-500/10 hover:text-orange-300"
+          >
+            <Settings size={16} />
+            {t("dashboard.configure")}
           </button>
           <button
             onClick={() => requestDeleteServer(contextMenu.server)}

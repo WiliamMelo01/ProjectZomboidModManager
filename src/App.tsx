@@ -23,7 +23,7 @@ import { findModForServerId, resolveModForBuild } from "@/lib/modBuilds"
 import { getActiveDependencyChain, getWorkshopIdsForModIds } from "@/lib/serverMods"
 import { invokeTauri } from "@/lib/tauri"
 import type { ZomboidMod } from "@/types/mod"
-import type { ZomboidServer } from "@/types/server"
+import type { ServerIniSettings, ZomboidServer } from "@/types/server"
 
 type ServerTestEvent = {
   serverId: string
@@ -217,14 +217,12 @@ function App() {
     setActiveTab("dashboard")
   }
 
-  async function updateServerSettings(data: { publicName: string; maxPlayers: number; defaultPort: string }) {
+  async function updateServerSettings(settings: ServerIniSettings) {
     if (!serverConfigTarget) return
 
     const updatedServer = await invokeTauri<ZomboidServer>("update_zomboid_server_settings", {
       serverId: serverConfigTarget.id,
-      publicName: data.publicName,
-      maxPlayers: data.maxPlayers,
-      defaultPort: data.defaultPort,
+      settings,
     })
 
     setServers((currentServers) =>
@@ -457,6 +455,7 @@ function App() {
                   onOpenSettings={() => setActiveTab("settings")}
                   runningServerTestId={runningServerTestId}
                   onChangeBuild={(gameBuild) => changeServerBuild(selectedServer, gameBuild)}
+                  onConfigureServer={setServerConfigTarget}
                 />
               )
             ) : (
@@ -468,6 +467,7 @@ function App() {
                 onCreateServer={() => setIsCreateServerModalOpen(true)}
                 searchQuery={searchQuery}
                 onDeleteServer={deleteServer}
+                onConfigureServer={setServerConfigTarget}
                 onServerClick={(server) => {
                   setSelectedServer(server)
                   void ensureModsLoaded()

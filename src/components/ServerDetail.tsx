@@ -1,4 +1,4 @@
-import { ArrowLeft, FilePenLine, Play, RefreshCw, Search, Server } from "lucide-react"
+import { ArrowLeft, FilePenLine, Play, RefreshCw, Search, Server, Settings } from "lucide-react"
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -39,6 +39,7 @@ type ServerDetailProps = {
   onOpenSettings?: () => void
   runningServerTestId?: string | null
   onChangeBuild: (gameBuild: "b41" | "b42") => Promise<void>
+  onConfigureServer: (server: ZomboidServer) => void
 }
 
 const MOVE_MOD_WARNING_KEY = "pzmm_move_mod_warning_modal_seen"
@@ -69,6 +70,7 @@ export function ServerDetail({
   onOpenSettings,
   runningServerTestId,
   onChangeBuild,
+  onConfigureServer,
 }: ServerDetailProps) {
   const { t } = useTranslation()
   const [search, setSearch] = useState("")
@@ -406,6 +408,14 @@ export function ServerDetail({
           </div>
 
           <div className="flex flex-wrap gap-3 relative z-10">
+             <button
+                type="button"
+                onClick={() => onConfigureServer(server)}
+                className="flex items-center gap-2 rounded-xl border border-white/10 bg-[#22272b] px-4 py-2 text-sm font-black text-gray-300 transition-all hover:border-orange-400/30 hover:text-orange-300"
+             >
+                <Settings size={18} />
+                <span>{t("serverDetail.configure")}</span>
+             </button>
              <button
                 onClick={() => void testServer()}
                 disabled={isCurrentServerTesting || isCheckingPorts}

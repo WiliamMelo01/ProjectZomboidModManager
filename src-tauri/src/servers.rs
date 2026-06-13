@@ -1,5 +1,8 @@
 use crate::i18n::text;
-use crate::models::{DeleteServerResult, ZomboidServer, BUILD_41, BUILD_42};
+use crate::models::{
+    DeleteServerResult, ServerIniSettings, ServerLuaSetting, ServerLuaSettingOption,
+    ServerLuaSettings, ZomboidServer, BUILD_41, BUILD_42,
+};
 use crate::mods::{
     normalize_server_values, parse_server_mod_ids, resolve_server_workshop_ids,
     serialize_server_mod_ids,
@@ -53,40 +56,7 @@ fn list_zomboid_servers_impl() -> Result<Vec<ZomboidServer>, String> {
 
 #[tauri::command]
 pub(crate) fn open_zomboid_server_file(server_id: String) -> Result<(), String> {
-    let server_dir = zomboid_server_dir()?;
-    let server_path = server_dir.join(format!("{server_id}.ini"));
-
-    if !server_path.exists() || !server_path.is_file() {
-        return Err(format!(
-            "{}: {}",
-            text(
-                "Server file not found",
-                "Arquivo do servidor nao encontrado"
-            ),
-            server_path.display()
-        ));
-    }
-
-    let canonical_server_dir = server_dir.canonicalize().map_err(|error| {
-        format!(
-            "{} {}: {error}",
-            text("Could not access", "Nao foi possivel acessar"),
-            server_dir.display()
-        )
-    })?;
-    let canonical_server_path = server_path.canonicalize().map_err(|error| {
-        format!(
-            "{} {}: {error}",
-            text("Could not access", "Nao foi possivel acessar"),
-            server_path.display()
-        )
-    })?;
-
-    if !canonical_server_path.starts_with(&canonical_server_dir) {
-        return Err(text("Invalid server file.", "Arquivo de servidor invalido.").to_string());
-    }
-
-    open_file_external(&canonical_server_path)
+    open_file_external(&canonical_zomboid_server_path(&server_id)?)
 }
 
 #[tauri::command]
@@ -276,6 +246,42 @@ fn read_zomboid_server_from_path(path: &Path) -> Result<ZomboidServer, String> {
         active_mod_ids,
         status: "offline".to_string(),
         game_build,
+    })
+}
+
+#[tauri::command]
+pub(crate) async fn get_zomboid_server_settings(
+    server_id: String,
+) -> Result<ServerIniSettings, String> {
+    run_blocking(move || get_zomboid_server_settings_impl(&server_id)).await
+}
+
+fn get_zomboid_server_settings_impl(server_id: &str) -> Result<ServerIniSettings, String> {
+    let server_path = canonical_zomboid_server_path(server_id)?;
+    let content = read_text_lossy(&server_path)?;
+
+    Ok(read_server_ini_settings(&content))
+}
+
+#[tauri::command]
+pub(crate) async fn get_zomboid_server_lua_settings(
+    server_id: String,
+) -> Result<ServerLuaSettings, String> {
+    run_blocking(move || get_zomboid_server_lua_settings_impl(&server_id)).await
+}
+
+fn get_zomboid_server_lua_settings_impl(server_id: &str) -> Result<ServerLuaSettings, String> {
+    let sandbox_path = canonical_zomboid_server_sandbox_path(server_id)?;
+    let file_name = sandbox_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("SandboxVars.lua")
+        .to_string();
+    let content = read_text_lossy(&sandbox_path)?;
+
+    Ok(ServerLuaSettings {
+        file_name,
+        settings: read_server_lua_settings(&content),
     })
 }
 
@@ -537,29 +543,63 @@ fn create_zomboid_server_impl(
 #[tauri::command]
 pub(crate) async fn update_zomboid_server_settings(
     server_id: String,
-    public_name: String,
-    max_players: u32,
-    default_port: String,
+    settings: ServerIniSettings,
 ) -> Result<ZomboidServer, String> {
-    run_blocking(move || {
-        update_zomboid_server_settings_impl(&server_id, &public_name, max_players, &default_port)
-    })
-    .await
+    run_blocking(move || update_zomboid_server_settings_impl(&server_id, &settings)).await
 }
 
 fn update_zomboid_server_settings_impl(
     server_id: &str,
-    public_name: &str,
-    max_players: u32,
-    default_port: &str,
+    settings: &ServerIniSettings,
 ) -> Result<ZomboidServer, String> {
-    let public_name = public_name.trim();
+    let public_name = settings.public_name.trim();
     if public_name.is_empty() {
         return Err(text("Enter a server name.", "Informe um nome para o servidor.").to_string());
     }
 
-    let max_players = validate_max_players(max_players)?;
-    let default_port = validate_port(default_port, "DefaultPort")?;
+    validate_server_ini_settings(settings)?;
+    let canonical_server_path = canonical_zomboid_server_path(server_id)?;
+
+    let content = read_text_lossy(&canonical_server_path)?;
+    let content = write_server_ini_settings(&content, settings);
+
+    fs::write(&canonical_server_path, content).map_err(|error| {
+        format!(
+            "Nao foi possivel salvar {}: {error}",
+            canonical_server_path.display()
+        )
+    })?;
+
+    read_zomboid_server_from_path(&canonical_server_path)
+}
+
+#[tauri::command]
+pub(crate) async fn update_zomboid_server_lua_settings(
+    server_id: String,
+    settings: Vec<ServerLuaSetting>,
+) -> Result<ServerLuaSettings, String> {
+    run_blocking(move || update_zomboid_server_lua_settings_impl(&server_id, &settings)).await
+}
+
+fn update_zomboid_server_lua_settings_impl(
+    server_id: &str,
+    settings: &[ServerLuaSetting],
+) -> Result<ServerLuaSettings, String> {
+    let sandbox_path = canonical_zomboid_server_sandbox_path(server_id)?;
+    let content = read_text_lossy(&sandbox_path)?;
+    let content = write_server_lua_settings(&content, settings)?;
+
+    fs::write(&sandbox_path, content).map_err(|error| {
+        format!(
+            "Nao foi possivel salvar {}: {error}",
+            sandbox_path.display()
+        )
+    })?;
+
+    get_zomboid_server_lua_settings_impl(server_id)
+}
+
+fn canonical_zomboid_server_path(server_id: &str) -> Result<PathBuf, String> {
     let server_dir = zomboid_server_dir()?;
     let server_path = server_dir.join(format!("{server_id}.ini"));
 
@@ -593,19 +633,164 @@ fn update_zomboid_server_settings_impl(
         return Err(text("Invalid server file.", "Arquivo de servidor invalido.").to_string());
     }
 
-    let content = read_text_lossy(&canonical_server_path)?;
-    let content = replace_or_append_ini_value(&content, "PublicName", public_name);
-    let content = replace_or_append_ini_value(&content, "MaxPlayers", &max_players.to_string());
-    let content = replace_or_append_ini_value(&content, "DefaultPort", &default_port.to_string());
+    Ok(canonical_server_path)
+}
 
-    fs::write(&canonical_server_path, content).map_err(|error| {
+fn canonical_zomboid_server_sandbox_path(server_id: &str) -> Result<PathBuf, String> {
+    let server_dir = zomboid_server_dir()?;
+    let sandbox_path = server_dir.join(format!("{server_id}_SandboxVars.lua"));
+
+    if !sandbox_path.exists() || !sandbox_path.is_file() {
+        return Err(format!(
+            "{}: {}",
+            text(
+                "Server SandboxVars file not found",
+                "Arquivo SandboxVars do servidor nao encontrado"
+            ),
+            sandbox_path.display()
+        ));
+    }
+
+    let canonical_server_dir = server_dir.canonicalize().map_err(|error| {
         format!(
-            "Nao foi possivel salvar {}: {error}",
-            canonical_server_path.display()
+            "{} {}: {error}",
+            text("Could not access", "Nao foi possivel acessar"),
+            server_dir.display()
+        )
+    })?;
+    let canonical_sandbox_path = sandbox_path.canonicalize().map_err(|error| {
+        format!(
+            "{} {}: {error}",
+            text("Could not access", "Nao foi possivel acessar"),
+            sandbox_path.display()
         )
     })?;
 
-    read_zomboid_server_from_path(&canonical_server_path)
+    if !canonical_sandbox_path.starts_with(&canonical_server_dir) {
+        return Err(text("Invalid server file.", "Arquivo de servidor invalido.").to_string());
+    }
+
+    Ok(canonical_sandbox_path)
+}
+
+fn read_server_ini_settings(content: &str) -> ServerIniSettings {
+    ServerIniSettings {
+        public_name: read_ini_string(content, "PublicName", "My PZ Server"),
+        public_description: read_ini_string(content, "PublicDescription", ""),
+        password: read_ini_string(content, "Password", ""),
+        max_players: read_ini_u32(content, "MaxPlayers", 32),
+        default_port: read_ini_string(content, "DefaultPort", "16261"),
+        udp_port: read_ini_string(content, "UDPPort", "16262"),
+        is_public: read_ini_bool(content, "Public", false),
+        is_open: read_ini_bool(content, "Open", true),
+        pvp: read_ini_bool(content, "PVP", true),
+        pause_empty: read_ini_bool(content, "PauseEmpty", true),
+        global_chat: read_ini_bool(content, "GlobalChat", true),
+        display_user_name: read_ini_bool(content, "DisplayUserName", true),
+        safety_system: read_ini_bool(content, "SafetySystem", true),
+        voice_enable: read_ini_bool(content, "VoiceEnable", true),
+        steam_vac: read_ini_bool(content, "SteamVAC", true),
+        upnp: read_ini_bool(content, "UPnP", true),
+        ping_limit: read_ini_u32(content, "PingLimit", 400),
+        save_world_every_minutes: read_ini_u32(content, "SaveWorldEveryMinutes", 0),
+        hours_for_loot_respawn: read_ini_u32(content, "HoursForLootRespawn", 0),
+        player_safehouse: read_ini_bool(content, "PlayerSafehouse", false),
+        admin_safehouse: read_ini_bool(content, "AdminSafehouse", false),
+        backups_count: read_ini_u32(content, "BackupsCount", 5),
+        backups_on_start: read_ini_bool(content, "BackupsOnStart", true),
+        backups_period: read_ini_u32(content, "BackupsPeriod", 0),
+    }
+}
+
+fn write_server_ini_settings(content: &str, settings: &ServerIniSettings) -> String {
+    let values = [
+        ("PublicName", settings.public_name.trim().to_string()),
+        (
+            "PublicDescription",
+            settings.public_description.trim().to_string(),
+        ),
+        ("Password", settings.password.trim().to_string()),
+        ("MaxPlayers", settings.max_players.to_string()),
+        ("DefaultPort", settings.default_port.trim().to_string()),
+        ("UDPPort", settings.udp_port.trim().to_string()),
+        ("Public", bool_ini_value(settings.is_public).to_string()),
+        ("Open", bool_ini_value(settings.is_open).to_string()),
+        ("PVP", bool_ini_value(settings.pvp).to_string()),
+        (
+            "PauseEmpty",
+            bool_ini_value(settings.pause_empty).to_string(),
+        ),
+        (
+            "GlobalChat",
+            bool_ini_value(settings.global_chat).to_string(),
+        ),
+        (
+            "DisplayUserName",
+            bool_ini_value(settings.display_user_name).to_string(),
+        ),
+        (
+            "SafetySystem",
+            bool_ini_value(settings.safety_system).to_string(),
+        ),
+        (
+            "VoiceEnable",
+            bool_ini_value(settings.voice_enable).to_string(),
+        ),
+        ("SteamVAC", bool_ini_value(settings.steam_vac).to_string()),
+        ("UPnP", bool_ini_value(settings.upnp).to_string()),
+        ("PingLimit", settings.ping_limit.to_string()),
+        (
+            "SaveWorldEveryMinutes",
+            settings.save_world_every_minutes.to_string(),
+        ),
+        (
+            "HoursForLootRespawn",
+            settings.hours_for_loot_respawn.to_string(),
+        ),
+        (
+            "PlayerSafehouse",
+            bool_ini_value(settings.player_safehouse).to_string(),
+        ),
+        (
+            "AdminSafehouse",
+            bool_ini_value(settings.admin_safehouse).to_string(),
+        ),
+        ("BackupsCount", settings.backups_count.to_string()),
+        (
+            "BackupsOnStart",
+            bool_ini_value(settings.backups_on_start).to_string(),
+        ),
+        ("BackupsPeriod", settings.backups_period.to_string()),
+    ];
+
+    values
+        .into_iter()
+        .fold(content.to_string(), |current, (key, value)| {
+            replace_or_append_ini_value(&current, key, &value)
+        })
+}
+
+fn validate_server_ini_settings(settings: &ServerIniSettings) -> Result<(), String> {
+    validate_max_players(settings.max_players)?;
+    validate_port(&settings.default_port, "DefaultPort")?;
+    validate_port(&settings.udp_port, "UDPPort")?;
+    validate_range(settings.ping_limit, 100, u32::MAX, "PingLimit")?;
+    validate_range(
+        settings.save_world_every_minutes,
+        0,
+        u32::MAX,
+        "SaveWorldEveryMinutes",
+    )?;
+    validate_range(
+        settings.hours_for_loot_respawn,
+        0,
+        u32::MAX,
+        "HoursForLootRespawn",
+    )?;
+    validate_range(settings.backups_count, 1, 300, "BackupsCount")?;
+    validate_range(settings.backups_period, 0, 1500, "BackupsPeriod")?;
+
+    Ok(())
 }
 
 fn server_builds_path() -> Result<PathBuf, String> {
@@ -640,6 +825,267 @@ fn validate_port(value: &str, label: &str) -> Result<u16, String> {
     }
 
     Ok(port)
+}
+
+fn validate_range(value: u32, min: u32, max: u32, label: &str) -> Result<u32, String> {
+    if (min..=max).contains(&value) {
+        return Ok(value);
+    }
+
+    Err(format!(
+        "{} {label} ({}-{}).",
+        text("Enter a valid value for", "Informe um valor valido para"),
+        min,
+        max
+    ))
+}
+
+fn read_ini_string(content: &str, key: &str, fallback: &str) -> String {
+    read_ini_value(content, key).unwrap_or_else(|| fallback.to_string())
+}
+
+fn read_ini_u32(content: &str, key: &str, fallback: u32) -> u32 {
+    read_ini_value(content, key)
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(fallback)
+}
+
+fn read_ini_bool(content: &str, key: &str, fallback: bool) -> bool {
+    read_ini_value(content, key)
+        .and_then(|value| match value.trim().to_lowercase().as_str() {
+            "true" | "1" | "yes" | "on" => Some(true),
+            "false" | "0" | "no" | "off" => Some(false),
+            _ => None,
+        })
+        .unwrap_or(fallback)
+}
+
+fn bool_ini_value(value: bool) -> &'static str {
+    if value {
+        "true"
+    } else {
+        "false"
+    }
+}
+
+fn read_server_lua_settings(content: &str) -> Vec<ServerLuaSetting> {
+    let mut settings = Vec::new();
+    let mut sections = Vec::new();
+    let mut comments = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        if let Some(comment) = trimmed.strip_prefix("--") {
+            comments.push(comment.trim().to_string());
+            continue;
+        }
+
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if is_lua_table_close(trimmed) {
+            sections.pop();
+            comments.clear();
+            continue;
+        }
+
+        let Some((key, value)) = parse_lua_assignment(trimmed) else {
+            comments.clear();
+            continue;
+        };
+
+        if value == "{" {
+            if !(sections.is_empty() && key == "SandboxVars") {
+                sections.push(key.to_string());
+            }
+            comments.clear();
+            continue;
+        }
+
+        let Some((value_kind, parsed_value)) = parse_lua_setting_value(value) else {
+            comments.clear();
+            continue;
+        };
+        let section = if sections.is_empty() {
+            "SandboxVars".to_string()
+        } else {
+            sections.join(".")
+        };
+        let path = if sections.is_empty() {
+            key.to_string()
+        } else {
+            format!("{}.{}", sections.join("."), key)
+        };
+
+        settings.push(ServerLuaSetting {
+            path,
+            key: key.to_string(),
+            section,
+            value: parsed_value,
+            value_kind: value_kind.to_string(),
+            default_value: extract_lua_default_value(&comments),
+            options: extract_lua_setting_options(&comments),
+        });
+        comments.clear();
+    }
+
+    settings
+}
+
+fn extract_lua_setting_options(comments: &[String]) -> Vec<ServerLuaSettingOption> {
+    comments
+        .iter()
+        .filter_map(|comment| {
+            let (value, label) = comment.split_once('=')?;
+            let value = value.trim();
+            let label = label.trim();
+
+            if value.is_empty()
+                || label.is_empty()
+                || !value
+                    .chars()
+                    .all(|char| char.is_ascii_digit() || char == '-' || char == '.')
+                || value.parse::<f64>().is_err()
+            {
+                return None;
+            }
+
+            Some(ServerLuaSettingOption {
+                value: value.to_string(),
+                label: label.to_string(),
+            })
+        })
+        .collect()
+}
+
+fn extract_lua_default_value(comments: &[String]) -> Option<String> {
+    comments.iter().find_map(|comment| {
+        let marker_start = comment.find("Padr")?;
+        let marker = &comment[marker_start..];
+        let (_, value) = marker.split_once('=')?;
+        let value = value.trim();
+
+        if value.is_empty() {
+            None
+        } else {
+            Some(value.to_string())
+        }
+    })
+}
+
+fn write_server_lua_settings(
+    content: &str,
+    settings: &[ServerLuaSetting],
+) -> Result<String, String> {
+    let values = settings
+        .iter()
+        .map(|setting| {
+            let value = format_lua_setting_value(setting)?;
+            Ok((setting.path.clone(), value))
+        })
+        .collect::<Result<HashMap<_, _>, String>>()?;
+    let mut sections = Vec::new();
+    let mut output = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        if is_lua_table_close(trimmed) {
+            sections.pop();
+            output.push(line.to_string());
+            continue;
+        }
+
+        let Some((key, value)) = parse_lua_assignment(trimmed) else {
+            output.push(line.to_string());
+            continue;
+        };
+
+        if value == "{" {
+            if !(sections.is_empty() && key == "SandboxVars") {
+                sections.push(key.to_string());
+            }
+            output.push(line.to_string());
+            continue;
+        }
+
+        let path = if sections.is_empty() {
+            key.to_string()
+        } else {
+            format!("{}.{}", sections.join("."), key)
+        };
+
+        if let Some(next_value) = values.get(&path) {
+            let indent = line
+                .chars()
+                .take_while(|char| char.is_whitespace())
+                .collect::<String>();
+            let comma = if trimmed.ends_with(',') { "," } else { "" };
+            output.push(format!("{indent}{key} = {next_value}{comma}"));
+        } else {
+            output.push(line.to_string());
+        }
+    }
+
+    let trailing_newline = if content.ends_with('\n') { "\n" } else { "" };
+    Ok(format!("{}{}", output.join("\n"), trailing_newline))
+}
+
+fn parse_lua_assignment(line: &str) -> Option<(&str, &str)> {
+    let (key, value) = line.split_once('=')?;
+    let key = key.trim();
+
+    if key.is_empty()
+        || !key
+            .chars()
+            .all(|char| char.is_ascii_alphanumeric() || char == '_')
+    {
+        return None;
+    }
+
+    let value = value.trim().trim_end_matches(',').trim();
+    Some((key, value))
+}
+
+fn parse_lua_setting_value(value: &str) -> Option<(&'static str, String)> {
+    if value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("false") {
+        return Some(("boolean", value.to_ascii_lowercase()));
+    }
+
+    if value.parse::<f64>().is_ok() {
+        return Some(("number", value.to_string()));
+    }
+
+    if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
+        return Some(("string", value[1..value.len() - 1].replace("\\\"", "\"")));
+    }
+
+    None
+}
+
+fn format_lua_setting_value(setting: &ServerLuaSetting) -> Result<String, String> {
+    match setting.value_kind.as_str() {
+        "boolean" => match setting.value.trim().to_lowercase().as_str() {
+            "true" | "1" | "yes" | "on" => Ok("true".to_string()),
+            "false" | "0" | "no" | "off" => Ok("false".to_string()),
+            _ => Err(format!("Valor booleano invalido para {}.", setting.path)),
+        },
+        "number" => {
+            let value = setting.value.trim();
+            value
+                .parse::<f64>()
+                .map(|_| value.to_string())
+                .map_err(|_| format!("Valor numerico invalido para {}.", setting.path))
+        }
+        "string" => Ok(format!("\"{}\"", setting.value.replace('\\', "\\\\").replace('"', "\\\""))),
+        _ => Err(format!("Tipo de valor invalido para {}.", setting.path)),
+    }
+}
+
+fn is_lua_table_close(line: &str) -> bool {
+    line == "}" || line == "},"
 }
 
 fn normalize_game_build(game_build: &str) -> Result<&'static str, String> {
@@ -900,13 +1346,17 @@ mod tests {
         )
         .expect("server ini should be written");
 
-        let server = update_zomboid_server_settings_impl(
-            "SettingsServer",
-            "New Name",
-            24,
-            "16271",
-        )
-        .expect("server settings should be updated");
+        let mut settings = get_zomboid_server_settings_impl("SettingsServer")
+            .expect("server settings should be readable");
+        settings.public_name = "New Name".to_string();
+        settings.max_players = 24;
+        settings.default_port = "16271".to_string();
+        settings.udp_port = "16272".to_string();
+        settings.pvp = false;
+        settings.backups_count = 7;
+
+        let server = update_zomboid_server_settings_impl("SettingsServer", &settings)
+            .expect("server settings should be updated");
         let content = read_text_lossy(&server_path).expect("server ini should be readable");
 
         assert_eq!(server.name, "New Name");
@@ -915,6 +1365,9 @@ mod tests {
         assert!(content.contains("PublicName=New Name"));
         assert!(content.contains("MaxPlayers=24"));
         assert!(content.contains("DefaultPort=16271"));
+        assert!(content.contains("UDPPort=16272"));
+        assert!(content.contains("PVP=false"));
+        assert!(content.contains("BackupsCount=7"));
 
         let _ = fs::remove_dir_all(root);
     }
@@ -928,14 +1381,185 @@ mod tests {
         configure_test_env(&root);
         let server_dir = zomboid_server_dir().expect("server dir should resolve");
         fs::create_dir_all(&server_dir).expect("server dir should be created");
-        fs::write(server_dir.join("SettingsServer.ini"), "PublicName=Old Name\n")
-            .expect("server ini should be written");
+        fs::write(
+            server_dir.join("SettingsServer.ini"),
+            "PublicName=Old Name\n",
+        )
+        .expect("server ini should be written");
 
-        let error = update_zomboid_server_settings_impl("SettingsServer", "New Name", 0, "16261")
+        let mut settings = read_server_ini_settings("PublicName=Old Name\n");
+        settings.public_name = "New Name".to_string();
+        settings.max_players = 0;
+
+        let error = update_zomboid_server_settings_impl("SettingsServer", &settings)
             .expect_err("invalid player count should fail");
 
         assert!(error.contains("Max players") || error.contains("jogadores"));
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reads_server_settings_from_ini_values() {
+        let content = concat!(
+            "PublicName=Read Me\n",
+            "PublicDescription=Visible server\n",
+            "Password=hunter2\n",
+            "MaxPlayers=12\n",
+            "DefaultPort=16261\n",
+            "UDPPort=16262\n",
+            "Public=true\n",
+            "Open=false\n",
+            "PVP=false\n",
+            "PauseEmpty=false\n",
+            "BackupsCount=9\n",
+        );
+
+        let settings = read_server_ini_settings(content);
+
+        assert_eq!(settings.public_name, "Read Me");
+        assert_eq!(settings.public_description, "Visible server");
+        assert_eq!(settings.password, "hunter2");
+        assert_eq!(settings.max_players, 12);
+        assert!(settings.is_public);
+        assert!(!settings.is_open);
+        assert!(!settings.pvp);
+        assert!(!settings.pause_empty);
+        assert_eq!(settings.backups_count, 9);
+    }
+
+    #[test]
+    fn reads_nested_lua_settings_from_sandbox_vars() {
+        let content = concat!(
+            "SandboxVars = {\n",
+            "    -- Padrao=Normal\n",
+            "    -- 1 = Insano\n",
+            "    -- 4 = Normal\n",
+            "    Zombies = 4,\n",
+            "    StarterKit = false,\n",
+            "    WorldItemRemovalList = \"Base.Hat,Base.Glasses\",\n",
+            "    Map = {\n",
+            "        AllowWorldMap = true,\n",
+            "    },\n",
+            "    ZombieConfig = {\n",
+            "        -- Minimo = 0,00 Maximo = 4,00 Padrao = 1,00\n",
+            "        PopulationMultiplier = 1.5,\n",
+            "    },\n",
+            "}\n",
+        );
+
+        let settings = read_server_lua_settings(content);
+
+        assert!(settings.iter().any(|setting| {
+            setting.path == "Zombies"
+                && setting.value == "4"
+                && setting.value_kind == "number"
+                && setting.section == "SandboxVars"
+                && setting.default_value.as_deref() == Some("Normal")
+                && setting.options
+                    == vec![
+                        ServerLuaSettingOption {
+                            value: "1".to_string(),
+                            label: "Insano".to_string(),
+                        },
+                        ServerLuaSettingOption {
+                            value: "4".to_string(),
+                            label: "Normal".to_string(),
+                        },
+                    ]
+        }));
+        assert!(settings.iter().any(|setting| {
+            setting.path == "StarterKit"
+                && setting.value == "false"
+                && setting.value_kind == "boolean"
+        }));
+        assert!(settings.iter().any(|setting| {
+            setting.path == "WorldItemRemovalList"
+                && setting.value == "Base.Hat,Base.Glasses"
+                && setting.value_kind == "string"
+        }));
+        assert!(settings.iter().any(|setting| {
+            setting.path == "Map.AllowWorldMap"
+                && setting.section == "Map"
+                && setting.value == "true"
+        }));
+        assert!(settings.iter().any(|setting| {
+            setting.path == "ZombieConfig.PopulationMultiplier"
+                && setting.section == "ZombieConfig"
+                && setting.value == "1.5"
+                && setting.default_value.as_deref() == Some("1,00")
+                && setting.options.is_empty()
+        }));
+    }
+
+    #[test]
+    fn reads_lua_options_and_defaults_for_nested_values() {
+        let content = concat!(
+            "SandboxVars = {\n",
+            "    ZombieLore = {\n",
+            "        -- Controla a movimentacao do zumbi. Padrao=Normal\n",
+            "        -- 1 = Corredores (Sprinters)\n",
+            "        -- 2 = Normal\n",
+            "        -- 3 = Lento\n",
+            "        Speed = 2,\n",
+            "    },\n",
+            "}\n",
+        );
+
+        let settings = read_server_lua_settings(content);
+        let speed = settings
+            .iter()
+            .find(|setting| setting.path == "ZombieLore.Speed")
+            .expect("nested setting should be parsed");
+
+        assert_eq!(speed.default_value.as_deref(), Some("Normal"));
+        assert_eq!(
+            speed.options,
+            vec![
+                ServerLuaSettingOption {
+                    value: "1".to_string(),
+                    label: "Corredores (Sprinters)".to_string(),
+                },
+                ServerLuaSettingOption {
+                    value: "2".to_string(),
+                    label: "Normal".to_string(),
+                },
+                ServerLuaSettingOption {
+                    value: "3".to_string(),
+                    label: "Lento".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn writes_lua_settings_without_reordering_file() {
+        let content = concat!(
+            "SandboxVars = {\n",
+            "    Zombies = 4,\n",
+            "    StarterKit = false,\n",
+            "    Map = {\n",
+            "        AllowWorldMap = true,\n",
+            "    },\n",
+            "}\n",
+        );
+        let mut settings = read_server_lua_settings(content);
+
+        for setting in &mut settings {
+            match setting.path.as_str() {
+                "Zombies" => setting.value = "5".to_string(),
+                "StarterKit" => setting.value = "true".to_string(),
+                "Map.AllowWorldMap" => setting.value = "false".to_string(),
+                _ => {}
+            }
+        }
+
+        let updated =
+            write_server_lua_settings(content, &settings).expect("lua settings should be written");
+
+        assert!(updated.contains("    Zombies = 5,"));
+        assert!(updated.contains("    StarterKit = true,"));
+        assert!(updated.contains("        AllowWorldMap = false,"));
+        assert!(updated.ends_with('\n'));
     }
 }

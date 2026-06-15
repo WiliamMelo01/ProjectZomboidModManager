@@ -59,7 +59,7 @@ export function ServerModDetailsModal({ mod, onClose }: ServerModDetailsModalPro
           </button>
           <div className="absolute bottom-5 left-6 right-6">
             <div className="mb-2 flex flex-wrap gap-2">
-              <Badge>{isLocalMod(mod) ? "LOCAL" : "STEAM"}</Badge>
+              <SourceBadge mod={mod} />
               {mod.compatibleBuilds.map((build) => <Badge key={build}>{build}</Badge>)}
               {mod.source === "missing" && <Badge tone="red">{t("mods.missing")}</Badge>}
             </div>
@@ -97,13 +97,28 @@ export function ServerModDetailsModal({ mod, onClose }: ServerModDetailsModalPro
   )
 }
 
-function Badge({ children, tone = "orange" }: { children: React.ReactNode; tone?: "orange" | "red" }) {
+function SourceBadge({ mod }: { mod: ZomboidMod }) {
+  if (isLocalMod(mod)) {
+    return <Badge tone="green">LOCAL</Badge>
+  }
+
+  if (mod.source === "steamcmd") {
+    return <Badge tone="blue">STEAMCMD</Badge>
+  }
+
+  return <Badge>STEAM</Badge>
+}
+
+function Badge({ children, tone = "orange" }: { children: React.ReactNode; tone?: "orange" | "red" | "green" | "blue" }) {
+  const toneClass = {
+    blue: "border-sky-400/30 bg-sky-400/15 text-sky-200",
+    green: "border-green-400/30 bg-green-400/15 text-green-200",
+    orange: "border-orange-400/30 bg-orange-400/15 text-orange-200",
+    red: "border-red-500/30 bg-red-500/15 text-red-200",
+  }[tone]
+
   return (
-    <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-wide ${
-      tone === "red"
-        ? "border-red-500/30 bg-red-500/15 text-red-200"
-        : "border-orange-400/30 bg-orange-400/15 text-orange-200"
-    }`}>
+    <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-wide ${toneClass}`}>
       {children}
     </span>
   )

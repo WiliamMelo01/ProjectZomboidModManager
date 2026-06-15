@@ -6,7 +6,7 @@ use crate::workshop::open_path_external;
 use crate::{
     app_settings_path, ensure_managed_steamcmd_pool, managed_steamcmd_pool_instance_path,
     managed_steamcmd_pool_workshop_dirs, read_config_value, read_saved_custom_mod_locations,
-    read_saved_mod_locations, run_blocking, validate_steamcmd_path, zomboid_mods_dir,
+    read_saved_mod_locations, run_blocking, zomboid_mods_dir,
 };
 use std::{collections::HashSet, env, fs, path::PathBuf, process::Command};
 
@@ -46,24 +46,6 @@ pub(crate) async fn save_app_settings(
         )
     })
     .await
-}
-
-#[tauri::command]
-pub(crate) async fn detect_steamcmd_path(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    run_blocking(move || {
-        let max_concurrent_downloads = read_max_concurrent_downloads()?;
-        let steamcmd_paths = ensure_managed_steamcmd_pool(&app, max_concurrent_downloads as usize)?;
-
-        Ok(steamcmd_paths
-            .first()
-            .map(|path| path.display().to_string()))
-    })
-    .await
-}
-
-#[tauri::command]
-pub(crate) async fn select_steamcmd_path() -> Result<Option<String>, String> {
-    run_blocking(select_steamcmd_path_impl).await
 }
 
 #[tauri::command]
@@ -445,76 +427,6 @@ fn open_mod_location_impl(path: &str) -> Result<(), String> {
     }
 
     open_path_external(&path)
-}
-
-#[cfg(windows)]
-fn select_steamcmd_path_impl() -> Result<Option<String>, String> {
-    let script = format!(r#"
-Add-Type -AssemblyName System.Windows.Forms
-$dialog = New-Object System.Windows.Forms.OpenFileDialog
-$dialog.Title = '{}'
-$dialog.Filter = '{}'
-$dialog.CheckFileExists = $true
-$dialog.Multiselect = $false
-if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
-  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-  Write-Output $dialog.FileName
-}}
-"#, text("Select steamcmd.exe", "Selecionar steamcmd.exe"), text("SteamCMD (steamcmd.exe)|steamcmd.exe|Executables (*.exe)|*.exe|All files (*.*)|*.*", "SteamCMD (steamcmd.exe)|steamcmd.exe|Executaveis (*.exe)|*.exe|Todos os arquivos (*.*)|*.*"));
-
-    let mut command = Command::new("powershell.exe");
-    let output = hide_command_window(&mut command)
-        .args([
-            "-NoProfile",
-            "-STA",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &script,
-        ])
-        .output()
-        .map_err(|error| {
-            format!(
-                "{}: {error}",
-                text(
-                    "Could not open the file picker",
-                    "Nao foi possivel abrir o seletor de arquivos"
-                )
-            )
-        })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-
-        return Err(if stderr.is_empty() {
-            text(
-                "Could not select the SteamCMD executable.",
-                "Nao foi possivel selecionar o executavel do SteamCMD.",
-            )
-            .to_string()
-        } else {
-            stderr
-        });
-    }
-
-    let selected_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-
-    if selected_path.is_empty() {
-        return Ok(None);
-    }
-
-    validate_steamcmd_path(&PathBuf::from(&selected_path))?;
-
-    Ok(Some(selected_path))
-}
-
-#[cfg(not(windows))]
-fn select_steamcmd_path_impl() -> Result<Option<String>, String> {
-    Err(text(
-        "Automatic file selection is available only on Windows.",
-        "Selecao de arquivo automatica esta disponivel apenas no Windows.",
-    )
-    .to_string())
 }
 
 #[cfg(windows)]

@@ -41,8 +41,8 @@ use servers::{
     update_zomboid_server_mods, update_zomboid_server_settings,
 };
 use settings::{
-    add_mod_location, detect_steamcmd_path, get_app_settings, get_mod_locations, push_mod_location,
-    open_mod_location, save_app_settings, select_mod_folder, select_steamcmd_path,
+    add_mod_location, get_app_settings, get_mod_locations, open_mod_location, push_mod_location,
+    save_app_settings, select_mod_folder,
     DEFAULT_MAX_CONCURRENT_DOWNLOADS,
 };
 use util::*;
@@ -435,31 +435,6 @@ fn saved_custom_mod_dirs() -> Result<Vec<PathBuf>, String> {
         .collect())
 }
 
-fn validate_steamcmd_path(path: &Path) -> Result<(), String> {
-    if !path.exists() {
-        return Err(format!("SteamCMD nao encontrado em {}.", path.display()));
-    }
-
-    if !path.is_file() {
-        return Err(format!(
-            "O caminho {} nao aponta para um arquivo.",
-            path.display()
-        ));
-    }
-
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default()
-        .to_lowercase();
-
-    if file_name != "steamcmd.exe" && file_name != "steamcmd" {
-        return Err("Selecione o executavel steamcmd.exe.".to_string());
-    }
-
-    Ok(())
-}
-
 fn read_steam_library_dirs(libraryfolders_path: &Path) -> Vec<PathBuf> {
     let Ok(content) = read_text_lossy(libraryfolders_path) else {
         return Vec::new();
@@ -520,8 +495,6 @@ fn main() {
             get_app_settings,
             get_mod_locations,
             save_app_settings,
-            detect_steamcmd_path,
-            select_steamcmd_path,
             select_game_executable,
             get_system_ram,
             scan_zomboid_installation,

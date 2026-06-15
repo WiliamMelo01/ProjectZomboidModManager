@@ -15,7 +15,6 @@ import type { AppSettings, LanguagePreference, ModLocation, ZomboidInstallationS
 export function Settings() {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<"mods" | "ram">("mods")
-  const [steamCmdPath, setSteamCmdPath] = useState("")
   const [gameExecutablePath, setGameExecutablePath] = useState("")
   const [clientRam, setClientRam] = useState("4.00")
   const [serverRam, setServerRam] = useState("4.00")
@@ -63,7 +62,7 @@ export function Settings() {
 
     try {
       const settings = await invokeTauri<AppSettings>("save_app_settings", {
-        steamcmdPath: steamCmdPath.trim(),
+        steamcmdPath: "",
         gameExecutablePath: gameExecutablePath.trim(),
         clientRam,
         serverRam,
@@ -130,54 +129,13 @@ export function Settings() {
     }
   }
 
-  async function detectSteamCmd() {
-    setMessage(null)
-    setError(null)
-
-    try {
-      const detectedPath = await invokeTauri<string | null>("detect_steamcmd_path")
-
-      if (detectedPath) {
-        setSteamCmdPath(detectedPath)
-        setMessage(t("settings.steamcmd.detected"))
-      } else {
-        setError(t("settings.steamcmd.notFound"))
-      }
-    } catch (detectError) {
-      setError(getErrorMessage(detectError))
-    }
-  }
-
-  async function browseSteamCmd() {
-    setMessage(null)
-    setError(null)
-
-    try {
-      const selectedPath = await invokeTauri<string | null>("select_steamcmd_path")
-
-      if (selectedPath) {
-        setSteamCmdPath(selectedPath)
-        setMessage(t("settings.steamcmd.selected"))
-      }
-    } catch (browseError) {
-      setError(getErrorMessage(browseError))
-    }
-  }
-
   function clearPath() {
-    if (activeTab === "ram") {
-      setGameExecutablePath("")
-      setMessage(t("settings.clearedGamePath"))
-    } else {
-      setSteamCmdPath("")
-      setMessage(t("settings.clearedSteamcmdPath"))
-    }
-
+    setGameExecutablePath("")
+    setMessage(t("settings.clearedGamePath"))
     setError(null)
   }
 
   function applySettings(settings: AppSettings) {
-    setSteamCmdPath(settings.steamcmdPath ?? "")
     setResolvedPath(settings.resolvedSteamcmdPath ?? null)
     setIsConfigured(Boolean(settings.isSteamcmdConfigured))
     setGameExecutablePath(settings.gameExecutablePath ?? "")
@@ -301,14 +259,10 @@ export function Settings() {
               {activeTab === "mods" && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <SteamCmdSettingsSection
-                    path={steamCmdPath}
                     resolvedPath={resolvedPath}
                     isConfigured={isConfigured}
-                    onPathChange={setSteamCmdPath}
                     maxConcurrentDownloads={maxConcurrentDownloads}
                     onMaxConcurrentDownloadsChange={setMaxConcurrentDownloads}
-                    onBrowse={() => void browseSteamCmd()}
-                    onDetect={() => void detectSteamCmd()}
                   />
                   <ModLocationsSection
                     locations={modLocations}
@@ -350,12 +304,14 @@ export function Settings() {
               )}
 
               <div className="flex flex-col justify-end gap-3 pt-4 sm:flex-row">
-                <button
-                  onClick={clearPath}
-                  className="rounded-2xl border border-white/10 px-6 py-4 text-sm font-bold text-gray-400 transition-all hover:bg-white/5 hover:text-white"
-                >
-                  {t("settings.clearPath")}
-                </button>
+                {activeTab === "ram" && (
+                  <button
+                    onClick={clearPath}
+                    className="rounded-2xl border border-white/10 px-6 py-4 text-sm font-bold text-gray-400 transition-all hover:bg-white/5 hover:text-white"
+                  >
+                    {t("settings.clearPath")}
+                  </button>
+                )}
                 <button
                   disabled={isLoading || isSaving}
                   onClick={() => void saveSettings()}

@@ -119,6 +119,7 @@ pub(crate) struct AppSettings {
     pub(crate) game_executable_path: String,
     pub(crate) client_ram: String,
     pub(crate) server_ram: String,
+    pub(crate) max_concurrent_downloads: u32,
     pub(crate) language_preference: String,
 }
 
@@ -127,6 +128,7 @@ pub(crate) struct AppSettings {
 pub(crate) struct WorkshopDownloadResult {
     pub(crate) total_items: usize,
     pub(crate) downloaded_items: usize,
+    pub(crate) skipped_items: usize,
     pub(crate) failed_items: Vec<WorkshopDownloadFailedItem>,
     pub(crate) cancelled_items: usize,
     pub(crate) was_cancelled: bool,
@@ -147,6 +149,15 @@ pub(crate) struct WorkshopDownloadEvent {
     pub(crate) name: String,
     pub(crate) status: String,
     pub(crate) error: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WorkshopDownloadLogEvent {
+    pub(crate) instance_id: usize,
+    pub(crate) label: String,
+    pub(crate) color_key: String,
+    pub(crate) line: String,
 }
 
 #[derive(Serialize)]

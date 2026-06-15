@@ -4,10 +4,15 @@ use crate::models::{AppSettings, ModLocation};
 use crate::util::hide_command_window;
 use crate::{
     app_settings_path, ensure_managed_steamcmd, find_steamcmd_path, read_config_value,
-    read_configured_steamcmd_path, read_saved_custom_mod_locations, read_saved_mod_locations,
-    run_blocking, validate_steamcmd_path, zomboid_mods_dir,
+    managed_steamcmd_pool_workshop_dirs, read_configured_steamcmd_path,
+    read_saved_custom_mod_locations, read_saved_mod_locations, run_blocking,
+    validate_steamcmd_path, zomboid_mods_dir,
 };
 use std::{collections::HashSet, env, fs, path::PathBuf, process::Command};
+
+pub(crate) const DEFAULT_MAX_CONCURRENT_DOWNLOADS: u32 = 2;
+pub(crate) const MAX_CONCURRENT_DOWNLOADS_LIMIT: u32 = 3;
+
 #[tauri::command]
 pub(crate) async fn get_app_settings(app: tauri::AppHandle) -> Result<AppSettings, String> {
     run_blocking(move || {
@@ -28,6 +33,7 @@ pub(crate) async fn save_app_settings(
     game_executable_path: String,
     client_ram: String,
     server_ram: String,
+    max_concurrent_downloads: Option<u32>,
 ) -> Result<AppSettings, String> {
     run_blocking(move || {
         save_app_settings_impl(
@@ -35,6 +41,7 @@ pub(crate) async fn save_app_settings(
             &game_executable_path,
             &client_ram,
             &server_ram,
+            max_concurrent_downloads.unwrap_or(DEFAULT_MAX_CONCURRENT_DOWNLOADS),
         )
     })
     .await
@@ -71,6 +78,7 @@ fn load_app_settings() -> Result<AppSettings, String> {
     let game_executable_path = read_config_value("game_executable_path")?.unwrap_or_default();
     let client_ram = read_config_value("client_ram")?.unwrap_or_else(|| "4.00".to_string());
     let server_ram = read_config_value("server_ram")?.unwrap_or_else(|| "4.00".to_string());
+    let max_concurrent_downloads = read_max_concurrent_downloads()?;
     let language_preference = read_language_preference()?;
 
     Ok(AppSettings {
@@ -80,6 +88,7 @@ fn load_app_settings() -> Result<AppSettings, String> {
         game_executable_path,
         client_ram,
         server_ram,
+        max_concurrent_downloads,
         language_preference,
     })
 }
@@ -105,12 +114,14 @@ fn get_mod_locations_impl() -> Result<Vec<ModLocation>, String> {
     let game_executable_path = read_config_value("game_executable_path")?.unwrap_or_default();
     let client_ram = read_config_value("client_ram")?.unwrap_or_else(|| "4.00".to_string());
     let server_ram = read_config_value("server_ram")?.unwrap_or_else(|| "4.00".to_string());
+    let max_concurrent_downloads = read_max_concurrent_downloads()?;
     let language_preference = read_language_preference()?;
     write_app_settings_file(
         &steamcmd_path,
         &game_executable_path,
         &client_ram,
         &server_ram,
+        max_concurrent_downloads,
         &language_preference,
         &locations,
     )?;
@@ -179,6 +190,18 @@ fn build_default_mod_locations(steamcmd_path: Option<&str>) -> Result<Vec<ModLoc
         }
     }
 
+    let steamcmd_label = mod_location_label("steamcmd", None);
+    for (index, pool_workshop_dir) in managed_steamcmd_pool_workshop_dirs().into_iter().enumerate()
+    {
+        push_mod_location(
+            &mut locations,
+            &mut seen,
+            &format!("{} {}", steamcmd_label, index + 1),
+            "steamcmd",
+            pool_workshop_dir,
+        );
+    }
+
     Ok(locations)
 }
 
@@ -235,11 +258,13 @@ fn save_app_settings_impl(
     game_executable_path: &str,
     client_ram: &str,
     server_ram: &str,
+    max_concurrent_downloads: u32,
 ) -> Result<AppSettings, String> {
     let steamcmd_path = steamcmd_path.trim();
     let game_executable_path = game_executable_path.trim();
     let client_ram = normalize_ram_gb(client_ram)?;
     let server_ram = normalize_ram_gb(server_ram)?;
+    let max_concurrent_downloads = validate_max_concurrent_downloads(max_concurrent_downloads)?;
 
     if !steamcmd_path.is_empty() {
         validate_steamcmd_path(&PathBuf::from(steamcmd_path))?;
@@ -266,6 +291,7 @@ fn save_app_settings_impl(
         game_executable_path,
         &client_ram,
         &server_ram,
+        max_concurrent_downloads,
         &read_language_preference()?,
         &locations,
     )?;
@@ -316,12 +342,14 @@ fn add_mod_location_impl(path: &str) -> Result<Vec<ModLocation>, String> {
     let game_executable_path = read_config_value("game_executable_path")?.unwrap_or_default();
     let client_ram = read_config_value("client_ram")?.unwrap_or_else(|| "4.00".to_string());
     let server_ram = read_config_value("server_ram")?.unwrap_or_else(|| "4.00".to_string());
+    let max_concurrent_downloads = read_max_concurrent_downloads()?;
     let language_preference = read_language_preference()?;
     write_app_settings_file(
         &steamcmd_path,
         &game_executable_path,
         &client_ram,
         &server_ram,
+        max_concurrent_downloads,
         &language_preference,
         &locations,
     )?;
@@ -334,6 +362,7 @@ fn write_app_settings_file(
     game_executable_path: &str,
     client_ram: &str,
     server_ram: &str,
+    max_concurrent_downloads: u32,
     language_preference: &str,
     mod_locations: &[ModLocation],
 ) -> Result<(), String> {
@@ -346,7 +375,7 @@ fn write_app_settings_file(
     }
 
     let mut content = format!(
-        "steamcmd_path={steamcmd_path}\ngame_executable_path={game_executable_path}\nclient_ram={client_ram}\nserver_ram={server_ram}\nlanguage={language_preference}\n"
+        "steamcmd_path={steamcmd_path}\ngame_executable_path={game_executable_path}\nclient_ram={client_ram}\nserver_ram={server_ram}\nmax_concurrent_downloads={max_concurrent_downloads}\nlanguage={language_preference}\n"
     );
 
     for location in mod_locations {
@@ -366,6 +395,32 @@ fn write_app_settings_file(
     Ok(())
 }
 
+pub(crate) fn read_max_concurrent_downloads() -> Result<u32, String> {
+    let Some(value) = read_config_value("max_concurrent_downloads")? else {
+        return Ok(DEFAULT_MAX_CONCURRENT_DOWNLOADS);
+    };
+
+    let parsed = value
+        .parse::<u32>()
+        .unwrap_or(DEFAULT_MAX_CONCURRENT_DOWNLOADS);
+
+    Ok(parsed.clamp(1, MAX_CONCURRENT_DOWNLOADS_LIMIT))
+}
+
+fn validate_max_concurrent_downloads(value: u32) -> Result<u32, String> {
+    if (1..=MAX_CONCURRENT_DOWNLOADS_LIMIT).contains(&value) {
+        Ok(value)
+    } else {
+        Err(format!(
+            "{} 1 e {MAX_CONCURRENT_DOWNLOADS_LIMIT}.",
+            text(
+                "Choose a simultaneous download limit between",
+                "Escolha um limite de downloads simultaneos entre"
+            )
+        ))
+    }
+}
+
 pub(crate) fn read_language_preference() -> Result<String, String> {
     let preference = read_config_value("language")?.unwrap_or_else(|| LANGUAGE_AUTO.to_string());
     Ok(validate_language_preference(&preference)
@@ -379,6 +434,7 @@ pub(crate) fn save_language_preference(preference: &str) -> Result<(), String> {
     let game_executable_path = read_config_value("game_executable_path")?.unwrap_or_default();
     let client_ram = read_config_value("client_ram")?.unwrap_or_else(|| "4.00".to_string());
     let server_ram = read_config_value("server_ram")?.unwrap_or_else(|| "4.00".to_string());
+    let max_concurrent_downloads = read_max_concurrent_downloads()?;
     let mut locations = build_default_mod_locations(Some(&steamcmd_path))?;
     merge_custom_mod_locations(&mut locations, read_saved_custom_mod_locations()?);
     write_app_settings_file(
@@ -386,6 +442,7 @@ pub(crate) fn save_language_preference(preference: &str) -> Result<(), String> {
         &game_executable_path,
         &client_ram,
         &server_ram,
+        max_concurrent_downloads,
         preference,
         &locations,
     )

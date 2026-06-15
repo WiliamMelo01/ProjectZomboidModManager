@@ -52,6 +52,8 @@ use workshop::{
 };
 
 const MANAGED_STEAMCMD_DIR_NAME: &str = "steamcmd";
+const MANAGED_STEAMCMD_POOL_DIR_NAME: &str = "steamcmd-pool";
+const MAX_MANAGED_STEAMCMD_POOL_INSTANCES: usize = 3;
 
 async fn run_blocking<T, F>(task: F) -> Result<T, String>
 where
@@ -142,14 +144,16 @@ fn managed_steamcmd_dir() -> Result<PathBuf, String> {
     Ok(app_config_dir()?.join(MANAGED_STEAMCMD_DIR_NAME))
 }
 
-fn managed_steamcmd_path() -> Result<PathBuf, String> {
-    let executable_name = if cfg!(windows) {
+fn steamcmd_executable_name() -> &'static str {
+    if cfg!(windows) {
         "steamcmd.exe"
     } else {
         "steamcmd"
-    };
+    }
+}
 
-    Ok(managed_steamcmd_dir()?.join(executable_name))
+fn managed_steamcmd_path() -> Result<PathBuf, String> {
+    Ok(managed_steamcmd_dir()?.join(steamcmd_executable_name()))
 }
 
 fn ensure_managed_steamcmd(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -182,6 +186,138 @@ fn ensure_managed_steamcmd(app: &tauri::AppHandle) -> Result<PathBuf, String> {
             steamcmd_path.display()
         ))
     }
+}
+
+fn managed_steamcmd_pool_dir() -> Result<PathBuf, String> {
+    Ok(app_config_dir()?.join(MANAGED_STEAMCMD_POOL_DIR_NAME))
+}
+
+fn managed_steamcmd_pool_instance_dir(instance_id: usize) -> Result<PathBuf, String> {
+    Ok(managed_steamcmd_pool_dir()?.join(format!("instance-{instance_id}")))
+}
+
+fn managed_steamcmd_pool_instance_path(instance_id: usize) -> Result<PathBuf, String> {
+    Ok(managed_steamcmd_pool_instance_dir(instance_id)?.join(steamcmd_executable_name()))
+}
+
+fn ensure_managed_steamcmd_pool(
+    app: &tauri::AppHandle,
+    instance_count: usize,
+) -> Result<Vec<PathBuf>, String> {
+    let instance_count = instance_count.clamp(1, MAX_MANAGED_STEAMCMD_POOL_INSTANCES);
+    let mut steamcmd_paths = Vec::new();
+
+    for instance_id in 1..=instance_count {
+        steamcmd_paths.push(ensure_managed_steamcmd_pool_instance(app, instance_id)?);
+    }
+
+    Ok(steamcmd_paths)
+}
+
+fn ensure_managed_steamcmd_pool_instance(
+    app: &tauri::AppHandle,
+    instance_id: usize,
+) -> Result<PathBuf, String> {
+    let steamcmd_path = managed_steamcmd_pool_instance_path(instance_id)?;
+
+    if steamcmd_path.exists() && steamcmd_path.is_file() {
+        ensure_managed_steamcmd_pool_instance_layout(&steamcmd_path)?;
+        return Ok(steamcmd_path);
+    }
+
+    if !cfg!(windows) {
+        return Err(
+            "Pool de SteamCMD gerenciado pelo app esta disponivel apenas no Windows.".to_string(),
+        );
+    }
+
+    let steamcmd_dir = managed_steamcmd_pool_instance_dir(instance_id)?;
+    fs::create_dir_all(&steamcmd_dir).map_err(|error| {
+        format!(
+            "Nao foi possivel criar a pasta da instancia SteamCMD em {}: {error}",
+            steamcmd_dir.display()
+        )
+    })?;
+
+    let zip_path = steamcmd_zip_resource_path(app)?;
+    extract_zip_with_powershell(&zip_path, &steamcmd_dir)?;
+
+    if steamcmd_path.exists() && steamcmd_path.is_file() {
+        ensure_managed_steamcmd_pool_instance_layout(&steamcmd_path)?;
+        Ok(steamcmd_path)
+    } else {
+        Err(format!(
+            "SteamCMD foi extraido, mas {} nao foi encontrado.",
+            steamcmd_path.display()
+        ))
+    }
+}
+
+fn ensure_managed_steamcmd_pool_instance_layout(steamcmd_path: &Path) -> Result<(), String> {
+    let steamcmd_dir = steamcmd_path.parent().ok_or_else(|| {
+        format!(
+            "Nao foi possivel resolver a pasta da instancia SteamCMD em {}.",
+            steamcmd_path.display()
+        )
+    })?;
+
+    for path in [
+        steamcmd_dir
+            .join("steamapps")
+            .join("workshop")
+            .join("content")
+            .join("108600"),
+        steamcmd_dir.join("downloads"),
+        steamcmd_dir.join("logs"),
+    ] {
+        fs::create_dir_all(&path).map_err(|error| {
+            format!(
+                "Nao foi possivel criar a pasta da instancia SteamCMD em {}: {error}",
+                path.display()
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
+fn steamcmd_workshop_dir_from_executable(steamcmd_path: &Path) -> Option<PathBuf> {
+    let steamcmd_dir = steamcmd_path.parent()?;
+
+    Some(
+        steamcmd_dir
+            .join("steamapps")
+            .join("workshop")
+            .join("content")
+            .join("108600"),
+    )
+}
+
+fn managed_steamcmd_pool_workshop_dirs() -> Vec<PathBuf> {
+    let Ok(pool_dir) = managed_steamcmd_pool_dir() else {
+        return Vec::new();
+    };
+    let Ok(entries) = fs::read_dir(pool_dir) else {
+        return Vec::new();
+    };
+
+    let mut entries = entries.filter_map(Result::ok).collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.file_name());
+
+    entries
+        .into_iter()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.starts_with("instance-"))
+                .unwrap_or(false)
+        })
+        .filter_map(|path| {
+            steamcmd_workshop_dir_from_executable(&path.join(steamcmd_executable_name()))
+        })
+        .collect()
 }
 
 fn steamcmd_zip_resource_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {

@@ -9,6 +9,7 @@ mod server_values;
 
 use catalog::count_zomboid_mods_impl;
 pub(crate) use catalog::list_zomboid_mods_impl;
+pub(crate) use discovery::steam_workshop_dirs;
 pub(crate) use server_values::{
     normalize_server_values, parse_server_mod_ids, resolve_server_workshop_ids,
     serialize_server_mod_ids,

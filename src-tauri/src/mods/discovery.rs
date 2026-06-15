@@ -1,4 +1,7 @@
-use crate::{find_steamcmd_path, read_steam_library_dirs};
+use crate::{
+    find_steamcmd_path, managed_steamcmd_pool_workshop_dirs, read_steam_library_dirs,
+    steamcmd_workshop_dir_from_executable,
+};
 use std::{
     collections::HashSet,
     env, fs,
@@ -35,7 +38,7 @@ pub(super) fn write_local_workshop_id(
         .map_err(|error| format!("Nao foi possivel salvar {}: {error}", marker_path.display()))
 }
 
-pub(super) fn steam_workshop_dirs() -> Vec<PathBuf> {
+pub(crate) fn steam_workshop_dirs() -> Vec<PathBuf> {
     let mut steamapps_dirs = Vec::new();
     let mut candidates = Vec::new();
 
@@ -62,33 +65,43 @@ pub(super) fn steam_workshop_dirs() -> Vec<PathBuf> {
         }
     }
 
-    if let Ok(Some(steamcmd_path)) = find_steamcmd_path() {
-        if let Some(steamcmd_dir) = steamcmd_path.parent() {
-            let steamapps_dir = steamcmd_dir.join("steamapps");
-
-            if steamapps_dir.exists() {
-                steamapps_dirs.push(steamapps_dir);
-            }
-        }
-    }
-
-    let mut seen = HashSet::new();
-
-    steamapps_dirs
+    let mut workshop_dirs = steamapps_dirs
         .into_iter()
-        .filter_map(|steamapps_dir| {
-            let workshop_dir = steamapps_dir
+        .map(|steamapps_dir| {
+            steamapps_dir
                 .join("workshop")
                 .join("content")
-                .join("108600");
-            let key = workshop_dir.display().to_string().to_lowercase();
-
-            if seen.insert(key) {
-                Some(workshop_dir)
-            } else {
-                None
-            }
+                .join("108600")
         })
+        .collect::<Vec<_>>();
+    workshop_dirs.extend(steamcmd_workshop_dirs());
+
+    dedupe_paths(workshop_dirs)
+}
+
+pub(crate) fn steamcmd_workshop_dir() -> Option<PathBuf> {
+    let steamcmd_path = find_steamcmd_path().ok().flatten()?;
+
+    steamcmd_workshop_dir_from_executable(&steamcmd_path)
+}
+
+pub(crate) fn steamcmd_workshop_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+
+    if let Some(legacy_dir) = steamcmd_workshop_dir() {
+        dirs.push(legacy_dir);
+    }
+
+    dirs.extend(managed_steamcmd_pool_workshop_dirs());
+    dedupe_paths(dirs)
+}
+
+fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut seen = HashSet::new();
+
+    paths
+        .into_iter()
+        .filter(|path| seen.insert(path.display().to_string().to_lowercase()))
         .collect()
 }
 

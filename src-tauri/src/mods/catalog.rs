@@ -1,4 +1,4 @@
-use super::discovery::{read_local_workshop_id, steam_workshop_dirs};
+use super::discovery::{read_local_workshop_id, steam_workshop_dirs, steamcmd_workshop_dirs};
 use super::metadata::{read_mod_package, variant_ids};
 use crate::models::ZomboidMod;
 use crate::{saved_custom_mod_dirs, zomboid_mods_dir};
@@ -11,8 +11,17 @@ pub(crate) fn list_zomboid_mods_impl() -> Result<Vec<ZomboidMod>, String> {
     if let Ok(local_dir) = zomboid_mods_dir() {
         collect_flat_packages(&local_dir, "local", true, &mut mods, &mut installed_ids)?;
     }
+    let steamcmd_workshop_dir_keys = steamcmd_workshop_dirs()
+        .into_iter()
+        .map(|path| path_key(&path))
+        .collect::<HashSet<_>>();
     for workshop_dir in steam_workshop_dirs() {
-        collect_workshop_items(&workshop_dir, "steam", &mut mods, &mut installed_ids)?;
+        let source = if steamcmd_workshop_dir_keys.contains(&path_key(&workshop_dir)) {
+            "steamcmd"
+        } else {
+            "steam"
+        };
+        collect_workshop_items(&workshop_dir, source, &mut mods, &mut installed_ids)?;
     }
     for custom_dir in saved_custom_mod_dirs()? {
         collect_custom_dir(&custom_dir, &mut mods, &mut installed_ids)?;
@@ -135,12 +144,14 @@ fn push_package(
         return Ok(());
     };
     let ids = variant_ids(&mod_item);
-    if source != "local" && ids.iter().any(|id| installed_ids.contains(id)) {
+    if ids.iter().any(|id| installed_ids.contains(id)) {
         return Ok(());
     }
-    if source == "local" {
-        installed_ids.extend(ids);
-    }
+    installed_ids.extend(ids);
     mods.push(mod_item);
     Ok(())
+}
+
+fn path_key(path: &Path) -> String {
+    path.display().to_string().to_lowercase()
 }

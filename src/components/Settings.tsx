@@ -7,7 +7,6 @@ import { GamePerformanceSection } from "@/components/settings/GamePerformanceSec
 import { ModLocationsSection } from "@/components/settings/ModLocationsSection"
 import { RamTips } from "@/components/settings/RamTips"
 import { SteamCmdSettingsSection } from "@/components/settings/SteamCmdSettingsSection"
-import { SteamCmdTips } from "@/components/settings/SteamCmdTips"
 import { invokeTauri } from "@/lib/tauri"
 import { setLanguagePreference } from "@/i18n"
 import type { AppSettings, LanguagePreference, ModLocation, ZomboidInstallationStatus } from "@/types/settings"
@@ -18,7 +17,7 @@ export function Settings() {
   const [gameExecutablePath, setGameExecutablePath] = useState("")
   const [clientRam, setClientRam] = useState("4.00")
   const [serverRam, setServerRam] = useState("4.00")
-  const [maxConcurrentDownloads, setMaxConcurrentDownloads] = useState(2)
+  const [maxConcurrentDownloads, setMaxConcurrentDownloads] = useState(1)
   const [languagePreference, setLanguagePreferenceState] = useState<LanguagePreference>("auto")
   const [totalSystemRam, setTotalSystemRam] = useState(16)
 
@@ -141,7 +140,7 @@ export function Settings() {
     setGameExecutablePath(settings.gameExecutablePath ?? "")
     setClientRam(settings.clientRam ?? "4.00")
     setServerRam(settings.serverRam ?? "4.00")
-    setMaxConcurrentDownloads(settings.maxConcurrentDownloads ?? 2)
+    setMaxConcurrentDownloads(1)
     setLanguagePreferenceState(settings.languagePreference ?? "auto")
   }
 
@@ -262,7 +261,6 @@ export function Settings() {
                     resolvedPath={resolvedPath}
                     isConfigured={isConfigured}
                     maxConcurrentDownloads={maxConcurrentDownloads}
-                    onMaxConcurrentDownloadsChange={setMaxConcurrentDownloads}
                   />
                   <ModLocationsSection
                     locations={modLocations}
@@ -328,9 +326,6 @@ export function Settings() {
         {/* Tips Sidebar */}
         {activeTab === "ram" && (
           <RamTips />
-        )}
-        {activeTab === "mods" && (
-          <SteamCmdTips />
         )}
       </div>
     </div>

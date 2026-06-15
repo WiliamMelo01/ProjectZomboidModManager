@@ -5,14 +5,12 @@ type SteamCmdSettingsSectionProps = {
   resolvedPath: string | null
   isConfigured: boolean
   maxConcurrentDownloads: number
-  onMaxConcurrentDownloadsChange: (value: number) => void
 }
 
 export function SteamCmdSettingsSection({
   resolvedPath,
   isConfigured,
   maxConcurrentDownloads,
-  onMaxConcurrentDownloadsChange,
 }: SteamCmdSettingsSectionProps) {
   const { t } = useTranslation()
   return (
@@ -46,30 +44,20 @@ export function SteamCmdSettingsSection({
         </div>
       </div>
 
-      <div className="space-y-3 relative z-10">
-        <div className="rounded-2xl border border-white/5 bg-[#1e2327] p-4">
-          <div className="mb-3 flex items-start gap-3">
-            <Gauge size={18} className="mt-0.5 shrink-0 text-orange-400" />
+      <div className="relative z-10">
+        <div className="rounded-2xl border border-white/5 bg-[#1e2327] p-4 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-orange-500/10 flex items-center justify-center text-orange-400 border border-orange-500/20">
+              <Gauge size={16} />
+            </div>
             <div>
               <p className="text-sm font-bold text-white">{t("settings.steamcmd.concurrentDownloads")}</p>
               <p className="text-xs text-gray-500">{t("settings.steamcmd.concurrentDownloadsHint")}</p>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-2">
-            {[1, 2, 3].map((value) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => onMaxConcurrentDownloadsChange(value)}
-                className={`rounded-xl border px-4 py-3 text-sm font-black transition-all ${
-                  maxConcurrentDownloads === value
-                    ? "border-orange-500/40 bg-orange-500 text-white"
-                    : "border-white/10 bg-[#2b3238] text-gray-400 hover:border-orange-500/30 hover:text-white"
-                }`}
-              >
-                {value}
-              </button>
-            ))}
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-orange-500/10 border border-orange-500/20">
+            <span className="text-sm font-black text-orange-400">1</span>
+            <span className="text-[10px] font-bold text-orange-400/60 uppercase tracking-tighter">Instance</span>
           </div>
         </div>
       </div>

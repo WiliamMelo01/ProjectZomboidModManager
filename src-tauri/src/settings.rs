@@ -10,8 +10,8 @@ use crate::{
 };
 use std::{collections::HashSet, env, fs, path::PathBuf, process::Command};
 
-pub(crate) const DEFAULT_MAX_CONCURRENT_DOWNLOADS: u32 = 2;
-pub(crate) const MAX_CONCURRENT_DOWNLOADS_LIMIT: u32 = 3;
+pub(crate) const DEFAULT_MAX_CONCURRENT_DOWNLOADS: u32 = 1;
+pub(crate) const MAX_CONCURRENT_DOWNLOADS_LIMIT: u32 = 1;
 
 #[tauri::command]
 pub(crate) async fn get_app_settings(app: tauri::AppHandle) -> Result<AppSettings, String> {
@@ -160,7 +160,10 @@ fn build_default_mod_locations() -> Result<Vec<ModLocation>, String> {
     );
 
     let steamcmd_label = mod_location_label("steamcmd", None);
-    for (index, pool_workshop_dir) in managed_steamcmd_pool_workshop_dirs().into_iter().enumerate()
+    for (index, pool_workshop_dir) in managed_steamcmd_pool_workshop_dirs()
+        .into_iter()
+        .take(1)
+        .enumerate()
     {
         push_mod_location(
             &mut locations,

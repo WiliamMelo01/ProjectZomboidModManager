@@ -27,6 +27,9 @@ export const resources = {
         download: "Download",
         settings: "Settings",
       },
+      app: {
+        version: "Version",
+      },
       header: {
         search: "Search servers or mods...",
         scanMods: "Scan mods",
@@ -75,7 +78,7 @@ export const resources = {
           hint: "The app creates isolated SteamCMD folders automatically.",
           notFound: "SteamCMD was not found automatically.",
           concurrentDownloads: "Simultaneous downloads",
-          concurrentDownloadsHint: "Use 2 for large collections. The app creates isolated SteamCMD instances to avoid file locks.",
+          concurrentDownloadsHint: "The stable mode uses 1 isolated SteamCMD instance.",
         },
         performanceSection: {
           title: "Game configuration",
@@ -361,17 +364,6 @@ export const resources = {
         attention: "Attention",
         windowsFree: "Always leave 2-4GB free so Windows can run smoothly.",
       },
-      steamcmdTips: {
-        title: "Download instances",
-        one: "1 instance:",
-        oneDescription: "most stable and best for small downloads.",
-        two: "2 instances:",
-        twoDescription: "recommended for large collections.",
-        three: "3 instances:",
-        threeDescription: "aggressive mode; may saturate network or disk.",
-        isolation: "Isolated folders",
-        isolationDescription: "Each instance uses its own SteamCMD folder, steamapps and logs to avoid Locking Failed errors.",
-      },
       contextMenu: {
         moveStart: "Move to start",
         moveEnd: "Move to end",
@@ -493,6 +485,9 @@ export const resources = {
         download: "Baixar",
         settings: "Configurações",
       },
+      app: {
+        version: "Versão",
+      },
       header: {
         search: "Buscar servidores ou mods...",
         scanMods: "Escanear mods",
@@ -541,7 +536,7 @@ export const resources = {
           hint: "O app cria as pastas SteamCMD isoladas automaticamente.",
           notFound: "SteamCMD não foi encontrado automaticamente.",
           concurrentDownloads: "Downloads simultâneos",
-          concurrentDownloadsHint: "Use 2 para coleções grandes. O app cria instâncias SteamCMD isoladas para evitar bloqueios de arquivo.",
+          concurrentDownloadsHint: "O modo estável usa 1 instância SteamCMD isolada.",
         },
         performanceSection: {
           title: "Configuração do jogo",
@@ -826,17 +821,6 @@ export const resources = {
         largeDescription: "12GB+ para mapas extensos.",
         attention: "Atenção",
         windowsFree: "Deixe sempre 2-4GB livres para o seu Windows funcionar sem travar.",
-      },
-      steamcmdTips: {
-        title: "Instâncias de download",
-        one: "1 instância:",
-        oneDescription: "mais estável e melhor para downloads pequenos.",
-        two: "2 instâncias:",
-        twoDescription: "recomendado para coleções grandes.",
-        three: "3 instâncias:",
-        threeDescription: "modo agressivo; pode saturar rede ou disco.",
-        isolation: "Pastas isoladas",
-        isolationDescription: "Cada instância usa sua própria pasta SteamCMD, steamapps e logs para evitar erros de Locking Failed.",
       },
       contextMenu: {
         moveStart: "Mover para o início",

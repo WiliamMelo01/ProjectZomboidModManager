@@ -42,7 +42,7 @@ use servers::{
 };
 use settings::{
     add_mod_location, detect_steamcmd_path, get_app_settings, get_mod_locations, push_mod_location,
-    save_app_settings, select_mod_folder, select_steamcmd_path,
+    open_mod_location, save_app_settings, select_mod_folder, select_steamcmd_path,
 };
 use util::*;
 use workshop::{
@@ -638,6 +638,7 @@ fn main() {
             open_steam_zomboid_folder,
             select_mod_folder,
             add_mod_location,
+            open_mod_location,
             get_language_preference,
             set_language_preference,
             sync_effective_language,

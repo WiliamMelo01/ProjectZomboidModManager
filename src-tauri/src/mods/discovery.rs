@@ -1,7 +1,4 @@
-use crate::{
-    find_steamcmd_path, managed_steamcmd_pool_workshop_dirs, read_steam_library_dirs,
-    steamcmd_workshop_dir_from_executable,
-};
+use crate::{managed_steamcmd_pool_workshop_dirs, read_steam_library_dirs};
 use std::{
     collections::HashSet,
     env, fs,
@@ -79,21 +76,8 @@ pub(crate) fn steam_workshop_dirs() -> Vec<PathBuf> {
     dedupe_paths(workshop_dirs)
 }
 
-pub(crate) fn steamcmd_workshop_dir() -> Option<PathBuf> {
-    let steamcmd_path = find_steamcmd_path().ok().flatten()?;
-
-    steamcmd_workshop_dir_from_executable(&steamcmd_path)
-}
-
 pub(crate) fn steamcmd_workshop_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-
-    if let Some(legacy_dir) = steamcmd_workshop_dir() {
-        dirs.push(legacy_dir);
-    }
-
-    dirs.extend(managed_steamcmd_pool_workshop_dirs());
-    dedupe_paths(dirs)
+    dedupe_paths(managed_steamcmd_pool_workshop_dirs())
 }
 
 fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {

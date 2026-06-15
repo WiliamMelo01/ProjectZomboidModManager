@@ -217,6 +217,16 @@ export function Settings() {
     }
   }
 
+  async function openModLocation(path: string) {
+    setError(null)
+
+    try {
+      await invokeTauri<void>("open_mod_location", { path })
+    } catch (openError) {
+      setError(getErrorMessage(openError))
+    }
+  }
+
   async function addModFolder() {
     setIsAddingFolder(true)
     setError(null)
@@ -305,6 +315,7 @@ export function Settings() {
                     isAddingFolder={isAddingFolder}
                     onAddFolder={() => void addModFolder()}
                     onRefresh={() => void refreshModLocations()}
+                    onOpenLocation={(path) => void openModLocation(path)}
                   />
                 </div>
               )}

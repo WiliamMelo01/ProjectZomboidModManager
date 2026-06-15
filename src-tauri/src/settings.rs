@@ -2,9 +2,10 @@ use crate::game::{apply_performance_settings, normalize_ram_gb, validate_game_ex
 use crate::i18n::{mod_location_label, text, validate_language_preference, LANGUAGE_AUTO};
 use crate::models::{AppSettings, ModLocation};
 use crate::util::hide_command_window;
+use crate::workshop::open_path_external;
 use crate::{
-    app_settings_path, ensure_managed_steamcmd, find_steamcmd_path, read_config_value,
-    managed_steamcmd_pool_workshop_dirs, read_configured_steamcmd_path,
+    app_settings_path, ensure_managed_steamcmd, find_steamcmd_path,
+    managed_steamcmd_pool_workshop_dirs, read_config_value, read_configured_steamcmd_path,
     read_saved_custom_mod_locations, read_saved_mod_locations, run_blocking,
     validate_steamcmd_path, zomboid_mods_dir,
 };
@@ -71,6 +72,11 @@ pub(crate) async fn add_mod_location(path: String) -> Result<Vec<ModLocation>, S
     run_blocking(move || add_mod_location_impl(&path)).await
 }
 
+#[tauri::command]
+pub(crate) async fn open_mod_location(path: String) -> Result<(), String> {
+    run_blocking(move || open_mod_location_impl(&path)).await
+}
+
 fn load_app_settings() -> Result<AppSettings, String> {
     let configured_path = read_configured_steamcmd_path()?.unwrap_or_default();
     let resolved_steamcmd_path = find_steamcmd_path()?.map(|path| path.display().to_string());
@@ -95,15 +101,8 @@ fn load_app_settings() -> Result<AppSettings, String> {
 
 fn get_mod_locations_impl() -> Result<Vec<ModLocation>, String> {
     let saved_locations = read_saved_mod_locations()?;
-    let steamcmd_path = read_configured_steamcmd_path()?
-        .or_else(|| {
-            find_steamcmd_path()
-                .ok()
-                .flatten()
-                .map(|path| path.display().to_string())
-        })
-        .unwrap_or_default();
-    let mut locations = build_default_mod_locations(Some(&steamcmd_path))?;
+    let steamcmd_path = read_configured_steamcmd_path()?.unwrap_or_default();
+    let mut locations = build_default_mod_locations()?;
     merge_custom_mod_locations(
         &mut locations,
         saved_locations
@@ -152,7 +151,7 @@ pub(crate) fn push_mod_location(
     });
 }
 
-fn build_default_mod_locations(steamcmd_path: Option<&str>) -> Result<Vec<ModLocation>, String> {
+fn build_default_mod_locations() -> Result<Vec<ModLocation>, String> {
     let mut locations = Vec::new();
     let mut seen = HashSet::new();
 
@@ -171,24 +170,6 @@ fn build_default_mod_locations(steamcmd_path: Option<&str>) -> Result<Vec<ModLoc
         "local",
         zomboid_mods_dir()?,
     );
-
-    if let Some(steamcmd_path) = steamcmd_path.map(str::trim).filter(|path| !path.is_empty()) {
-        let steamcmd_path = PathBuf::from(steamcmd_path);
-
-        if let Some(steamcmd_dir) = steamcmd_path.parent() {
-            push_mod_location(
-                &mut locations,
-                &mut seen,
-                &mod_location_label("steamcmd", None),
-                "steamcmd",
-                steamcmd_dir
-                    .join("steamapps")
-                    .join("workshop")
-                    .join("content")
-                    .join("108600"),
-            );
-        }
-    }
 
     let steamcmd_label = mod_location_label("steamcmd", None);
     for (index, pool_workshop_dir) in managed_steamcmd_pool_workshop_dirs().into_iter().enumerate()
@@ -277,14 +258,7 @@ fn save_app_settings_impl(
         apply_performance_settings(&game_executable, &client_ram, &server_ram)?;
     }
 
-    let default_steamcmd_path = if steamcmd_path.is_empty() {
-        find_steamcmd_path()?
-            .map(|path| path.display().to_string())
-            .unwrap_or_default()
-    } else {
-        steamcmd_path.to_string()
-    };
-    let mut locations = build_default_mod_locations(Some(&default_steamcmd_path))?;
+    let mut locations = build_default_mod_locations()?;
     merge_custom_mod_locations(&mut locations, read_saved_custom_mod_locations()?);
     write_app_settings_file(
         steamcmd_path,
@@ -328,7 +302,7 @@ fn add_mod_location_impl(path: &str) -> Result<Vec<ModLocation>, String> {
     }
 
     let steamcmd_path = read_configured_steamcmd_path()?.unwrap_or_default();
-    let mut locations = build_default_mod_locations(Some(&steamcmd_path))?;
+    let mut locations = build_default_mod_locations()?;
     let mut custom_locations = read_saved_custom_mod_locations()?;
     let label = mod_location_label("custom", path.file_name().and_then(|name| name.to_str()));
 
@@ -435,7 +409,7 @@ pub(crate) fn save_language_preference(preference: &str) -> Result<(), String> {
     let client_ram = read_config_value("client_ram")?.unwrap_or_else(|| "4.00".to_string());
     let server_ram = read_config_value("server_ram")?.unwrap_or_else(|| "4.00".to_string());
     let max_concurrent_downloads = read_max_concurrent_downloads()?;
-    let mut locations = build_default_mod_locations(Some(&steamcmd_path))?;
+    let mut locations = build_default_mod_locations()?;
     merge_custom_mod_locations(&mut locations, read_saved_custom_mod_locations()?);
     write_app_settings_file(
         &steamcmd_path,
@@ -446,6 +420,31 @@ pub(crate) fn save_language_preference(preference: &str) -> Result<(), String> {
         preference,
         &locations,
     )
+}
+
+fn open_mod_location_impl(path: &str) -> Result<(), String> {
+    let path = PathBuf::from(path.trim());
+
+    if !path.exists() {
+        return Err(format!(
+            "{}: {}.",
+            text("Folder not found", "Pasta nao encontrada"),
+            path.display()
+        ));
+    }
+
+    if !path.is_dir() {
+        return Err(format!(
+            "{} {}.",
+            text(
+                "The path does not point to a folder:",
+                "O caminho nao aponta para uma pasta:"
+            ),
+            path.display()
+        ));
+    }
+
+    open_path_external(&path)
 }
 
 #[cfg(windows)]

@@ -8,9 +8,10 @@ type ModLocationsSectionProps = {
   isAddingFolder: boolean
   onAddFolder: () => void
   onRefresh: () => void
+  onOpenLocation: (path: string) => void
 }
 
-export function ModLocationsSection({ locations, isAddingFolder, onAddFolder, onRefresh }: ModLocationsSectionProps) {
+export function ModLocationsSection({ locations, isAddingFolder, onAddFolder, onRefresh, onOpenLocation }: ModLocationsSectionProps) {
   const { t } = useTranslation()
   return (
     <section className="bg-[#2b3238] rounded-3xl border border-white/5 p-8 shadow-xl relative group">
@@ -51,7 +52,15 @@ export function ModLocationsSection({ locations, isAddingFolder, onAddFolder, on
           ) : (
             locations.map((location) => (
               <div key={`${location.kind}:${location.path}`} className="group/path flex items-center gap-3 bg-[#1e2327] border border-white/5 rounded-2xl p-3 pl-4 transition-all hover:border-orange-500/20">
-                <Folder size={18} className="text-gray-500 group-hover/path:text-orange-400 transition-colors shrink-0" />
+                <button
+                  type="button"
+                  disabled={!location.exists}
+                  onClick={() => onOpenLocation(location.path)}
+                  title={t("settings.modLocations.open")}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-gray-500 transition-colors hover:bg-orange-500/10 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Folder size={18} />
+                </button>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-bold text-white">{location.label}</span>

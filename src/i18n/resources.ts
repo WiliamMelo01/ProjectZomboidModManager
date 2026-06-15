@@ -65,6 +65,7 @@ export const resources = {
           missing: "Does not exist",
           refreshed: "Mod locations updated.",
           added: "Mod folder added.",
+          open: "Open folder",
         },
         steamcmd: {
           title: "SteamCMD integration",
@@ -536,6 +537,7 @@ export const resources = {
           missing: "Não existe",
           refreshed: "Locais de mods atualizados.",
           added: "Pasta de mods adicionada.",
+          open: "Abrir pasta",
         },
         steamcmd: {
           title: "Integração SteamCMD",

@@ -1,6 +1,7 @@
 import { AppSidebarItem, type SidebarItem } from "@/components/AppSidebarItem"
 import { Logo } from "@/components/Logo"
 import { useTranslation } from "react-i18next"
+import packageMetadata from "../../package.json"
 
 type AppSidebarProps = {
   activeTab: string
@@ -10,6 +11,8 @@ type AppSidebarProps = {
 
 export function AppSidebar({ activeTab, items, onTabChange }: AppSidebarProps) {
   const { t } = useTranslation()
+  const appChannel = formatAppChannel(packageMetadata.appChannel ?? "beta")
+
   return (
     <nav className="flex h-full w-[18vw] min-w-[240px] flex-col gap-8 py-8 px-4 bg-[#1e2327] border-r border-white/5 shadow-2xl z-20">
       <div className="px-4 mb-4">
@@ -30,17 +33,24 @@ export function AppSidebar({ activeTab, items, onTabChange }: AppSidebarProps) {
         </ul>
       </div>
 
-      <div className="mt-auto px-4 pt-6 border-t border-white/5">
-        <div className="bg-[#2b3238] rounded-xl p-3 flex items-center gap-3 border border-white/5">
-          <div className="w-10 h-10 rounded-full bg-orange-500/10 flex items-center justify-center text-orange-400 font-bold border border-orange-500/20">
-            AD
+      <div className="mt-auto px-4 pb-8 pt-6 border-t border-white/5">
+        <div className="rounded-xl border border-white/5 bg-[#171b1f]/70 px-3 py-2.5">
+          <div className="mb-1.5 flex items-center justify-between gap-3">
+            <span className="text-[9px] font-bold uppercase tracking-widest text-gray-500">PZ Manager</span>
+            <span className="rounded-full border border-orange-400/20 bg-orange-500/10 px-2 py-0.5 text-[9px] font-black uppercase text-orange-300">
+              {appChannel}
+            </span>
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold truncate">Admin User</p>
-            <p className="text-[10px] text-gray-500 truncate">v1.0.4 - Alpha</p>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-[10px] font-semibold text-gray-500">{t("app.version")}</span>
+            <span className="font-mono text-xs font-bold text-gray-300">v{packageMetadata.version}</span>
           </div>
         </div>
       </div>
     </nav>
   )
+}
+
+function formatAppChannel(channel: string) {
+  return channel.charAt(0).toUpperCase() + channel.slice(1).toLowerCase()
 }

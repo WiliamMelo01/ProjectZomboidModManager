@@ -1,5 +1,6 @@
 import {
   CheckCircle2,
+  Clock3,
   Download,
   ExternalLink,
   Hash,
@@ -162,7 +163,11 @@ export function DownloadMods({ manager, onOpenSettings }: DownloadModsProps) {
             <CheckCircle2 size={24} />
             <div>
               <p className="font-bold">{t("downloads.completedTitle")}</p>
-              <p className="text-sm text-green-300">{t("downloads.completedLibrary", { count: manager.result.downloadedItems })}</p>
+              <p className="text-sm text-green-300">{t("downloads.completedLibrary", { downloaded: manager.result.downloadedItems, skipped: manager.result.skippedItems })}</p>
+              <p className="mt-1 flex items-center gap-1.5 text-xs font-bold text-green-300">
+                <Clock3 size={13} />
+                {t("downloads.finishedIn", { time: manager.elapsedLabel })}
+              </p>
             </div>
           </section>
         )}
@@ -171,7 +176,20 @@ export function DownloadMods({ manager, onOpenSettings }: DownloadModsProps) {
           <section className="mt-6 rounded-3xl border border-white/5 bg-[#2b3238] p-6">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <h3 className="font-bold">{t("downloads.itemProgress")}</h3>
-              <p className="text-xs text-gray-400">{t("downloads.itemProgressSummary", manager.progress)}</p>
+              <div className="text-right">
+                <p className="text-xs text-gray-400">
+                  {t("downloads.itemProgressSummary", {
+                    completed: manager.progress.completedItems,
+                    skipped: manager.progress.skippedItems,
+                    failed: manager.progress.failedItems,
+                    queued: manager.progress.queuedItems,
+                  })}
+                </p>
+                <p className="mt-1 flex items-center justify-end gap-1.5 text-xs font-bold text-orange-200">
+                  <Clock3 size={13} />
+                  {t(manager.isDownloading ? "downloads.elapsed" : "downloads.finishedIn", { time: manager.elapsedLabel })}
+                </p>
+              </div>
             </div>
             <div className="max-h-72 space-y-2 overflow-y-auto pr-2 custom-scrollbar">
               {manager.downloadItems.map((item) => <DownloadItemRow key={item.workshopId} item={item} />)}
@@ -186,8 +204,13 @@ export function DownloadMods({ manager, onOpenSettings }: DownloadModsProps) {
               <h3 className="text-xs font-black uppercase tracking-widest">{t("downloads.steamcmdLog")}</h3>
             </div>
             <div className="max-h-72 overflow-y-auto whitespace-pre-wrap p-5 font-mono text-xs leading-relaxed text-gray-400 custom-scrollbar">
-              {manager.steamCmdLogLines.map((line, index) => (
-                <div key={`${index}:${line.slice(0, 24)}`}>{line}</div>
+              {manager.steamCmdLogLines.map((entry, index) => (
+                <div key={`${index}:${entry.instanceId}:${entry.line.slice(0, 24)}`} className={`mb-1 flex gap-2 rounded-r-md border-l-2 px-2 py-1 ${steamCmdInstanceLineClass(entry.colorKey)}`}>
+                  <span className="shrink-0 font-black">
+                    [{entry.label}]
+                  </span>
+                  <span>{entry.line}</span>
+                </div>
               ))}
               <div ref={logEndRef} />
             </div>
@@ -198,6 +221,7 @@ export function DownloadMods({ manager, onOpenSettings }: DownloadModsProps) {
       {manager.result && manager.isResultModalOpen && (
         <DownloadResultModal
           result={manager.result}
+          elapsedLabel={manager.elapsedLabel}
           onClose={manager.closeResultModal}
           onRetry={() => void manager.retryFailedItems()}
         />
@@ -239,11 +263,11 @@ function StatusBox({ status }: { status: WorkshopDownloadStatus }) {
 
 function DownloadItemRow({ item }: { item: DownloadListItem }) {
   const { t } = useTranslation()
-  const color = item.status === "completed" ? "text-green-300" : item.status === "failed" || item.status === "cancelled" ? "text-red-300" : "text-orange-300"
+  const color = item.status === "completed" ? "text-green-300" : item.status === "skipped" ? "text-blue-300" : item.status === "failed" || item.status === "cancelled" ? "text-red-300" : "text-orange-300"
   return <div className="flex items-center gap-3 rounded-xl border border-white/5 bg-[#1e2327] px-4 py-3 text-sm"><Hash size={14} className="text-gray-600" /><span className="flex-1 font-mono">{item.workshopId}</span><span className={color}>{statusLabel(item.status, t)}</span></div>
 }
 
-function DownloadResultModal({ result, onClose, onRetry }: { result: WorkshopDownloadResult; onClose: () => void; onRetry: () => void }) {
+function DownloadResultModal({ result, elapsedLabel, onClose, onRetry }: { result: WorkshopDownloadResult; elapsedLabel: string; onClose: () => void; onRetry: () => void }) {
   const { t } = useTranslation()
 
   return (
@@ -254,11 +278,13 @@ function DownloadResultModal({ result, onClose, onRetry }: { result: WorkshopDow
           <button onClick={onClose} className="rounded-full p-2 text-gray-400 hover:bg-white/5"><X size={20} /></button>
         </div>
         <div className="p-6">
-          <div className="mb-5 grid grid-cols-2 gap-3 text-center sm:grid-cols-4">
+          <div className="mb-5 grid grid-cols-2 gap-3 text-center sm:grid-cols-6">
             <ResultCount label={t("downloads.total")} value={result.totalItems} color="text-white" />
             <ResultCount label={t("downloads.downloaded")} value={result.downloadedItems} color="text-green-300" />
+            <ResultCount label={t("downloads.skipped")} value={result.skippedItems} color="text-blue-300" />
             <ResultCount label={t("downloads.failures")} value={result.failedItems.length} color="text-red-300" />
             <ResultCount label={t("downloads.cancelledCount")} value={result.cancelledItems} color="text-orange-300" />
+            <ResultCount label={t("downloads.duration")} value={elapsedLabel} color="text-orange-200" />
           </div>
           {result.failedItems.length > 0 && (
             <div className="max-h-72 space-y-3 overflow-y-auto pr-2 custom-scrollbar">
@@ -275,10 +301,18 @@ function DownloadResultModal({ result, onClose, onRetry }: { result: WorkshopDow
   )
 }
 
-function ResultCount({ label, value, color }: { label: string; value: number; color: string }) {
+function ResultCount({ label, value, color }: { label: string; value: number | string; color: string }) {
   return <div className="rounded-2xl border border-white/5 bg-[#1e2327] p-4"><p className={`text-2xl font-black ${color}`}>{value}</p><p className="text-xs text-gray-500">{label}</p></div>
 }
 
+function steamCmdInstanceLineClass(colorKey: string) {
+  return {
+    orange: "border-l-orange-400 bg-orange-500/5 text-orange-200",
+    blue: "border-l-sky-400 bg-sky-500/5 text-sky-200",
+    green: "border-l-emerald-400 bg-emerald-500/5 text-emerald-200",
+  }[colorKey] ?? "border-l-gray-500 bg-white/5 text-gray-300"
+}
+
 function statusLabel(status: DownloadItemStatus, t: (key: string) => string) {
-  return t({ queued: "downloads.queued", downloading: "downloads.downloading", completed: "downloads.completed", retrying: "downloads.retryingStatus", failed: "downloads.failed", cancelled: "downloads.cancelledStatus" }[status])
+  return t({ queued: "downloads.queued", downloading: "downloads.downloading", completed: "downloads.completed", retrying: "downloads.retryingStatus", failed: "downloads.failed", cancelled: "downloads.cancelledStatus", skipped: "downloads.skippedStatus" }[status])
 }

@@ -1,4 +1,4 @@
-import { Download, RefreshCw } from "lucide-react"
+import { Clock3, Download, RefreshCw } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import type { WorkshopDownloadManager } from "@/hooks/useWorkshopDownloadManager"
@@ -26,10 +26,18 @@ export function DownloadProgressCard({ manager, onOpen }: DownloadProgressCardPr
             <p className="truncate text-sm font-black text-white">{t("downloads.progressTitle")}</p>
             {!progress.isPreparing && <span className="text-xs font-black text-orange-300">{progress.percentage}%</span>}
           </div>
+          <p className="mt-1 flex items-center gap-1.5 text-xs font-bold text-orange-200">
+            <Clock3 size={13} />
+            {t("downloads.elapsed", { time: manager.elapsedLabel })}
+          </p>
           <p className="mt-1 text-xs text-gray-400">
             {progress.isPreparing
               ? t("downloads.preparing")
-              : t("downloads.progressSummary", { completed: progress.completedItems, total: progress.totalItems, failed: progress.failedItems })}
+              : t("downloads.progressSummary", {
+                  completed: progress.completedItems,
+                  skipped: progress.skippedItems,
+                  failed: progress.failedItems,
+                })}
           </p>
           <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/5">
             <div

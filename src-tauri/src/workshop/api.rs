@@ -85,37 +85,97 @@ pub(super) fn fetch_steam_workshop_collection_items(
         &script,
         &text("fetch the Steam collection", "consultar a colecao na Steam"),
     )?;
-    let children = response
+
+    let mut workshop_ids = collection_item_ids_from_api_response(&response);
+
+    if workshop_ids.is_empty() {
+        workshop_ids = fetch_steam_workshop_collection_items_from_page(&collection_id)?;
+    }
+
+    if workshop_ids.is_empty() {
+        return Err(text(
+            "Steam did not find items in this collection. Confirm that the ID belongs to a public collection.",
+            "A Steam nao encontrou itens nessa colecao. Confirme se o ID pertence a uma colecao publica.",
+        )
+        .to_string());
+    }
+
+    Ok(workshop_ids)
+}
+
+fn collection_item_ids_from_api_response(response: &Value) -> Vec<String> {
+    let Some(children) = response
         .get("response")
         .and_then(|value| value.get("collectiondetails"))
         .and_then(Value::as_array)
         .and_then(|collections| collections.first())
         .and_then(|collection| collection.get("children"))
         .and_then(Value::as_array)
-        .ok_or_else(|| {
-            text(
-                "Steam did not find items in this collection. Confirm that the ID belongs to a public collection.",
-                "A Steam nao encontrou itens nessa colecao. Confirme se o ID pertence a uma colecao publica.",
-            ).to_string()
-        })?;
+    else {
+        return Vec::new();
+    };
+
     let mut seen = HashSet::new();
-    let workshop_ids = children
+
+    children
         .iter()
         .filter_map(|child| child.get("publishedfileid").and_then(Value::as_str))
         .filter(|workshop_id| workshop_id.chars().all(|char| char.is_ascii_digit()))
         .filter(|workshop_id| seen.insert((*workshop_id).to_string()))
         .map(ToString::to_string)
-        .collect::<Vec<_>>();
+        .collect()
+}
 
-    if workshop_ids.is_empty() {
-        return Err(text(
-            "The provided collection has no items to download.",
-            "A colecao informada nao possui itens para baixar.",
-        )
-        .to_string());
+fn fetch_steam_workshop_collection_items_from_page(
+    collection_id: &str,
+) -> Result<Vec<String>, String> {
+    let script = format!(
+        "$ErrorActionPreference = 'Stop'; \
+         $response = Invoke-WebRequest \
+           -UseBasicParsing \
+           -Uri 'https://steamcommunity.com/sharedfiles/filedetails/?id={collection_id}'; \
+         $response.Content"
+    );
+    let html = run_powershell_text_request(
+        &script,
+        &text("fetch the Steam collection page", "consultar a pagina da colecao na Steam"),
+    )?;
+
+    Ok(collection_item_ids_from_html(&html, collection_id))
+}
+
+fn collection_item_ids_from_html(html: &str, collection_id: &str) -> Vec<String> {
+    let html = html
+        .find("collectionItem")
+        .and_then(|index| html.get(index..))
+        .unwrap_or(html);
+    let mut seen = HashSet::new();
+    let mut workshop_ids = Vec::new();
+
+    for pattern in [
+        "sharedfiles/filedetails/?id=",
+        "workshop/filedetails/?id=",
+    ] {
+        let mut remaining = html;
+
+        while let Some(index) = remaining.find(pattern) {
+            remaining = &remaining[index + pattern.len()..];
+            let workshop_id = remaining
+                .chars()
+                .take_while(|char| char.is_ascii_digit())
+                .collect::<String>();
+
+            if workshop_id.is_empty() {
+                continue;
+            }
+
+            if workshop_id != collection_id && seen.insert(workshop_id.clone()) {
+                workshop_ids.push(workshop_id);
+            }
+        }
     }
 
-    Ok(workshop_ids)
+    workshop_ids
 }
 
 fn run_powershell_json_request(script: &str, action: &str) -> Result<Value, String> {
@@ -153,4 +213,78 @@ fn run_powershell_json_request(script: &str, action: &str) -> Result<Value, Stri
             )
         )
     })
+}
+
+fn run_powershell_text_request(script: &str, action: &str) -> Result<String, String> {
+    let mut command = Command::new("powershell.exe");
+    let output = hide_command_window(&mut command)
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .output()
+        .map_err(|error| {
+            format!(
+                "{} {action}: {error}",
+                text("Could not", "Nao foi possivel")
+            )
+        })?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if !output.status.success() {
+        let details = stderr.trim();
+        return Err(if details.is_empty() {
+            format!("{} {action}.", text("Could not", "Nao foi possivel"))
+        } else {
+            format!(
+                "{} {action}:\n{details}",
+                text("Could not", "Nao foi possivel")
+            )
+        });
+    }
+
+    Ok(stdout)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn reads_collection_items_from_api_response() {
+        let response = json!({
+            "response": {
+                "collectiondetails": [
+                    {
+                        "children": [
+                            { "publishedfileid": "111" },
+                            { "publishedfileid": "222" },
+                            { "publishedfileid": "111" }
+                        ]
+                    }
+                ]
+            }
+        });
+
+        assert_eq!(
+            collection_item_ids_from_api_response(&response),
+            vec!["111".to_string(), "222".to_string()]
+        );
+    }
+
+    #[test]
+    fn reads_collection_items_from_html_fallback() {
+        let html = r#"
+            <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=3073059898">same collection</a>
+            <div class="collectionItem">
+              <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=2694448564">Mod Manager</a>
+              <a href="https://steamcommunity.com/workshop/filedetails/?id=2725216703">Another mod</a>
+              <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=2694448564">duplicate</a>
+            </div>
+        "#;
+
+        assert_eq!(
+            collection_item_ids_from_html(html, "3073059898"),
+            vec!["2694448564".to_string(), "2725216703".to_string()]
+        );
+    }
 }

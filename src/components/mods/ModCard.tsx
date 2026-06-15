@@ -12,7 +12,7 @@ type ModCardProps = {
 export function ModCard({ mod, onInstall }: ModCardProps) {
   const { t } = useTranslation()
   const isLocal = isLocalMod(mod)
-  const sourceLabel = isLocal ? "LOCAL" : "STEAM"
+  const sourceBadge = getSourceBadge(mod)
   const displayWorkshopId = mod.workshopId || "-"
   const hasDependencies = mod.dependencies && mod.dependencies.length > 0
 
@@ -33,8 +33,8 @@ export function ModCard({ mod, onInstall }: ModCardProps) {
         <div className="absolute inset-0 bg-gradient-to-t from-[#2b3238] to-transparent opacity-60" />
 
         <div className="absolute top-3 left-3">
-          <span className="text-[10px] text-white font-bold bg-orange-500 px-2 py-0.5 rounded-md shadow-lg">
-            {sourceLabel}
+          <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold text-white shadow-lg ${sourceBadge.className}`}>
+            {sourceBadge.label}
           </span>
         </div>
         <div className="absolute bottom-3 left-3 flex gap-1">
@@ -116,4 +116,16 @@ export function ModCard({ mod, onInstall }: ModCardProps) {
       </div>
     </div>
   )
+}
+
+function getSourceBadge(mod: ZomboidMod) {
+  if (isLocalMod(mod)) {
+    return { label: "LOCAL", className: "bg-green-500" }
+  }
+
+  if (mod.source === "steamcmd") {
+    return { label: "STEAMCMD", className: "bg-sky-500" }
+  }
+
+  return { label: "STEAM", className: "bg-orange-500" }
 }

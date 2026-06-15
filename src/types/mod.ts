@@ -17,7 +17,7 @@ export type ZomboidMod = {
   description: string
   size: string
   isInstalled: boolean
-  source: "local" | "steam" | string
+  source: "local" | "steam" | "steamcmd" | string
   path: string
   imageUrl?: string
   dependencies?: string[]

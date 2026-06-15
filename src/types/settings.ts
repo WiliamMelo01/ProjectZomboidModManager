@@ -5,6 +5,7 @@ export type AppSettings = {
   gameExecutablePath: string
   clientRam: string
   serverRam: string
+  maxConcurrentDownloads: number
   languagePreference: LanguagePreference
 }
 

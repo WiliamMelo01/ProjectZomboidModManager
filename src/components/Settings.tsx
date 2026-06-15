@@ -7,6 +7,7 @@ import { GamePerformanceSection } from "@/components/settings/GamePerformanceSec
 import { ModLocationsSection } from "@/components/settings/ModLocationsSection"
 import { RamTips } from "@/components/settings/RamTips"
 import { SteamCmdSettingsSection } from "@/components/settings/SteamCmdSettingsSection"
+import { SteamCmdTips } from "@/components/settings/SteamCmdTips"
 import { invokeTauri } from "@/lib/tauri"
 import { setLanguagePreference } from "@/i18n"
 import type { AppSettings, LanguagePreference, ModLocation, ZomboidInstallationStatus } from "@/types/settings"
@@ -18,6 +19,7 @@ export function Settings() {
   const [gameExecutablePath, setGameExecutablePath] = useState("")
   const [clientRam, setClientRam] = useState("4.00")
   const [serverRam, setServerRam] = useState("4.00")
+  const [maxConcurrentDownloads, setMaxConcurrentDownloads] = useState(2)
   const [languagePreference, setLanguagePreferenceState] = useState<LanguagePreference>("auto")
   const [totalSystemRam, setTotalSystemRam] = useState(16)
 
@@ -65,6 +67,7 @@ export function Settings() {
         gameExecutablePath: gameExecutablePath.trim(),
         clientRam,
         serverRam,
+        maxConcurrentDownloads,
       })
 
       applySettings(settings)
@@ -180,6 +183,7 @@ export function Settings() {
     setGameExecutablePath(settings.gameExecutablePath ?? "")
     setClientRam(settings.clientRam ?? "4.00")
     setServerRam(settings.serverRam ?? "4.00")
+    setMaxConcurrentDownloads(settings.maxConcurrentDownloads ?? 2)
     setLanguagePreferenceState(settings.languagePreference ?? "auto")
   }
 
@@ -252,7 +256,7 @@ export function Settings() {
     <div className="h-full bg-[#22272b] p-8 text-white overflow-y-auto custom-scrollbar">
       <div className="max-w-6xl mx-auto relative">
         {/* Main Settings Column */}
-        <div className={`transition-all duration-500 ${activeTab === 'ram' ? 'lg:pr-80' : ''}`}>
+        <div className={`transition-all duration-500 ${activeTab === "mods" || activeTab === "ram" ? "lg:pr-80" : ""}`}>
           <div className="max-w-3xl">
             <div className="mb-8">
               <h2 className="text-3xl font-black tracking-tight text-white uppercase italic">{t("settings.title")}</h2>
@@ -291,6 +295,8 @@ export function Settings() {
                     resolvedPath={resolvedPath}
                     isConfigured={isConfigured}
                     onPathChange={setSteamCmdPath}
+                    maxConcurrentDownloads={maxConcurrentDownloads}
+                    onMaxConcurrentDownloadsChange={setMaxConcurrentDownloads}
                     onBrowse={() => void browseSteamCmd()}
                     onDetect={() => void detectSteamCmd()}
                   />
@@ -355,6 +361,9 @@ export function Settings() {
         {/* Tips Sidebar */}
         {activeTab === "ram" && (
           <RamTips />
+        )}
+        {activeTab === "mods" && (
+          <SteamCmdTips />
         )}
       </div>
     </div>

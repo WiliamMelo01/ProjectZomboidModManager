@@ -1,11 +1,13 @@
-import { CheckCircle2, Folder, Search, XCircle } from "lucide-react"
+import { CheckCircle2, Folder, Gauge, Search, XCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 type SteamCmdSettingsSectionProps = {
   path: string
   resolvedPath: string | null
   isConfigured: boolean
+  maxConcurrentDownloads: number
   onPathChange: (path: string) => void
+  onMaxConcurrentDownloadsChange: (value: number) => void
   onBrowse: () => void
   onDetect: () => void
 }
@@ -14,7 +16,9 @@ export function SteamCmdSettingsSection({
   path,
   resolvedPath,
   isConfigured,
+  maxConcurrentDownloads,
   onPathChange,
+  onMaxConcurrentDownloadsChange,
   onBrowse,
   onDetect,
 }: SteamCmdSettingsSectionProps) {
@@ -78,6 +82,32 @@ export function SteamCmdSettingsSection({
         <p className="text-xs text-gray-500">
           {t("settings.steamcmd.emptyHint")}
         </p>
+
+        <div className="rounded-2xl border border-white/5 bg-[#1e2327] p-4">
+          <div className="mb-3 flex items-start gap-3">
+            <Gauge size={18} className="mt-0.5 shrink-0 text-orange-400" />
+            <div>
+              <p className="text-sm font-bold text-white">{t("settings.steamcmd.concurrentDownloads")}</p>
+              <p className="text-xs text-gray-500">{t("settings.steamcmd.concurrentDownloadsHint")}</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {[1, 2, 3].map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => onMaxConcurrentDownloadsChange(value)}
+                className={`rounded-xl border px-4 py-3 text-sm font-black transition-all ${
+                  maxConcurrentDownloads === value
+                    ? "border-orange-500/40 bg-orange-500 text-white"
+                    : "border-white/10 bg-[#2b3238] text-gray-400 hover:border-orange-500/30 hover:text-white"
+                }`}
+              >
+                {value}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
     </section>
   )

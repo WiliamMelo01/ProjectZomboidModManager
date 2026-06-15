@@ -334,6 +334,10 @@ function shouldApplyDownloadEvent(currentStatus: DownloadItemStatus, nextStatus:
     return nextStatus === "completed"
   }
 
+  if (currentStatus === "failed") {
+    return nextStatus === "retrying" || nextStatus === "downloading" || nextStatus === "completed"
+  }
+
   if (nextStatus === "queued") {
     return false
   }

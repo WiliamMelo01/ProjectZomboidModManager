@@ -101,18 +101,23 @@ pub(super) fn download_steam_workshop_items_impl(
     }
 
     let was_cancelled = workshop_download_was_cancelled();
-    let cancelled_items = if was_cancelled {
-        pending_ids
-            .len()
-            .saturating_sub(first_pass.completed_items.len())
-    } else {
-        0
-    };
+    let cancelled_items = cancelled_item_count(
+        was_cancelled,
+        pending_ids.len(),
+        &first_pass.completed_items,
+        &failed_items,
+    );
     let failed_items = enrich_workshop_download_failures(failed_items);
 
     if was_cancelled {
+        let failed_ids = failed_items
+            .iter()
+            .map(|item| item.workshop_id.as_str())
+            .collect::<HashSet<_>>();
         for workshop_id in &pending_ids {
-            if !first_pass.completed_items.contains(workshop_id) {
+            if !first_pass.completed_items.contains(workshop_id)
+                && !failed_ids.contains(workshop_id.as_str())
+            {
                 emit_workshop_download_event(app, workshop_id, "cancelled", None);
             }
         }
@@ -130,6 +135,21 @@ pub(super) fn download_steam_workshop_items_impl(
         cancelled_items,
         was_cancelled,
     })
+}
+
+fn cancelled_item_count(
+    was_cancelled: bool,
+    pending_item_count: usize,
+    completed_items: &HashSet<String>,
+    failed_items: &HashMap<String, String>,
+) -> usize {
+    if !was_cancelled {
+        return 0;
+    }
+
+    pending_item_count
+        .saturating_sub(completed_items.len())
+        .saturating_sub(failed_items.len())
 }
 
 struct WorkshopDownloadPassResult {
@@ -1066,6 +1086,25 @@ mod tests {
 
         assert_eq!(skipped, vec!["123".to_string()]);
         assert_eq!(pending, vec!["456".to_string()]);
+    }
+
+    #[test]
+    fn cancelled_count_excludes_completed_and_failed_items() {
+        let completed_items = ["1".to_string(), "2".to_string()]
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let failed_items = [("3".to_string(), "ERROR! Download item 3 failed".to_string())]
+            .into_iter()
+            .collect::<HashMap<_, _>>();
+
+        assert_eq!(
+            cancelled_item_count(true, 5, &completed_items, &failed_items),
+            2
+        );
+        assert_eq!(
+            cancelled_item_count(false, 5, &completed_items, &failed_items),
+            0
+        );
     }
 
     #[test]

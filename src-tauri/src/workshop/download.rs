@@ -841,9 +841,7 @@ fn process_steamcmd_workshop_line(
     failed_items: &mut HashMap<String, String>,
 ) -> Option<(String, &'static str)> {
     let normalized_line = line.to_lowercase();
-    let Some(workshop_id) = find_workshop_id_in_line(line, wanted_ids) else {
-        return None;
-    };
+    let workshop_id = find_workshop_id_in_line(line, wanted_ids)?;
 
     if steamcmd_workshop_line_status(&normalized_line) == Some("completed") {
         failed_items.remove(&workshop_id);
@@ -945,7 +943,7 @@ fn enrich_workshop_download_failures(
         })
         .collect::<Vec<_>>();
 
-    failures.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    failures.sort_by_key(|failure| failure.name.to_lowercase());
     failures
 }
 
@@ -1034,8 +1032,11 @@ mod tests {
         fs::create_dir_all(&package).unwrap();
         fs::write(package.join("mod.info"), "name=Example\nid=Example").unwrap();
 
-        let (skipped, pending) =
-            split_already_downloaded_items_with_roots(&["123".to_string()], false, &[root.clone()]);
+        let (skipped, pending) = split_already_downloaded_items_with_roots(
+            &["123".to_string()],
+            false,
+            std::slice::from_ref(&root),
+        );
         let _ = fs::remove_dir_all(root);
 
         assert_eq!(skipped, vec!["123".to_string()]);
@@ -1047,8 +1048,11 @@ mod tests {
         let root = temp_dir("incomplete");
         fs::create_dir_all(root.join("123").join("mods").join("ExampleMod")).unwrap();
 
-        let (skipped, pending) =
-            split_already_downloaded_items_with_roots(&["123".to_string()], false, &[root.clone()]);
+        let (skipped, pending) = split_already_downloaded_items_with_roots(
+            &["123".to_string()],
+            false,
+            std::slice::from_ref(&root),
+        );
         let _ = fs::remove_dir_all(root);
 
         assert!(skipped.is_empty());
@@ -1062,8 +1066,11 @@ mod tests {
         fs::create_dir_all(&package).unwrap();
         fs::write(package.join("mod.info"), "name=Example\nid=Example").unwrap();
 
-        let (skipped, pending) =
-            split_already_downloaded_items_with_roots(&["123".to_string()], true, &[root.clone()]);
+        let (skipped, pending) = split_already_downloaded_items_with_roots(
+            &["123".to_string()],
+            true,
+            std::slice::from_ref(&root),
+        );
         let _ = fs::remove_dir_all(root);
 
         assert!(skipped.is_empty());
@@ -1080,7 +1087,7 @@ mod tests {
         let (skipped, pending) = split_already_downloaded_items_with_roots(
             &["123".to_string(), "456".to_string()],
             false,
-            &[root.clone()],
+            std::slice::from_ref(&root),
         );
         let _ = fs::remove_dir_all(root);
 

@@ -42,7 +42,7 @@ pub(crate) fn list_zomboid_mods_impl() -> Result<Vec<ZomboidMod>, String> {
         collect_custom_dir(&custom_dir, &mut mods, &mut installed_ids, &mut cache)?;
     }
 
-    mods.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    mods.sort_by_key(|mod_item| mod_item.name.to_lowercase());
     cache.retain_active_and_save();
     Ok(mods)
 }

@@ -67,7 +67,7 @@ fn open_url_external(url: &str) -> Result<(), String> {
             .args(["url.dll,FileProtocolHandler", url])
             .spawn()
             .map_err(|error| format!("Nao foi possivel abrir o navegador: {error}"))?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(target_os = "macos")]
@@ -76,7 +76,7 @@ fn open_url_external(url: &str) -> Result<(), String> {
             .arg(url)
             .spawn()
             .map_err(|error| format!("Nao foi possivel abrir o navegador: {error}"))?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -85,7 +85,7 @@ fn open_url_external(url: &str) -> Result<(), String> {
             .arg(url)
             .spawn()
             .map_err(|error| format!("Nao foi possivel abrir o navegador: {error}"))?;
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -96,7 +96,7 @@ pub(crate) fn open_path_external(path: &Path) -> Result<(), String> {
             .arg(path)
             .spawn()
             .map_err(|error| format!("Nao foi possivel abrir o Explorer: {error}"))?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(target_os = "macos")]
@@ -126,7 +126,7 @@ pub(crate) fn open_file_external(path: &Path) -> Result<(), String> {
             .arg(path)
             .spawn()
             .map_err(|error| format!("Nao foi possivel abrir o arquivo: {error}"))?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(target_os = "macos")]

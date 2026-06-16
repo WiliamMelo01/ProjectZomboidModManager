@@ -19,7 +19,7 @@ fn set_effective_language(language: &str) -> Result<(), String> {
             rust_i18n::set_locale(language);
             Ok(())
         }
-        _ => return Err("Invalid language. Use en or pt-BR.".to_string()),
+        _ => Err("Invalid language. Use en or pt-BR.".to_string()),
     }
 }
 

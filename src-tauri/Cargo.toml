@@ -12,7 +12,7 @@ OriginalFilename = "zomboid_server_mod_manager.exe"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["protocol-asset"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rust-i18n = "4"

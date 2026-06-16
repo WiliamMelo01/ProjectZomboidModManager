@@ -105,7 +105,7 @@ pub(crate) fn open_path_external(path: &Path) -> Result<(), String> {
             .arg(path)
             .spawn()
             .map_err(|error| format!("Nao foi possivel abrir a pasta: {error}"))?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -114,7 +114,7 @@ pub(crate) fn open_path_external(path: &Path) -> Result<(), String> {
             .arg(path)
             .spawn()
             .map_err(|error| format!("Nao foi possivel abrir a pasta: {error}"))?;
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -135,7 +135,7 @@ pub(crate) fn open_file_external(path: &Path) -> Result<(), String> {
             .arg(path)
             .spawn()
             .map_err(|error| format!("Nao foi possivel abrir o arquivo: {error}"))?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -144,7 +144,7 @@ pub(crate) fn open_file_external(path: &Path) -> Result<(), String> {
             .arg(path)
             .spawn()
             .map_err(|error| format!("Nao foi possivel abrir o arquivo: {error}"))?;
-        return Ok(());
+        Ok(())
     }
 }
 

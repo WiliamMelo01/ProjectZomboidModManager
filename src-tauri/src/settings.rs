@@ -1,6 +1,7 @@
 use crate::game::{apply_performance_settings, normalize_ram_gb, validate_game_executable_path};
 use crate::i18n::{mod_location_label, text, validate_language_preference, LANGUAGE_AUTO};
 use crate::models::{AppSettings, ModLocation};
+#[cfg(windows)]
 use crate::util::hide_command_window;
 use crate::workshop::open_path_external;
 use crate::{
@@ -8,7 +9,9 @@ use crate::{
     managed_steamcmd_pool_workshop_dirs, read_config_value, read_saved_custom_mod_locations,
     read_saved_mod_locations, run_blocking, zomboid_mods_dir,
 };
-use std::{collections::HashSet, env, fs, path::PathBuf, process::Command};
+use std::{collections::HashSet, env, fs, path::PathBuf};
+#[cfg(windows)]
+use std::process::Command;
 
 pub(crate) const DEFAULT_MAX_CONCURRENT_DOWNLOADS: u32 = 1;
 pub(crate) const MAX_CONCURRENT_DOWNLOADS_LIMIT: u32 = 1;

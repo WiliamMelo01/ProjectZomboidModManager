@@ -1,10 +1,9 @@
 use crate::i18n::text;
 use crate::models::{ZomboidMod, ZomboidModVariant, BUILD_41, BUILD_42};
 use crate::util::{
-    capitalize_first_letter, clean_mod_description, directory_size, format_size, read_ini_value,
-    read_ini_values, read_text_lossy, split_mod_ids,
+    capitalize_first_letter, clean_mod_description, read_ini_value, read_ini_values,
+    read_text_lossy, split_mod_ids,
 };
-use base64::{engine::general_purpose, Engine as _};
 use std::{collections::HashSet, fs, path::Path};
 
 pub(super) fn read_mod_package(
@@ -66,7 +65,7 @@ pub(super) fn read_mod_package(
             .unwrap_or_else(|| {
                 text("No description available.", "Sem descricao disponivel.").to_string()
             }),
-        size: format_size(directory_size(package_dir)),
+        size: "-".to_string(),
         is_installed: source == "local",
         source: source.to_string(),
         path: display.path.clone(),
@@ -151,7 +150,7 @@ fn find_package_image_url(package_dir: &Path) -> Option<String> {
     ["poster.png", "poster.jpg", "icon.png", "icon.jpg"]
         .into_iter()
         .map(|name| package_dir.join(name))
-        .find_map(|path| image_file_to_data_url(&path))
+        .find_map(|path| image_file_to_path(&path))
 }
 
 fn find_mod_image_url(content: &str, mod_dir: &Path) -> Option<String> {
@@ -159,28 +158,11 @@ fn find_mod_image_url(content: &str, mod_dir: &Path) -> Option<String> {
         .into_iter()
         .chain(read_ini_values(content, "icon"))
         .filter(|value| !value.trim().is_empty())
-        .find_map(|candidate| image_file_to_data_url(&mod_dir.join(candidate)))
+        .find_map(|candidate| image_file_to_path(&mod_dir.join(candidate)))
 }
 
-fn image_file_to_data_url(path: &Path) -> Option<String> {
-    let bytes = fs::read(path).ok()?;
-    let mime_type = match path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or_default()
-        .to_lowercase()
-        .as_str()
-    {
-        "jpg" | "jpeg" => "image/jpeg",
-        "webp" => "image/webp",
-        "gif" => "image/gif",
-        "bmp" => "image/bmp",
-        _ => "image/png",
-    };
-    Some(format!(
-        "data:{mime_type};base64,{}",
-        general_purpose::STANDARD.encode(bytes)
-    ))
+fn image_file_to_path(path: &Path) -> Option<String> {
+    path.is_file().then(|| path.display().to_string())
 }
 
 pub(super) fn variant_ids(mod_item: &ZomboidMod) -> Vec<String> {

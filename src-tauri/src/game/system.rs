@@ -1,8 +1,11 @@
+#[cfg(windows)]
 use super::performance::validate_game_executable_path;
 use crate::i18n::text;
+#[cfg(windows)]
 use crate::util::hide_command_window;
 #[cfg(not(windows))]
 use std::fs;
+#[cfg(windows)]
 use std::{path::PathBuf, process::Command};
 
 #[cfg(windows)]

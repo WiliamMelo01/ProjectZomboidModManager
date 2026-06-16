@@ -38,9 +38,9 @@ export function GamePerformanceSection({
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <section className="bg-[#2b3238] rounded-3xl border border-white/5 p-8 shadow-xl relative group">
+      <section className="bg-[#2b3238] rounded-3xl border border-white/5 p-6 shadow-xl relative group">
         <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/5 blur-3xl rounded-full -mr-16 -mt-16 transition-all group-hover:bg-orange-500/10" />
-        <div className="flex items-center gap-3 mb-6 relative z-10">
+        <div className="flex items-center gap-3 mb-4 relative z-10">
           <div className="w-10 h-10 rounded-2xl bg-orange-500/10 flex items-center justify-center text-orange-400 border border-orange-500/20">
             <Monitor size={20} />
           </div>

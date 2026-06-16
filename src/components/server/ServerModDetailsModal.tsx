@@ -1,7 +1,10 @@
 import { Download, FolderOpen, Hash, MapPinned, PackageCheck, User, X } from "lucide-react"
+import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
+import { getModImageSrc } from "@/lib/modImages"
 import { isLocalMod } from "@/lib/modDependencies"
+import { invokeTauri } from "@/lib/tauri"
 import type { ZomboidMod } from "@/types/mod"
 
 type ServerModDetailsModalProps = {
@@ -13,6 +16,37 @@ export function ServerModDetailsModal({ mod, onClose }: ServerModDetailsModalPro
   const { t } = useTranslation()
   const dependencies = mod.dependencies ?? []
   const mapNames = mod.mapNames ?? []
+  const imageSrc = getModImageSrc(mod.imageUrl)
+  const [resolvedSize, setResolvedSize] = useState(mod.size || "-")
+
+  useEffect(() => {
+    let isCancelled = false
+    const hasKnownSize = Boolean(mod.size && mod.size !== "-")
+
+    setResolvedSize(hasKnownSize ? mod.size : "...")
+
+    if (hasKnownSize || !mod.packagePath) {
+      return () => {
+        isCancelled = true
+      }
+    }
+
+    void invokeTauri<string>("get_zomboid_mod_package_size", { packagePath: mod.packagePath })
+      .then((size) => {
+        if (!isCancelled) {
+          setResolvedSize(size || "-")
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setResolvedSize("-")
+        }
+      })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [mod.packagePath, mod.size])
 
   return (
     <div
@@ -27,17 +61,17 @@ export function ServerModDetailsModal({ mod, onClose }: ServerModDetailsModalPro
         onClick={(event) => event.stopPropagation()}
       >
         <div className="relative min-h-80 overflow-hidden bg-[#1e2327] sm:h-96">
-          {mod.imageUrl ? (
+          {imageSrc ? (
             <>
               <img
-                src={mod.imageUrl}
+                src={imageSrc}
                 alt=""
                 aria-hidden="true"
                 className="absolute inset-0 h-full w-full scale-110 object-cover opacity-25 blur-2xl"
               />
               <div className="absolute inset-x-0 top-0 flex h-[72%] items-center justify-center p-4 sm:h-[76%] sm:p-6">
                 <img
-                  src={mod.imageUrl}
+                  src={imageSrc}
                   alt={mod.name}
                   className="max-h-full max-w-full rounded-2xl border border-white/10 bg-[#15191c]/60 object-contain shadow-2xl"
                 />
@@ -59,7 +93,7 @@ export function ServerModDetailsModal({ mod, onClose }: ServerModDetailsModalPro
           </button>
           <div className="absolute bottom-5 left-6 right-6">
             <div className="mb-2 flex flex-wrap gap-2">
-              <Badge>{isLocalMod(mod) ? "LOCAL" : "STEAM"}</Badge>
+              <SourceBadge mod={mod} />
               {mod.compatibleBuilds.map((build) => <Badge key={build}>{build}</Badge>)}
               {mod.source === "missing" && <Badge tone="red">{t("mods.missing")}</Badge>}
             </div>
@@ -78,7 +112,7 @@ export function ServerModDetailsModal({ mod, onClose }: ServerModDetailsModalPro
 
           <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <Detail label={t("mods.version")} value={mod.version || "-"} />
-            <Detail label={t("mods.size")} value={mod.size || "-"} />
+            <Detail label={t("mods.size")} value={resolvedSize} />
             <Detail label={t("mods.source")} value={mod.source || "-"} />
             <Detail label="Workshop ID" value={mod.workshopId || "-"} icon={<Hash size={14} />} />
             <Detail label="Mod ID" value={mod.id} icon={<PackageCheck size={14} />} />
@@ -97,13 +131,28 @@ export function ServerModDetailsModal({ mod, onClose }: ServerModDetailsModalPro
   )
 }
 
-function Badge({ children, tone = "orange" }: { children: React.ReactNode; tone?: "orange" | "red" }) {
+function SourceBadge({ mod }: { mod: ZomboidMod }) {
+  if (isLocalMod(mod)) {
+    return <Badge tone="green">LOCAL</Badge>
+  }
+
+  if (mod.source === "steamcmd") {
+    return <Badge tone="blue">STEAMCMD</Badge>
+  }
+
+  return <Badge>STEAM</Badge>
+}
+
+function Badge({ children, tone = "orange" }: { children: React.ReactNode; tone?: "orange" | "red" | "green" | "blue" }) {
+  const toneClass = {
+    blue: "border-sky-400/30 bg-sky-400/15 text-sky-200",
+    green: "border-green-400/30 bg-green-400/15 text-green-200",
+    orange: "border-orange-400/30 bg-orange-400/15 text-orange-200",
+    red: "border-red-500/30 bg-red-500/15 text-red-200",
+  }[tone]
+
   return (
-    <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-wide ${
-      tone === "red"
-        ? "border-red-500/30 bg-red-500/15 text-red-200"
-        : "border-orange-400/30 bg-orange-400/15 text-orange-200"
-    }`}>
+    <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-wide ${toneClass}`}>
       {children}
     </span>
   )

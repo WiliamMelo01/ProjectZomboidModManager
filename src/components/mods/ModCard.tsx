@@ -1,6 +1,7 @@
 import { AlertCircle, Download, Hash, PackageCheck, User } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { getModImageSrc } from "@/lib/modImages"
 import { isLocalMod } from "@/lib/modDependencies"
 import type { ZomboidMod } from "@/types/mod"
 
@@ -12,16 +13,17 @@ type ModCardProps = {
 export function ModCard({ mod, onInstall }: ModCardProps) {
   const { t } = useTranslation()
   const isLocal = isLocalMod(mod)
-  const sourceLabel = isLocal ? "LOCAL" : "STEAM"
+  const sourceBadge = getSourceBadge(mod)
   const displayWorkshopId = mod.workshopId || "-"
   const hasDependencies = mod.dependencies && mod.dependencies.length > 0
+  const imageSrc = getModImageSrc(mod.imageUrl)
 
   return (
     <div className="group bg-[#2b3238] border border-white/5 rounded-2xl flex flex-col transition-all duration-300 hover:border-orange-400/30 hover:bg-[#353c42] hover:shadow-[0_10px_30px_rgba(0,0,0,0.2)] overflow-hidden">
       <div className="relative h-40 w-full bg-[#1e2327] overflow-hidden shrink-0">
-        {mod.imageUrl ? (
+        {imageSrc ? (
           <img
-            src={mod.imageUrl}
+            src={imageSrc}
             alt={mod.name}
             className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
           />
@@ -33,8 +35,8 @@ export function ModCard({ mod, onInstall }: ModCardProps) {
         <div className="absolute inset-0 bg-gradient-to-t from-[#2b3238] to-transparent opacity-60" />
 
         <div className="absolute top-3 left-3">
-          <span className="text-[10px] text-white font-bold bg-orange-500 px-2 py-0.5 rounded-md shadow-lg">
-            {sourceLabel}
+          <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold text-white shadow-lg ${sourceBadge.className}`}>
+            {sourceBadge.label}
           </span>
         </div>
         <div className="absolute bottom-3 left-3 flex gap-1">
@@ -116,4 +118,16 @@ export function ModCard({ mod, onInstall }: ModCardProps) {
       </div>
     </div>
   )
+}
+
+function getSourceBadge(mod: ZomboidMod) {
+  if (isLocalMod(mod)) {
+    return { label: "LOCAL", className: "bg-green-500" }
+  }
+
+  if (mod.source === "steamcmd") {
+    return { label: "STEAMCMD", className: "bg-sky-500" }
+  }
+
+  return { label: "STEAM", className: "bg-orange-500" }
 }

@@ -21,6 +21,14 @@ O **PZ Manager** é um aplicativo desktop para organizar mods de servidores de *
 
 O aplicativo suporta perfis para **Build 41** e **Build 42**. Cada servidor mantém sua própria build, lista de mods e itens da Workshop.
 
+## Destaques da versao 0.3.0
+
+- Cache persistente no backend para a biblioteca de mods, reutilizado pelo preflight do servidor.
+- Atualizacoes mais rapidas ao revalidar apenas pacotes de mods alterados.
+- Acao de reescanear tudo para limpar o cache de mods e reconstruir a biblioteca.
+- Configuracoes abrem com os ultimos valores conhecidos enquanto o backend atualiza os dados.
+- Imagens locais de mods carregam pelo protocolo de assets do Tauri em vez de payloads base64.
+
 ## Funcionalidades
 
 | Recurso | O que você pode fazer |

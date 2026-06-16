@@ -1,4 +1,5 @@
-use super::discovery::{read_local_workshop_id, steam_workshop_dirs};
+use super::cache::{package_signature, ModsLibraryCache};
+use super::discovery::{read_local_workshop_id, steam_workshop_dirs, steamcmd_workshop_dirs};
 use super::metadata::{read_mod_package, variant_ids};
 use crate::models::ZomboidMod;
 use crate::{saved_custom_mod_dirs, zomboid_mods_dir};
@@ -7,18 +8,42 @@ use std::{collections::HashSet, fs, path::Path};
 pub(crate) fn list_zomboid_mods_impl() -> Result<Vec<ZomboidMod>, String> {
     let mut mods = Vec::new();
     let mut installed_ids = HashSet::new();
+    let mut cache = ModsLibraryCache::load();
 
     if let Ok(local_dir) = zomboid_mods_dir() {
-        collect_flat_packages(&local_dir, "local", true, &mut mods, &mut installed_ids)?;
+        collect_flat_packages(
+            &local_dir,
+            "local",
+            true,
+            &mut mods,
+            &mut installed_ids,
+            &mut cache,
+        )?;
     }
+    let steamcmd_workshop_dir_keys = steamcmd_workshop_dirs()
+        .into_iter()
+        .map(|path| path_key(&path))
+        .collect::<HashSet<_>>();
     for workshop_dir in steam_workshop_dirs() {
-        collect_workshop_items(&workshop_dir, "steam", &mut mods, &mut installed_ids)?;
+        let source = if steamcmd_workshop_dir_keys.contains(&path_key(&workshop_dir)) {
+            "steamcmd"
+        } else {
+            "steam"
+        };
+        collect_workshop_items(
+            &workshop_dir,
+            source,
+            &mut mods,
+            &mut installed_ids,
+            &mut cache,
+        )?;
     }
     for custom_dir in saved_custom_mod_dirs()? {
-        collect_custom_dir(&custom_dir, &mut mods, &mut installed_ids)?;
+        collect_custom_dir(&custom_dir, &mut mods, &mut installed_ids, &mut cache)?;
     }
 
-    mods.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    mods.sort_by_key(|mod_item| mod_item.name.to_lowercase());
+    cache.retain_active_and_save();
     Ok(mods)
 }
 
@@ -32,6 +57,7 @@ fn collect_flat_packages(
     is_local: bool,
     mods: &mut Vec<ZomboidMod>,
     installed_ids: &mut HashSet<String>,
+    cache: &mut ModsLibraryCache,
 ) -> Result<(), String> {
     if !root.is_dir() {
         return Ok(());
@@ -48,7 +74,14 @@ fn collect_flat_packages(
         } else {
             None
         };
-        push_package(&path, workshop_id.as_deref(), source, mods, installed_ids)?;
+        push_package(
+            &path,
+            workshop_id.as_deref(),
+            source,
+            mods,
+            installed_ids,
+            cache,
+        )?;
     }
     Ok(())
 }
@@ -58,6 +91,7 @@ fn collect_workshop_items(
     source: &str,
     mods: &mut Vec<ZomboidMod>,
     installed_ids: &mut HashSet<String>,
+    cache: &mut ModsLibraryCache,
 ) -> Result<(), String> {
     if !root.is_dir() {
         return Ok(());
@@ -80,7 +114,14 @@ fn collect_workshop_items(
             {
                 let package = package.map_err(|error| error.to_string())?.path();
                 if package.is_dir() {
-                    push_package(&package, Some(workshop_id), source, mods, installed_ids)?;
+                    push_package(
+                        &package,
+                        Some(workshop_id),
+                        source,
+                        mods,
+                        installed_ids,
+                        cache,
+                    )?;
                 }
             }
         }
@@ -92,6 +133,7 @@ fn collect_custom_dir(
     root: &Path,
     mods: &mut Vec<ZomboidMod>,
     installed_ids: &mut HashSet<String>,
+    cache: &mut ModsLibraryCache,
 ) -> Result<(), String> {
     if !root.is_dir() {
         return Ok(());
@@ -114,11 +156,11 @@ fn collect_custom_dir(
             {
                 let package = package.map_err(|error| error.to_string())?.path();
                 if package.is_dir() {
-                    push_package(&package, Some(name), "custom", mods, installed_ids)?;
+                    push_package(&package, Some(name), "custom", mods, installed_ids, cache)?;
                 }
             }
         } else {
-            push_package(&path, None, "custom", mods, installed_ids)?;
+            push_package(&path, None, "custom", mods, installed_ids, cache)?;
         }
     }
     Ok(())
@@ -130,17 +172,28 @@ fn push_package(
     source: &str,
     mods: &mut Vec<ZomboidMod>,
     installed_ids: &mut HashSet<String>,
+    cache: &mut ModsLibraryCache,
 ) -> Result<(), String> {
-    let Some(mod_item) = read_mod_package(package, workshop_id, source)? else {
-        return Ok(());
+    let key = ModsLibraryCache::key(package, source, workshop_id);
+    let signature = package_signature(package);
+    let mod_item = if let Some(mod_item) = cache.get_valid(&key, &signature) {
+        mod_item
+    } else {
+        let Some(mod_item) = read_mod_package(package, workshop_id, source)? else {
+            return Ok(());
+        };
+        cache.store(key, signature, mod_item.clone());
+        mod_item
     };
     let ids = variant_ids(&mod_item);
-    if source != "local" && ids.iter().any(|id| installed_ids.contains(id)) {
+    if ids.iter().any(|id| installed_ids.contains(id)) {
         return Ok(());
     }
-    if source == "local" {
-        installed_ids.extend(ids);
-    }
+    installed_ids.extend(ids);
     mods.push(mod_item);
     Ok(())
+}
+
+fn path_key(path: &Path) -> String {
+    path.display().to_string().to_lowercase()
 }

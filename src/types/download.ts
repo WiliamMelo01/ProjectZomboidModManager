@@ -1,6 +1,6 @@
 export type DownloadType = "item" | "collection"
 
-export type DownloadItemStatus = "queued" | "downloading" | "completed" | "retrying" | "failed" | "cancelled"
+export type DownloadItemStatus = "queued" | "downloading" | "completed" | "retrying" | "failed" | "cancelled" | "skipped"
 
 export type WorkshopDownloadFailedItem = {
   workshopId: string
@@ -11,6 +11,7 @@ export type WorkshopDownloadFailedItem = {
 export type WorkshopDownloadResult = {
   totalItems: number
   downloadedItems: number
+  skippedItems: number
   failedItems: WorkshopDownloadFailedItem[]
   cancelledItems: number
   wasCancelled: boolean
@@ -24,6 +25,13 @@ export type WorkshopDownloadEvent = {
 }
 
 export type DownloadListItem = WorkshopDownloadEvent
+
+export type WorkshopDownloadLogEvent = {
+  instanceId: number
+  label: string
+  colorKey: "orange" | "blue" | "green" | string
+  line: string
+}
 
 export type WorkshopDownloadStatus = {
   type: "success" | "error" | "info"

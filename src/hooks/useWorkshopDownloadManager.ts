@@ -2,11 +2,14 @@ import { listen } from "@tauri-apps/api/event"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import { i18n } from "@/i18n"
+import { formatDuration } from "@/lib/serverTest"
 import { invokeTauri } from "@/lib/tauri"
 import type {
+  DownloadItemStatus,
   DownloadListItem,
   DownloadType,
   WorkshopDownloadEvent,
+  WorkshopDownloadLogEvent,
   WorkshopDownloadResult,
   WorkshopDownloadStatus,
 } from "@/types/download"
@@ -41,10 +44,12 @@ export function useWorkshopDownloadManager({
   const [isDownloading, setIsDownloading] = useState(false)
   const [status, setStatus] = useState<WorkshopDownloadStatus | null>(null)
   const [downloadItems, setDownloadItems] = useState<DownloadListItem[]>([])
-  const [steamCmdLogLines, setSteamCmdLogLines] = useState<string[]>([])
+  const [steamCmdLogLines, setSteamCmdLogLines] = useState<WorkshopDownloadLogEvent[]>([])
   const [result, setResult] = useState<WorkshopDownloadResult | null>(null)
   const [isResultModalOpen, setIsResultModalOpen] = useState(false)
   const [forceValidate, setForceValidate] = useState(false)
+  const [downloadStartedAt, setDownloadStartedAt] = useState<number | null>(null)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const isDownloadScreenActiveRef = useRef(isDownloadScreenActive)
   const onDownloadFinishedRef = useRef(onDownloadFinished)
   const onNotificationRef = useRef(onNotification)
@@ -73,14 +78,28 @@ export function useWorkshopDownloadManager({
           return [...items, payload]
         }
 
-        return items.map((item, index) => index === existing ? { ...item, ...payload } : item)
+        return items.map((item, index) => {
+          if (index !== existing || !shouldApplyDownloadEvent(item.status, payload.status)) {
+            return item
+          }
+
+          return { ...item, ...payload }
+        })
       })
     }).then((unlisten) => {
       dispose = unlisten
     })
 
-    void listen<string>("workshop-download-log", ({ payload }) => {
-      setSteamCmdLogLines((lines) => [...lines, payload].slice(-320))
+    void listen<WorkshopDownloadLogEvent>("workshop-download-log", ({ payload }) => {
+      setSteamCmdLogLines((lines) => {
+        const lastLine = lines.at(-1)
+
+        if (lastLine?.instanceId === payload.instanceId && lastLine.line === payload.line) {
+          return lines
+        }
+
+        return [...lines, payload].slice(-320)
+      })
     }).then((unlisten) => {
       disposeLog = unlisten
     })
@@ -91,16 +110,33 @@ export function useWorkshopDownloadManager({
     }
   }, [])
 
+  useEffect(() => {
+    if (!isDownloading || downloadStartedAt === null) {
+      return
+    }
+
+    const updateElapsed = () => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - downloadStartedAt) / 1000)))
+    }
+
+    updateElapsed()
+    const interval = window.setInterval(updateElapsed, 1000)
+
+    return () => window.clearInterval(interval)
+  }, [downloadStartedAt, isDownloading])
+
   const progress = useMemo(() => {
     const totalItems = downloadItems.length
     const completedItems = downloadItems.filter((item) => item.status === "completed").length
+    const skippedItems = downloadItems.filter((item) => item.status === "skipped").length
     const failedItems = downloadItems.filter((item) => item.status === "failed").length
     const queuedItems = downloadItems.filter((item) => item.status === "queued").length
-    const percentage = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0
+    const percentage = totalItems > 0 ? Math.round(((completedItems + skippedItems) / totalItems) * 100) : 0
 
     return {
       totalItems,
       completedItems,
+      skippedItems,
       failedItems,
       queuedItems,
       percentage,
@@ -108,7 +144,23 @@ export function useWorkshopDownloadManager({
     }
   }, [downloadItems, isDownloading])
 
+  function startDownloadTimer() {
+    setElapsedSeconds(0)
+    setDownloadStartedAt(Date.now())
+  }
+
+  function stopDownloadTimer() {
+    setDownloadStartedAt((startedAt) => {
+      if (startedAt !== null) {
+        setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)))
+      }
+
+      return null
+    })
+  }
+
   async function finishDownload(downloadResult: WorkshopDownloadResult) {
+    stopDownloadTimer()
     setResult(downloadResult)
     setIsResultModalOpen(
       isDownloadScreenActiveRef.current &&
@@ -116,14 +168,14 @@ export function useWorkshopDownloadManager({
     )
 
     if (downloadResult.wasCancelled) {
-      setStatus({ type: "error", message: i18n.t("downloads.cancelledProgress", { count: downloadResult.downloadedItems }) })
+      setStatus({ type: "error", message: i18n.t("downloads.cancelledProgress", { count: downloadResult.downloadedItems, skipped: downloadResult.skippedItems }) })
     } else if (downloadResult.failedItems.length > 0) {
       setStatus({
         type: "error",
-        message: i18n.t("downloads.progress", { downloaded: downloadResult.downloadedItems, total: downloadResult.totalItems, failed: downloadResult.failedItems.length }),
+        message: i18n.t("downloads.progress", { downloaded: downloadResult.downloadedItems, skipped: downloadResult.skippedItems, total: downloadResult.totalItems, failed: downloadResult.failedItems.length }),
       })
     } else {
-      setStatus({ type: "success", message: i18n.t("downloads.success", { count: downloadResult.downloadedItems }) })
+      setStatus({ type: "success", message: i18n.t("downloads.success", { downloaded: downloadResult.downloadedItems, skipped: downloadResult.skippedItems }) })
     }
 
     await onDownloadFinishedRef.current?.()
@@ -139,6 +191,7 @@ export function useWorkshopDownloadManager({
     setSteamCmdLogLines([])
     setResult(null)
     setIsResultModalOpen(false)
+    startDownloadTimer()
     setIsDownloading(true)
     setForceValidate(shouldValidate)
     setStatus({
@@ -159,6 +212,7 @@ export function useWorkshopDownloadManager({
 
       await finishDownload(downloadResult)
     } catch (error) {
+      stopDownloadTimer()
       setStatus({ type: "error", message: getErrorMessage(error) })
     } finally {
       setIsDownloading(false)
@@ -176,6 +230,7 @@ export function useWorkshopDownloadManager({
     setIsResultModalOpen(false)
     setDownloadItems([])
     setSteamCmdLogLines([])
+    startDownloadTimer()
     setIsDownloading(true)
     setStatus({ type: "info", message: i18n.t("downloads.retrying", { count: workshopIds.length }) })
 
@@ -186,6 +241,7 @@ export function useWorkshopDownloadManager({
       })
       await finishDownload(downloadResult)
     } catch (error) {
+      stopDownloadTimer()
       setStatus({ type: "error", message: getErrorMessage(error) })
     } finally {
       setIsDownloading(false)
@@ -211,10 +267,10 @@ export function useWorkshopDownloadManager({
     setIsResultModalOpen(downloadResult.failedItems.length > 0 || downloadResult.wasCancelled)
     setStatus(
       downloadResult.wasCancelled
-        ? { type: "error", message: i18n.t("downloads.cancelledProgress", { count: downloadResult.downloadedItems }) }
+        ? { type: "error", message: i18n.t("downloads.cancelledProgress", { count: downloadResult.downloadedItems, skipped: downloadResult.skippedItems }) }
         : downloadResult.failedItems.length > 0
-          ? { type: "error", message: i18n.t("downloads.progress", { downloaded: downloadResult.downloadedItems, total: downloadResult.totalItems, failed: downloadResult.failedItems.length }) }
-          : { type: "success", message: i18n.t("downloads.success", { count: downloadResult.downloadedItems }) },
+          ? { type: "error", message: i18n.t("downloads.progress", { downloaded: downloadResult.downloadedItems, skipped: downloadResult.skippedItems, total: downloadResult.totalItems, failed: downloadResult.failedItems.length }) }
+          : { type: "success", message: i18n.t("downloads.success", { downloaded: downloadResult.downloadedItems, skipped: downloadResult.skippedItems }) },
     )
   }
 
@@ -226,6 +282,8 @@ export function useWorkshopDownloadManager({
     result,
     isResultModalOpen,
     progress,
+    elapsedSeconds,
+    elapsedLabel: formatDuration(elapsedSeconds),
     startDownload,
     retryFailedItems,
     cancelDownload,
@@ -244,10 +302,10 @@ function buildDownloadNotification(result: WorkshopDownloadResult): DownloadNoti
       ? i18n.t("downloads.failedTitle")
       : i18n.t("downloads.finishedTitle")
   const message = result.wasCancelled
-    ? i18n.t("downloads.cancelled", { downloaded: result.downloadedItems, cancelled: result.cancelledItems })
+    ? i18n.t("downloads.cancelled", { downloaded: result.downloadedItems, skipped: result.skippedItems, cancelled: result.cancelledItems })
     : failedCount > 0
-      ? i18n.t("downloads.progress", { downloaded: result.downloadedItems, total: result.totalItems, failed: failedCount })
-      : i18n.t("downloads.success", { count: result.downloadedItems })
+      ? i18n.t("downloads.progress", { downloaded: result.downloadedItems, skipped: result.skippedItems, total: result.totalItems, failed: failedCount })
+      : i18n.t("downloads.success", { downloaded: result.downloadedItems, skipped: result.skippedItems })
 
   return {
     title,
@@ -261,6 +319,30 @@ function buildDownloadNotification(result: WorkshopDownloadResult): DownloadNoti
         : "success",
     action: { type: "download-result", result },
   }
+}
+
+function shouldApplyDownloadEvent(currentStatus: DownloadItemStatus, nextStatus: DownloadItemStatus) {
+  if (currentStatus === nextStatus) {
+    return true
+  }
+
+  if (currentStatus === "completed" || currentStatus === "skipped") {
+    return false
+  }
+
+  if (currentStatus === "cancelled") {
+    return nextStatus === "completed"
+  }
+
+  if (currentStatus === "failed") {
+    return nextStatus === "retrying" || nextStatus === "downloading" || nextStatus === "completed"
+  }
+
+  if (nextStatus === "queued") {
+    return false
+  }
+
+  return true
 }
 
 function getErrorMessage(error: unknown) {

@@ -49,7 +49,7 @@ fn list_zomboid_servers_impl() -> Result<Vec<ZomboidServer>, String> {
         servers.push(read_zomboid_server_from_path(&path)?);
     }
 
-    servers.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    servers.sort_by_key(|server| server.name.to_lowercase());
 
     Ok(servers)
 }
@@ -1127,7 +1127,7 @@ fn write_zomboid_server_build(server_id: &str, game_build: &str) -> Result<(), S
     let mut builds = read_server_builds()?;
     builds.insert(server_id.to_string(), game_build.to_string());
     let mut entries = builds.into_iter().collect::<Vec<_>>();
-    entries.sort_by(|left, right| left.0.to_lowercase().cmp(&right.0.to_lowercase()));
+    entries.sort_by_key(|entry| entry.0.to_lowercase());
     let content = entries
         .into_iter()
         .map(|(id, build)| format!("{id}={build}"))
@@ -1149,7 +1149,7 @@ fn remove_zomboid_server_build(server_id: &str) -> Result<(), String> {
     }
 
     let mut entries = builds.into_iter().collect::<Vec<_>>();
-    entries.sort_by(|left, right| left.0.to_lowercase().cmp(&right.0.to_lowercase()));
+    entries.sort_by_key(|entry| entry.0.to_lowercase());
     let content = entries
         .into_iter()
         .map(|(id, build)| format!("{id}={build}"))
@@ -1189,8 +1189,6 @@ fn sanitize_server_id(value: &str) -> String {
         .map(|char| {
             if char.is_ascii_alphanumeric() || char == '-' || char == '_' {
                 char
-            } else if char.is_whitespace() {
-                '_'
             } else {
                 '_'
             }

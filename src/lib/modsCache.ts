@@ -160,3 +160,11 @@ export async function writeModsLibraryCache(mods: ZomboidMod[]) {
     // The live backend scan remains the source of truth if browser storage is unavailable or full.
   }
 }
+
+export function clearModsLibraryCache() {
+  try {
+    window.localStorage.removeItem(MODS_LIBRARY_CACHE_KEY)
+  } catch {
+    // The backend scan remains the source of truth if browser storage is unavailable.
+  }
+}

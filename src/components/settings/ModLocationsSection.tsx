@@ -6,12 +6,22 @@ import type { ModLocation } from "@/types/settings"
 type ModLocationsSectionProps = {
   locations: ModLocation[]
   isAddingFolder: boolean
+  isRescanning: boolean
   onAddFolder: () => void
   onRefresh: () => void
+  onRescan: () => void
   onOpenLocation: (path: string) => void
 }
 
-export function ModLocationsSection({ locations, isAddingFolder, onAddFolder, onRefresh, onOpenLocation }: ModLocationsSectionProps) {
+export function ModLocationsSection({
+  locations,
+  isAddingFolder,
+  isRescanning,
+  onAddFolder,
+  onRefresh,
+  onRescan,
+  onOpenLocation,
+}: ModLocationsSectionProps) {
   const { t } = useTranslation()
   return (
     <section className="bg-[#2b3238] rounded-3xl border border-white/5 p-6 shadow-xl relative group">
@@ -38,6 +48,14 @@ export function ModLocationsSection({ locations, isAddingFolder, onAddFolder, on
           <button onClick={onRefresh} className="flex items-center gap-2 bg-orange-500/10 text-orange-400 hover:bg-orange-500 hover:text-white px-4 py-2 rounded-xl transition-all font-bold text-sm border border-orange-500/20 active:scale-95">
             <RefreshCw size={18} />
             <span>{t("settings.modLocations.reload")}</span>
+          </button>
+          <button
+            disabled={isRescanning}
+            onClick={onRescan}
+            className="flex items-center gap-2 bg-[#1e2327] text-gray-300 hover:bg-orange-500 hover:text-white disabled:opacity-60 px-4 py-2 rounded-xl transition-all font-bold text-sm border border-white/10 active:scale-95"
+          >
+            <RefreshCw size={18} className={isRescanning ? "animate-spin" : ""} />
+            <span>{t("settings.modLocations.rescanAll")}</span>
           </button>
         </div>
       </div>

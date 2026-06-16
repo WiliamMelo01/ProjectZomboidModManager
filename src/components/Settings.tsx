@@ -11,22 +11,39 @@ import { invokeTauri } from "@/lib/tauri"
 import { setLanguagePreference } from "@/i18n"
 import type { AppSettings, LanguagePreference, ModLocation, ZomboidInstallationStatus } from "@/types/settings"
 
-export function Settings() {
-  const { t } = useTranslation()
-  const [activeTab, setActiveTab] = useState<"mods" | "ram">("mods")
-  const [gameExecutablePath, setGameExecutablePath] = useState("")
-  const [clientRam, setClientRam] = useState("4.00")
-  const [serverRam, setServerRam] = useState("4.00")
-  const [maxConcurrentDownloads, setMaxConcurrentDownloads] = useState(1)
-  const [languagePreference, setLanguagePreferenceState] = useState<LanguagePreference>("auto")
-  const [totalSystemRam, setTotalSystemRam] = useState(16)
+const SETTINGS_VIEW_CACHE_KEY = "pzmm:settings-view"
+const SETTINGS_VIEW_CACHE_VERSION = 1
 
-  const [modLocations, setModLocations] = useState<ModLocation[]>([])
-  const [resolvedPath, setResolvedPath] = useState<string | null>(null)
-  const [isConfigured, setIsConfigured] = useState(false)
+type SettingsViewCache = {
+  version: number
+  settings: AppSettings
+  modLocations: ModLocation[]
+  totalSystemRam: number
+}
+
+type SettingsProps = {
+  onRescanMods?: () => Promise<void>
+}
+
+export function Settings({ onRescanMods }: SettingsProps) {
+  const { t } = useTranslation()
+  const [cachedView] = useState(readSettingsViewCache)
+  const [activeTab, setActiveTab] = useState<"mods" | "ram">("mods")
+  const [loadedSettings, setLoadedSettings] = useState<AppSettings | null>(cachedView?.settings ?? null)
+  const [gameExecutablePath, setGameExecutablePath] = useState(cachedView?.settings.gameExecutablePath ?? "")
+  const [clientRam, setClientRam] = useState(cachedView?.settings.clientRam ?? "4.00")
+  const [serverRam, setServerRam] = useState(cachedView?.settings.serverRam ?? "4.00")
+  const [maxConcurrentDownloads, setMaxConcurrentDownloads] = useState(cachedView?.settings.maxConcurrentDownloads ?? 1)
+  const [languagePreference, setLanguagePreferenceState] = useState<LanguagePreference>(cachedView?.settings.languagePreference ?? "auto")
+  const [totalSystemRam, setTotalSystemRam] = useState(cachedView?.totalSystemRam ?? 16)
+
+  const [modLocations, setModLocations] = useState<ModLocation[]>(cachedView?.modLocations ?? [])
+  const [resolvedPath, setResolvedPath] = useState<string | null>(cachedView?.settings.resolvedSteamcmdPath ?? null)
+  const [isConfigured, setIsConfigured] = useState(Boolean(cachedView?.settings.isSteamcmdConfigured))
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [isAddingFolder, setIsAddingFolder] = useState(false)
+  const [isRescanningMods, setIsRescanningMods] = useState(false)
   const [isScanningZomboid, setIsScanningZomboid] = useState(false)
   const [zomboidStatus, setZomboidStatus] = useState<ZomboidInstallationStatus | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -46,6 +63,7 @@ export function Settings() {
       applySettings(settings)
       setModLocations(locations)
       setTotalSystemRam(systemRam)
+      writeSettingsViewCache(settings, locations, systemRam)
       await scanZomboidInstallation(settings.gameExecutablePath)
     } catch (loadError) {
       setError(getErrorMessage(loadError))
@@ -70,7 +88,9 @@ export function Settings() {
 
       applySettings(settings)
       await scanZomboidInstallation(settings.gameExecutablePath)
-      setModLocations(await invokeTauri<ModLocation[]>("get_mod_locations"))
+      const locations = await invokeTauri<ModLocation[]>("get_mod_locations")
+      setModLocations(locations)
+      writeSettingsViewCache(settings, locations, totalSystemRam)
       setMessage(t("settings.saved"))
     } catch (saveError) {
       setError(getErrorMessage(saveError))
@@ -135,12 +155,13 @@ export function Settings() {
   }
 
   function applySettings(settings: AppSettings) {
+    setLoadedSettings(settings)
     setResolvedPath(settings.resolvedSteamcmdPath ?? null)
     setIsConfigured(Boolean(settings.isSteamcmdConfigured))
     setGameExecutablePath(settings.gameExecutablePath ?? "")
     setClientRam(settings.clientRam ?? "4.00")
     setServerRam(settings.serverRam ?? "4.00")
-    setMaxConcurrentDownloads(1)
+    setMaxConcurrentDownloads(settings.maxConcurrentDownloads ?? 1)
     setLanguagePreferenceState(settings.languagePreference ?? "auto")
   }
 
@@ -152,7 +173,15 @@ export function Settings() {
 
     try {
       await setLanguagePreference(preference)
-      setModLocations(await invokeTauri<ModLocation[]>("get_mod_locations"))
+      const locations = await invokeTauri<ModLocation[]>("get_mod_locations")
+      setModLocations(locations)
+      writeSettingsViewCache(currentSettingsSnapshot(loadedSettings, {
+        gameExecutablePath,
+        clientRam,
+        serverRam,
+        maxConcurrentDownloads,
+        languagePreference: preference,
+      }), locations, totalSystemRam)
       setMessage(t("language.saved"))
     } catch (languageError) {
       setLanguagePreferenceState(previousPreference)
@@ -167,10 +196,38 @@ export function Settings() {
     setMessage(null)
 
     try {
-      setModLocations(await invokeTauri<ModLocation[]>("get_mod_locations"))
+      const locations = await invokeTauri<ModLocation[]>("get_mod_locations")
+      setModLocations(locations)
+      writeSettingsViewCache(currentSettingsSnapshot(loadedSettings, {
+        gameExecutablePath,
+        clientRam,
+        serverRam,
+        maxConcurrentDownloads,
+        languagePreference,
+      }), locations, totalSystemRam)
       setMessage(t("settings.modLocations.refreshed"))
     } catch (refreshError) {
       setError(getErrorMessage(refreshError))
+    }
+  }
+
+  async function rescanAllMods() {
+    if (!onRescanMods || isRescanningMods) {
+      return
+    }
+
+    setIsRescanningMods(true)
+    setError(null)
+    setMessage(null)
+
+    try {
+      await onRescanMods()
+      setModLocations(await invokeTauri<ModLocation[]>("get_mod_locations"))
+      setMessage(t("settings.modLocations.rescanned"))
+    } catch (rescanError) {
+      setError(getErrorMessage(rescanError))
+    } finally {
+      setIsRescanningMods(false)
     }
   }
 
@@ -196,11 +253,17 @@ export function Settings() {
         return
       }
 
-      setModLocations(
-        await invokeTauri<ModLocation[]>("add_mod_location", {
-          path: selectedPath,
-        }),
-      )
+      const locations = await invokeTauri<ModLocation[]>("add_mod_location", {
+        path: selectedPath,
+      })
+      setModLocations(locations)
+      writeSettingsViewCache(currentSettingsSnapshot(loadedSettings, {
+        gameExecutablePath,
+        clientRam,
+        serverRam,
+        maxConcurrentDownloads,
+        languagePreference,
+      }), locations, totalSystemRam)
       setMessage(t("settings.modLocations.added"))
     } catch (addError) {
       setError(getErrorMessage(addError))
@@ -265,8 +328,10 @@ export function Settings() {
                   <ModLocationsSection
                     locations={modLocations}
                     isAddingFolder={isAddingFolder}
+                    isRescanning={isRescanningMods}
                     onAddFolder={() => void addModFolder()}
                     onRefresh={() => void refreshModLocations()}
+                    onRescan={() => void rescanAllMods()}
                     onOpenLocation={(path) => void openModLocation(path)}
                   />
                 </div>
@@ -342,4 +407,94 @@ function getErrorMessage(error: unknown) {
   }
 
   return "Could not load settings."
+}
+
+function readSettingsViewCache(): SettingsViewCache | null {
+  try {
+    const rawCache = window.localStorage.getItem(SETTINGS_VIEW_CACHE_KEY)
+
+    if (!rawCache) {
+      return null
+    }
+
+    const cache = JSON.parse(rawCache) as Partial<SettingsViewCache>
+
+    if (
+      cache.version !== SETTINGS_VIEW_CACHE_VERSION ||
+      !isAppSettings(cache.settings) ||
+      !Array.isArray(cache.modLocations) ||
+      !cache.modLocations.every(isModLocation) ||
+      typeof cache.totalSystemRam !== "number"
+    ) {
+      window.localStorage.removeItem(SETTINGS_VIEW_CACHE_KEY)
+      return null
+    }
+
+    return cache as SettingsViewCache
+  } catch {
+    return null
+  }
+}
+
+function writeSettingsViewCache(settings: AppSettings, modLocations: ModLocation[], totalSystemRam: number) {
+  try {
+    window.localStorage.setItem(SETTINGS_VIEW_CACHE_KEY, JSON.stringify({
+      version: SETTINGS_VIEW_CACHE_VERSION,
+      settings,
+      modLocations,
+      totalSystemRam,
+    }))
+  } catch {
+    // The backend remains the source of truth if browser storage is unavailable.
+  }
+}
+
+function currentSettingsSnapshot(
+  loadedSettings: AppSettings | null,
+  values: Pick<AppSettings, "gameExecutablePath" | "clientRam" | "serverRam" | "maxConcurrentDownloads" | "languagePreference">,
+): AppSettings {
+  return {
+    steamcmdPath: loadedSettings?.steamcmdPath ?? "",
+    resolvedSteamcmdPath: loadedSettings?.resolvedSteamcmdPath ?? null,
+    isSteamcmdConfigured: loadedSettings?.isSteamcmdConfigured ?? false,
+    ...values,
+  }
+}
+
+function isAppSettings(value: unknown): value is AppSettings {
+  if (!value || typeof value !== "object") {
+    return false
+  }
+
+  const settings = value as Record<string, unknown>
+
+  return (
+    typeof settings.steamcmdPath === "string" &&
+    (settings.resolvedSteamcmdPath === null || typeof settings.resolvedSteamcmdPath === "string") &&
+    typeof settings.isSteamcmdConfigured === "boolean" &&
+    typeof settings.gameExecutablePath === "string" &&
+    typeof settings.clientRam === "string" &&
+    typeof settings.serverRam === "string" &&
+    typeof settings.maxConcurrentDownloads === "number" &&
+    isLanguagePreference(settings.languagePreference)
+  )
+}
+
+function isLanguagePreference(value: unknown): value is LanguagePreference {
+  return value === "auto" || value === "en" || value === "pt-BR"
+}
+
+function isModLocation(value: unknown): value is ModLocation {
+  if (!value || typeof value !== "object") {
+    return false
+  }
+
+  const location = value as Record<string, unknown>
+
+  return (
+    typeof location.label === "string" &&
+    typeof location.path === "string" &&
+    typeof location.kind === "string" &&
+    typeof location.exists === "boolean"
+  )
 }

@@ -1,6 +1,6 @@
 {
   "name": "zomboid-server-mod-manager",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "appChannel": "beta",
   "type": "module",
   "private": true,

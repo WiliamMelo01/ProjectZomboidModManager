@@ -3,12 +3,14 @@ use crate::run_blocking;
 use crate::util::{directory_size, format_size};
 use std::path::PathBuf;
 
+mod cache;
 mod catalog;
 mod discovery;
 mod install;
 mod metadata;
 mod server_values;
 
+use cache::clear_persisted_cache;
 use catalog::count_zomboid_mods_impl;
 pub(crate) use catalog::list_zomboid_mods_impl;
 pub(crate) use discovery::steam_workshop_dirs;
@@ -25,6 +27,11 @@ pub(crate) async fn list_zomboid_mods() -> Result<Vec<ZomboidMod>, String> {
 #[tauri::command]
 pub(crate) async fn count_zomboid_mods() -> Result<usize, String> {
     run_blocking(count_zomboid_mods_impl).await
+}
+
+#[tauri::command]
+pub(crate) async fn clear_zomboid_mods_cache() -> Result<(), String> {
+    run_blocking(clear_persisted_cache).await
 }
 
 #[tauri::command]

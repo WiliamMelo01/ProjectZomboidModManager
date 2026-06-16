@@ -79,7 +79,7 @@ pub(crate) struct ServerLuaSettings {
     pub(crate) settings: Vec<ServerLuaSetting>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ZomboidMod {
     pub(crate) id: String,
@@ -100,7 +100,7 @@ pub(crate) struct ZomboidMod {
     pub(crate) package_path: String,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ZomboidModVariant {
     pub(crate) game_build: String,

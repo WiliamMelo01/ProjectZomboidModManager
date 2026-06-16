@@ -56,7 +56,7 @@ export function SteamCmdSettingsSection({
             </div>
           </div>
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-orange-500/10 border border-orange-500/20">
-            <span className="text-sm font-black text-orange-400">1</span>
+            <span className="text-sm font-black text-orange-400">{maxConcurrentDownloads}</span>
             <span className="text-[10px] font-bold text-orange-400/60 uppercase tracking-tighter">Instance</span>
           </div>
         </div>

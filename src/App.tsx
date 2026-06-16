@@ -20,6 +20,7 @@ import { useModsLibrary } from "@/hooks/useModsLibrary"
 import { useWorkshopDownloadManager } from "@/hooks/useWorkshopDownloadManager"
 import { getErrorMessage } from "@/lib/errors"
 import { findModForServerId, resolveModForBuild } from "@/lib/modBuilds"
+import { clearModsLibraryCache } from "@/lib/modsCache"
 import { getActiveDependencyChain, getWorkshopIdsForModIds } from "@/lib/serverMods"
 import { invokeTauri } from "@/lib/tauri"
 import type { ZomboidMod } from "@/types/mod"
@@ -294,6 +295,12 @@ function App() {
     void loadModsInBackground()
   }
 
+  async function rescanModsFromScratch() {
+    clearModsLibraryCache()
+    await invokeTauri<void>("clear_zomboid_mods_cache")
+    await loadMods()
+  }
+
   async function loadInitialData() {
     await loadServers()
     void loadModsInBackground()
@@ -498,7 +505,7 @@ function App() {
             />
           )}
           {activeTab === "settings" && (
-            <SettingsView />
+            <SettingsView onRescanMods={rescanModsFromScratch} />
           )}
         </div>
       </div>

@@ -67,7 +67,7 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
         return
       }
 
-      if (payload.serverId !== serverIdRef.current && serverIdRef.current !== null && payload.event !== "started") {
+      if (payload.serverId !== serverIdRef.current && serverIdRef.current !== null) {
         return
       }
 

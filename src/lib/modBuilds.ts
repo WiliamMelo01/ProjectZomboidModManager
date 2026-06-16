@@ -26,7 +26,8 @@ export function findModForServerId(mods: ZomboidMod[], modId: string, gameBuild:
   const normalizedId = normalizeModId(modId)
   return mods
     .map((mod) => resolveModForBuild(mod, gameBuild))
-    .find((mod): mod is ZomboidMod => Boolean(mod) && normalizeModId(mod.id) === normalizedId)
+    .filter((mod): mod is ZomboidMod => Boolean(mod))
+    .find((mod) => normalizeModId(mod.id) === normalizedId)
 }
 
 function normalizeModId(modId: string) {

@@ -1,5 +1,5 @@
 import { ArrowLeft, FilePenLine, Play, RefreshCw, Search, Server, Settings } from "lucide-react"
-import { useState } from "react"
+import { useDeferredValue, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { MissingDependencyModal } from "@/components/MissingDependencyModal"
@@ -95,6 +95,62 @@ export function ServerDetail({
 
   const [isActivatedExpanded, setIsActivatedExpanded] = useState(true)
   const [isAvailableExpanded, setIsAvailableExpanded] = useState(true)
+  const deferredSearch = useDeferredValue(search)
+  const safeMods = useMemo(() => Array.isArray(allMods) ? allMods : [], [allMods])
+  const safeActiveIds = useMemo(() => Array.isArray(server?.activeModIds) ? server.activeModIds : [], [server?.activeModIds])
+  const activatedModIds = useMemo(() => new Set(safeActiveIds.map((modId) => normalizeModId(modId))), [safeActiveIds])
+  const libraryMods = useMemo(() => safeMods.filter((mod) => mod?.id), [safeMods])
+  const compatibleMods = useMemo(
+    () => server
+      ? libraryMods
+        .map((mod) => resolveModForBuild(mod, server.gameBuild))
+        .filter((mod): mod is ZomboidMod => Boolean(mod))
+      : [],
+    [libraryMods, server],
+  )
+  const compatibleModIds = useMemo(
+    () => new Set(compatibleMods.map((mod) => normalizeModId(mod.id))),
+    [compatibleMods],
+  )
+  const modsById = useMemo(
+    () => new Map(
+      libraryMods.flatMap((mod) => mod.variants.map((variant) => [
+        normalizeModId(variant.id),
+        { ...mod, id: variant.id, path: variant.path, dependencies: variant.dependencies, mapNames: variant.mapNames },
+      ] as const)),
+    ),
+    [libraryMods],
+  )
+  const activatedMods = useMemo(
+    () => safeActiveIds.map((modId) => modsById.get(normalizeModId(modId)) ?? createMissingActiveMod(modId)),
+    [modsById, safeActiveIds],
+  )
+  const availableMods = useMemo(
+    () => compatibleMods.filter((mod) => !activatedModIds.has(normalizeModId(mod.id))),
+    [activatedModIds, compatibleMods],
+  )
+  const incompatibleActiveIds = useMemo(
+    () => safeActiveIds.filter((modId) => !compatibleModIds.has(normalizeModId(modId))),
+    [compatibleModIds, safeActiveIds],
+  )
+  const incompatibleActiveIdSet = useMemo(() => new Set(incompatibleActiveIds.map(normalizeModId)), [incompatibleActiveIds])
+  const incompatibleActiveMods = useMemo(
+    () => incompatibleActiveIds.map((modId) => ({
+      id: modId,
+      name: modsById.get(normalizeModId(modId))?.name ?? modId,
+      compatibleBuilds: modsById.get(normalizeModId(modId))?.compatibleBuilds ?? [],
+      isInLibrary: modsById.has(normalizeModId(modId)),
+    })),
+    [incompatibleActiveIds, modsById],
+  )
+  const filteredActivated = useMemo(
+    () => activatedMods.filter((mod) => matchesSearch(mod, deferredSearch)),
+    [activatedMods, deferredSearch],
+  )
+  const filteredAvailable = useMemo(
+    () => availableMods.filter((mod) => matchesSearch(mod, deferredSearch)),
+    [availableMods, deferredSearch],
+  )
 
   if (!server) {
     return (
@@ -114,34 +170,7 @@ export function ServerDetail({
     )
   }
 
-  const safeMods = Array.isArray(allMods) ? allMods : []
-  const safeActiveIds = Array.isArray(server.activeModIds) ? server.activeModIds : []
-  const activatedModIds = new Set(safeActiveIds.map((modId) => normalizeModId(modId)))
-  const libraryMods = safeMods.filter((mod) => mod?.id)
-  const compatibleMods = libraryMods
-    .map((mod) => resolveModForBuild(mod, server.gameBuild))
-    .filter((mod): mod is ZomboidMod => Boolean(mod))
-  const modsById = new Map(
-    libraryMods.flatMap((mod) => mod.variants.map((variant) => [
-      normalizeModId(variant.id),
-      { ...mod, id: variant.id, path: variant.path, dependencies: variant.dependencies, mapNames: variant.mapNames },
-    ] as const)),
-  )
-  const activatedMods = safeActiveIds
-    .map((modId) => modsById.get(normalizeModId(modId)) ?? createMissingActiveMod(modId))
-  const availableMods = compatibleMods.filter((mod) => !activatedModIds.has(String(mod.id).toLowerCase()))
-  const incompatibleActiveIds = safeActiveIds.filter((modId) => !compatibleMods.some((mod) => normalizeModId(mod.id) === normalizeModId(modId)))
-  const incompatibleActiveIdSet = new Set(incompatibleActiveIds.map(normalizeModId))
-  const incompatibleActiveMods = incompatibleActiveIds.map((modId) => ({
-    id: modId,
-    name: modsById.get(normalizeModId(modId))?.name ?? modId,
-    compatibleBuilds: modsById.get(normalizeModId(modId))?.compatibleBuilds ?? [],
-    isInLibrary: modsById.has(normalizeModId(modId)),
-  }))
   const isCurrentServerTesting = isTestingServer || runningServerTestId === server.id
-
-  const filteredActivated = activatedMods.filter((mod) => matchesSearch(mod, search))
-  const filteredAvailable = availableMods.filter((mod) => matchesSearch(mod, search))
 
   const handleActiveModContextMenu = (event: React.MouseEvent, mod: ZomboidMod) => {
     event.preventDefault()

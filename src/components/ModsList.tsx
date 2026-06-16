@@ -1,9 +1,10 @@
 import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Download, Info, RefreshCw, Search, X } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { MissingDependencyModal } from "@/components/MissingDependencyModal"
 import { ModCard } from "@/components/mods/ModCard"
+import { getModImageSrc } from "@/lib/modImages"
 import { buildInstallDependencyPlan, isLocalMod } from "@/lib/modDependencies"
 import type { ZomboidMod } from "@/types/mod"
 
@@ -41,33 +42,40 @@ export function ModsList({
   const modsListRef = useRef<HTMLDivElement>(null)
   const [pendingInstall, setPendingInstall] = useState<{ mod: ZomboidMod; dependencies: ZomboidMod[] } | null>(null)
   const [missingDependency, setMissingDependency] = useState<{ mod: ZomboidMod; dependencyId: string } | null>(null)
-  const steamCount = mods.filter((mod) => !isLocalMod(mod)).length
+  const deferredSearchQuery = useDeferredValue(searchQuery)
+  const steamCount = useMemo(() => mods.filter((mod) => !isLocalMod(mod)).length, [mods])
 
-  const normalizedSearch = searchQuery.trim().toLowerCase()
-  const filteredMods = mods.filter((mod) => {
-    const matchesSearch =
-      !normalizedSearch ||
-      mod.name.toLowerCase().includes(normalizedSearch) ||
-      mod.id.toLowerCase().includes(normalizedSearch) ||
-      mod.author.toLowerCase().includes(normalizedSearch) ||
-      mod.description.toLowerCase().includes(normalizedSearch) ||
-      mod.workshopId.includes(searchQuery) ||
-      mod.dependencies?.some((dependency) => dependency.toLowerCase().includes(normalizedSearch))
+  const filteredMods = useMemo(() => {
+    const normalizedSearch = deferredSearchQuery.trim().toLowerCase()
 
-    const matchesFilter =
-      filterStatus === "all" ||
-      (filterStatus === "local" && isLocalMod(mod)) ||
-      (filterStatus === "steam" && !isLocalMod(mod))
-    const matchesBuild = filterBuild === "all" || mod.compatibleBuilds.includes(filterBuild)
+    return mods.filter((mod) => {
+      const matchesSearch =
+        !normalizedSearch ||
+        mod.name.toLowerCase().includes(normalizedSearch) ||
+        mod.id.toLowerCase().includes(normalizedSearch) ||
+        mod.author.toLowerCase().includes(normalizedSearch) ||
+        mod.description.toLowerCase().includes(normalizedSearch) ||
+        mod.workshopId.includes(deferredSearchQuery) ||
+        mod.dependencies?.some((dependency) => dependency.toLowerCase().includes(normalizedSearch))
 
-    return matchesSearch && matchesFilter && matchesBuild
-  })
+      const matchesFilter =
+        filterStatus === "all" ||
+        (filterStatus === "local" && isLocalMod(mod)) ||
+        (filterStatus === "steam" && !isLocalMod(mod))
+      const matchesBuild = filterBuild === "all" || mod.compatibleBuilds.includes(filterBuild)
+
+      return matchesSearch && matchesFilter && matchesBuild
+    })
+  }, [deferredSearchQuery, filterBuild, filterStatus, mods])
   const totalPages = Math.max(1, Math.ceil(filteredMods.length / MODS_PER_PAGE))
-  const paginatedMods = filteredMods.slice((currentPage - 1) * MODS_PER_PAGE, currentPage * MODS_PER_PAGE)
+  const paginatedMods = useMemo(
+    () => filteredMods.slice((currentPage - 1) * MODS_PER_PAGE, currentPage * MODS_PER_PAGE),
+    [currentPage, filteredMods],
+  )
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [filterStatus, filterBuild, searchQuery])
+  }, [filterStatus, filterBuild, deferredSearchQuery])
 
   useEffect(() => {
     setCurrentPage((page) => Math.min(page, totalPages))
@@ -269,23 +277,27 @@ export function ModsList({
               </p>
 
               <div className="space-y-3 mb-6 max-h-48 overflow-y-auto custom-scrollbar pr-2">
-                {pendingInstall.dependencies.map((dep) => (
-                  <div key={dep.id} className="flex items-center gap-3 p-3 bg-[#2b3238] border border-white/5 rounded-xl">
-                    <div className="w-10 h-10 rounded-lg bg-[#1e2327] overflow-hidden shrink-0">
-                      {dep.imageUrl ? (
-                        <img src={dep.imageUrl} alt={dep.name} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <Download size={16} className="text-white/10" />
-                        </div>
-                      )}
+                {pendingInstall.dependencies.map((dep) => {
+                  const imageSrc = getModImageSrc(dep.imageUrl)
+
+                  return (
+                    <div key={dep.id} className="flex items-center gap-3 p-3 bg-[#2b3238] border border-white/5 rounded-xl">
+                      <div className="w-10 h-10 rounded-lg bg-[#1e2327] overflow-hidden shrink-0">
+                        {imageSrc ? (
+                          <img src={imageSrc} alt={dep.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <Download size={16} className="text-white/10" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-white truncate">{dep.name}</p>
+                        <p className="text-[10px] text-gray-500 font-mono truncate">{dep.id}</p>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold text-white truncate">{dep.name}</p>
-                      <p className="text-[10px] text-gray-500 font-mono truncate">{dep.id}</p>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
 
               <div className="flex flex-col gap-3">

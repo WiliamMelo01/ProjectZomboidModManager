@@ -1,6 +1,7 @@
 import { AlertCircle, AlertTriangle, Check, CheckCircle2, Info, MapPinned, PlusCircle, Trash2, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { getModImageSrc } from "@/lib/modImages"
 import { normalizeModId } from "@/lib/modDependencies"
 import type { ZomboidMod } from "@/types/mod"
 
@@ -302,11 +303,13 @@ export function PendingActivationModal({ activation, onCancel, onConfirm }: Pend
 }
 
 function ActivationItem({ mod, action }: { mod: ZomboidMod; action: string }) {
+  const imageSrc = getModImageSrc(mod.imageUrl)
+
   return (
     <div className="flex items-center gap-3 p-3 bg-[#2b3238] border border-white/5 rounded-xl">
       <div className="w-10 h-10 rounded-lg bg-[#1e2327] overflow-hidden shrink-0">
-        {mod.imageUrl ? (
-          <img src={mod.imageUrl} alt={mod.name} className="w-full h-full object-cover" />
+        {imageSrc ? (
+          <img src={imageSrc} alt={mod.name} className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-white/10">
             <PlusCircle size={16} />

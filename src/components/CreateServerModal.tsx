@@ -1,5 +1,5 @@
-import { Box, Check, ChevronLeft, ChevronRight, Copy, Plus, Save, Server, Users, X } from "lucide-react"
-import { useState } from "react"
+import { Box, Check, ChevronLeft, ChevronRight, Copy, Plus, RotateCcw, Save, Server, Users, X } from "lucide-react"
+import { useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { ZomboidMod } from "@/types/mod"
@@ -26,6 +26,10 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
   const [cloneSourceId, setCloneSourceId] = useState<string>("")
   const [isCreating, setIsCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const compatibleAvailableMods = useMemo(
+    () => availableMods.filter((mod) => supportsBuild(mod, gameBuild)),
+    [availableMods, gameBuild],
+  )
 
   if (!isOpen) return null
 
@@ -209,7 +213,7 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
                     </label>
                   </div>
                   <div className="grid max-h-[320px] grid-cols-1 gap-2 overflow-y-auto pr-2 custom-scrollbar">
-                    {availableMods.filter((mod) => supportsBuild(mod, gameBuild)).map((mod) => (
+                    {compatibleAvailableMods.map((mod) => (
                       <label
                         key={mod.id}
                         className={`group flex cursor-pointer items-center gap-4 rounded-2xl border p-4 transition-all ${

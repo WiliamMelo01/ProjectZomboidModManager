@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { MouseEvent } from "react"
 
+import { getModImageSrc } from "@/lib/modImages"
 import type { ZomboidMod } from "@/types/mod"
 
 type ServerModListProps = {
@@ -80,6 +81,7 @@ export function ServerModList({
       }`}>
         {visibleMods.map((mod) => {
           const isIncompatible = incompatibleModIds.has(mod.id.toLowerCase())
+          const imageSrc = getModImageSrc(mod.imageUrl)
 
           return (
           <div
@@ -99,8 +101,8 @@ export function ServerModList({
               className={`flex min-w-0 flex-1 items-center gap-4 text-left ${isActiveList ? "" : "opacity-70 transition-opacity group-hover:opacity-100"}`}
             >
               <div className="w-20 h-20 rounded-xl bg-[#1e2327] overflow-hidden shrink-0 border border-white/5 shadow-lg">
-                {mod.imageUrl ? (
-                  <img src={mod.imageUrl} alt={mod.name} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+                {imageSrc ? (
+                  <img src={imageSrc} alt={mod.name} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-white/5 font-black text-xs uppercase">
                     {t("mods.noImage")}

@@ -1,7 +1,10 @@
 import { Download, FolderOpen, Hash, MapPinned, PackageCheck, User, X } from "lucide-react"
+import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
+import { getModImageSrc } from "@/lib/modImages"
 import { isLocalMod } from "@/lib/modDependencies"
+import { invokeTauri } from "@/lib/tauri"
 import type { ZomboidMod } from "@/types/mod"
 
 type ServerModDetailsModalProps = {
@@ -13,6 +16,37 @@ export function ServerModDetailsModal({ mod, onClose }: ServerModDetailsModalPro
   const { t } = useTranslation()
   const dependencies = mod.dependencies ?? []
   const mapNames = mod.mapNames ?? []
+  const imageSrc = getModImageSrc(mod.imageUrl)
+  const [resolvedSize, setResolvedSize] = useState(mod.size || "-")
+
+  useEffect(() => {
+    let isCancelled = false
+    const hasKnownSize = Boolean(mod.size && mod.size !== "-")
+
+    setResolvedSize(hasKnownSize ? mod.size : "...")
+
+    if (hasKnownSize || !mod.packagePath) {
+      return () => {
+        isCancelled = true
+      }
+    }
+
+    void invokeTauri<string>("get_zomboid_mod_package_size", { packagePath: mod.packagePath })
+      .then((size) => {
+        if (!isCancelled) {
+          setResolvedSize(size || "-")
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setResolvedSize("-")
+        }
+      })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [mod.packagePath, mod.size])
 
   return (
     <div
@@ -27,17 +61,17 @@ export function ServerModDetailsModal({ mod, onClose }: ServerModDetailsModalPro
         onClick={(event) => event.stopPropagation()}
       >
         <div className="relative min-h-80 overflow-hidden bg-[#1e2327] sm:h-96">
-          {mod.imageUrl ? (
+          {imageSrc ? (
             <>
               <img
-                src={mod.imageUrl}
+                src={imageSrc}
                 alt=""
                 aria-hidden="true"
                 className="absolute inset-0 h-full w-full scale-110 object-cover opacity-25 blur-2xl"
               />
               <div className="absolute inset-x-0 top-0 flex h-[72%] items-center justify-center p-4 sm:h-[76%] sm:p-6">
                 <img
-                  src={mod.imageUrl}
+                  src={imageSrc}
                   alt={mod.name}
                   className="max-h-full max-w-full rounded-2xl border border-white/10 bg-[#15191c]/60 object-contain shadow-2xl"
                 />
@@ -78,7 +112,7 @@ export function ServerModDetailsModal({ mod, onClose }: ServerModDetailsModalPro
 
           <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <Detail label={t("mods.version")} value={mod.version || "-"} />
-            <Detail label={t("mods.size")} value={mod.size || "-"} />
+            <Detail label={t("mods.size")} value={resolvedSize} />
             <Detail label={t("mods.source")} value={mod.source || "-"} />
             <Detail label="Workshop ID" value={mod.workshopId || "-"} icon={<Hash size={14} />} />
             <Detail label="Mod ID" value={mod.id} icon={<PackageCheck size={14} />} />

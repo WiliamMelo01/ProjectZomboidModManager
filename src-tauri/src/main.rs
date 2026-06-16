@@ -29,7 +29,9 @@ use i18n::{
     sync_effective_language,
 };
 use models::*;
-use mods::{count_zomboid_mods, install_zomboid_mod, list_zomboid_mods};
+use mods::{
+    count_zomboid_mods, get_zomboid_mod_package_size, install_zomboid_mod, list_zomboid_mods,
+};
 use server_test::{
     check_zomboid_server_ports, kill_processes_by_pid, start_zomboid_server_test,
     test_zomboid_server,
@@ -487,6 +489,7 @@ fn main() {
             install_zomboid_server_map,
             list_zomboid_mods,
             count_zomboid_mods,
+            get_zomboid_mod_package_size,
             install_zomboid_mod,
             download_steam_workshop_item,
             download_steam_workshop_collection,

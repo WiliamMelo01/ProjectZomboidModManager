@@ -450,7 +450,9 @@ function App() {
                   onActivateMods={(modsToActivate) => activateServerMods(selectedServer, modsToActivate)}
                   onToggleMod={(mod, action) => toggleServerMod(selectedServer, mod, action)}
                   onMoveActiveMod={(mod, position) => moveServerMod(selectedServer, mod, position)}
-                  onRefreshMods={loadMods}
+                  onRefreshMods={async () => {
+                    await loadMods()
+                  }}
                   onDependencyDownloaded={(dependencyId) => installDownloadedDependencyForServer(selectedServer, dependencyId)}
                   onOpenSettings={() => setActiveTab("settings")}
                   runningServerTestId={runningServerTestId}

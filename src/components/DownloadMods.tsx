@@ -97,6 +97,14 @@ export function DownloadMods({ manager, onOpenSettings }: DownloadModsProps) {
           <p className="mt-1 text-gray-400">{t("downloads.pageDescription")}</p>
         </div>
 
+        <div className="mb-6 flex items-start gap-3 rounded-2xl border border-amber-400/20 bg-amber-500/10 p-4 text-amber-100">
+          <Info size={20} className="mt-0.5 shrink-0 text-amber-300" />
+          <div>
+            <p className="text-sm font-bold">{t("downloads.experimentalNoticeTitle")}</p>
+            <p className="mt-1 text-sm leading-relaxed text-amber-100/75">{t("downloads.experimentalNoticeBody")}</p>
+          </div>
+        </div>
+
         <section className="rounded-3xl border border-white/5 bg-[#2b3238] p-8 shadow-xl">
           <SteamCmdStatus
             isChecking={isCheckingSettings}

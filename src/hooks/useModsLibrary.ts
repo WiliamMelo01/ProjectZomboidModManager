@@ -5,8 +5,30 @@ import { readModsLibraryCache, writeModsLibraryCache } from "@/lib/modsCache"
 import { invokeTauri } from "@/lib/tauri"
 import type { ZomboidMod } from "@/types/mod"
 
-export function useModsLibrary() {
-  const [cachedMods] = useState(readModsLibraryCache)
+type UseModsLibraryOptions = {
+  listCommand?: string
+  listArgs?: Record<string, unknown>
+  installCommand?: string
+  installArgs?: Record<string, unknown>
+  clearCacheCommand?: string
+  clearCacheArgs?: Record<string, unknown>
+  reloadAfterInstall?: boolean
+  useCache?: boolean
+  cacheKey?: string
+}
+
+export function useModsLibrary({
+  listCommand = "list_zomboid_mods",
+  listArgs,
+  installCommand = "install_zomboid_mod",
+  installArgs,
+  clearCacheCommand,
+  clearCacheArgs,
+  reloadAfterInstall = false,
+  useCache = true,
+  cacheKey,
+}: UseModsLibraryOptions = {}) {
+  const [cachedMods] = useState(() => useCache ? readModsLibraryCache(cacheKey) : null)
   const [mods, setMods] = useState<ZomboidMod[]>(cachedMods?.mods ?? [])
   const [modsCount, setModsCount] = useState(cachedMods?.totalModsCount ?? 0)
   const [modsError, setModsError] = useState<string | null>(null)
@@ -25,11 +47,13 @@ export function useModsLibrary() {
       setModsError(null)
 
       try {
-        const foundMods = await invokeTauri<ZomboidMod[]>("list_zomboid_mods")
+        const foundMods = await invokeTauri<ZomboidMod[]>(listCommand, listArgs)
         setMods(foundMods)
         setModsCount(foundMods.length)
         setHasLoadedMods(true)
-        void writeModsLibraryCache(foundMods)
+        if (useCache) {
+          void writeModsLibraryCache(foundMods, cacheKey)
+        }
         return foundMods
       } catch (error) {
         setModsError(getErrorMessage(error))
@@ -57,12 +81,23 @@ export function useModsLibrary() {
       const modsToMove = modsToInstall.filter((mod) => !mod.isInstalled && mod.source !== "local")
 
       for (const mod of modsToMove) {
-        await invokeTauri<void>("install_zomboid_mod", {
+        await invokeTauri<void>(installCommand, {
+          ...(installArgs ?? {}),
           packagePath: mod.packagePath,
           modId: mod.id,
           workshopId: mod.workshopId,
         })
       }
+
+      if (clearCacheCommand) {
+        await invokeTauri<void>(clearCacheCommand, clearCacheArgs)
+      }
+
+      if (reloadAfterInstall) {
+        await loadMods()
+        return
+      }
+
       const installedModIds = new Set(modsToMove.map((mod) => mod.id.toLowerCase()))
 
       setMods((currentMods) => {
@@ -72,7 +107,7 @@ export function useModsLibrary() {
             : mod,
         )
 
-        void writeModsLibraryCache(updatedMods)
+        void writeModsLibraryCache(updatedMods, cacheKey)
         return updatedMods
       })
     } catch (error) {

@@ -9,10 +9,12 @@ import { RamTips } from "@/components/settings/RamTips"
 import { SteamCmdSettingsSection } from "@/components/settings/SteamCmdSettingsSection"
 import { invokeTauri } from "@/lib/tauri"
 import { setLanguagePreference } from "@/i18n"
+import type { RemoteConnectionDraft } from "@/lib/commandRunner"
 import type { AppSettings, LanguagePreference, ModLocation, ZomboidInstallationStatus } from "@/types/settings"
 
 const SETTINGS_VIEW_CACHE_KEY = "pzmm:settings-view"
-const SETTINGS_VIEW_CACHE_VERSION = 1
+const REMOTE_SETTINGS_VIEW_CACHE_PREFIX = "pzmm:settings-view:remote"
+const SETTINGS_VIEW_CACHE_VERSION = 2
 
 type SettingsViewCache = {
   version: number
@@ -23,11 +25,14 @@ type SettingsViewCache = {
 
 type SettingsProps = {
   onRescanMods?: () => Promise<void>
+  remoteConnection?: RemoteConnectionDraft | null
 }
 
-export function Settings({ onRescanMods }: SettingsProps) {
+export function Settings({ onRescanMods, remoteConnection = null }: SettingsProps) {
   const { t } = useTranslation()
-  const [cachedView] = useState(readSettingsViewCache)
+  const isRemoteWorkspace = remoteConnection !== null
+  const cacheKey = getSettingsViewCacheKey(remoteConnection)
+  const [cachedView] = useState(() => readSettingsViewCache(cacheKey))
   const [activeTab, setActiveTab] = useState<"mods" | "ram">("mods")
   const [loadedSettings, setLoadedSettings] = useState<AppSettings | null>(cachedView?.settings ?? null)
   const [gameExecutablePath, setGameExecutablePath] = useState(cachedView?.settings.gameExecutablePath ?? "")
@@ -54,17 +59,27 @@ export function Settings({ onRescanMods }: SettingsProps) {
     setError(null)
 
     try {
-      const [settings, locations, systemRam] = await Promise.all([
-        invokeTauri<AppSettings>("get_app_settings"),
-        invokeTauri<ModLocation[]>("get_mod_locations"),
-        invokeTauri<number>("get_system_ram").catch(() => 16), // Fallback to 16 if not implemented yet
-      ])
+      const [settings, locations, systemRam] = isRemoteWorkspace && remoteConnection
+        ? await Promise.all([
+          invokeTauri<AppSettings>("get_remote_app_settings", { connection: remoteConnection }),
+          invokeTauri<ModLocation[]>("get_remote_mod_locations", { connection: remoteConnection }),
+          invokeTauri<number>("get_remote_system_ram", { connection: remoteConnection }).catch(() => 16),
+        ])
+        : await Promise.all([
+          invokeTauri<AppSettings>("get_app_settings"),
+          invokeTauri<ModLocation[]>("get_mod_locations"),
+          invokeTauri<number>("get_system_ram").catch(() => 16), // Fallback to 16 if not implemented yet
+        ])
 
       applySettings(settings)
       setModLocations(locations)
       setTotalSystemRam(systemRam)
-      writeSettingsViewCache(settings, locations, systemRam)
-      await scanZomboidInstallation(settings.gameExecutablePath)
+      writeSettingsViewCache(cacheKey, settings, locations, systemRam)
+      if (isRemoteWorkspace) {
+        applyRemoteZomboidStatus(settings.gameExecutablePath)
+      } else {
+        await scanZomboidInstallation(settings.gameExecutablePath)
+      }
     } catch (loadError) {
       setError(getErrorMessage(loadError))
     } finally {
@@ -78,19 +93,34 @@ export function Settings({ onRescanMods }: SettingsProps) {
     setError(null)
 
     try {
-      const settings = await invokeTauri<AppSettings>("save_app_settings", {
-        steamcmdPath: "",
-        gameExecutablePath: gameExecutablePath.trim(),
-        clientRam,
-        serverRam,
-        maxConcurrentDownloads,
-      })
+      const settings = isRemoteWorkspace && remoteConnection
+        ? await invokeTauri<AppSettings>("save_remote_app_settings", {
+          request: {
+            connection: remoteConnection,
+            gameExecutablePath: gameExecutablePath.trim(),
+            clientRam,
+            serverRam,
+          },
+        })
+        : await invokeTauri<AppSettings>("save_app_settings", {
+          steamcmdPath: "",
+          gameExecutablePath: gameExecutablePath.trim(),
+          clientRam,
+          serverRam,
+          maxConcurrentDownloads,
+        })
 
       applySettings(settings)
-      await scanZomboidInstallation(settings.gameExecutablePath)
-      const locations = await invokeTauri<ModLocation[]>("get_mod_locations")
+      if (isRemoteWorkspace) {
+        applyRemoteZomboidStatus(settings.gameExecutablePath)
+      } else {
+        await scanZomboidInstallation(settings.gameExecutablePath)
+      }
+      const locations = isRemoteWorkspace && remoteConnection
+        ? await invokeTauri<ModLocation[]>("get_remote_mod_locations", { connection: remoteConnection })
+        : await invokeTauri<ModLocation[]>("get_mod_locations")
       setModLocations(locations)
-      writeSettingsViewCache(settings, locations, totalSystemRam)
+      writeSettingsViewCache(cacheKey, settings, locations, totalSystemRam)
       setMessage(t("settings.saved"))
     } catch (saveError) {
       setError(getErrorMessage(saveError))
@@ -102,6 +132,11 @@ export function Settings({ onRescanMods }: SettingsProps) {
   async function browseGameExecutable() {
     setMessage(null)
     setError(null)
+
+    if (isRemoteWorkspace) {
+      setMessage("Edit the remote server path directly, or configure it from remote setup.")
+      return
+    }
 
     try {
       const selectedPath = await invokeTauri<string | null>("select_game_executable")
@@ -120,6 +155,11 @@ export function Settings({ onRescanMods }: SettingsProps) {
     setMessage(null)
     setError(null)
 
+    if (isRemoteWorkspace) {
+      setMessage(`Remote path: ${gameExecutablePath || remoteConnection?.serverPath || ""}`)
+      return
+    }
+
     try {
       const openedPath = await invokeTauri<string>("open_steam_zomboid_folder")
       setMessage(t("settings.openedFolder", { path: openedPath }))
@@ -129,6 +169,10 @@ export function Settings({ onRescanMods }: SettingsProps) {
   }
 
   async function scanZomboidInstallation(path = gameExecutablePath) {
+    if (isRemoteWorkspace) {
+      applyRemoteZomboidStatus(path)
+      return
+    }
     setIsScanningZomboid(true)
 
     try {
@@ -154,6 +198,18 @@ export function Settings({ onRescanMods }: SettingsProps) {
     setError(null)
   }
 
+  function applyRemoteZomboidStatus(path = gameExecutablePath) {
+    const trimmedPath = path.trim()
+    setZomboidStatus({
+      defaultGameDir: remoteConnection?.serverPath ?? "",
+      detectedExecutablePath: trimmedPath || null,
+      isGameDirFound: Boolean(trimmedPath),
+      isExecutableFound: Boolean(trimmedPath),
+      isClientConfigFound: false,
+      isServerConfigFound: Boolean(trimmedPath),
+    })
+  }
+
   function applySettings(settings: AppSettings) {
     setLoadedSettings(settings)
     setResolvedPath(settings.resolvedSteamcmdPath ?? null)
@@ -173,9 +229,11 @@ export function Settings({ onRescanMods }: SettingsProps) {
 
     try {
       await setLanguagePreference(preference)
-      const locations = await invokeTauri<ModLocation[]>("get_mod_locations")
+      const locations = isRemoteWorkspace && remoteConnection
+        ? await invokeTauri<ModLocation[]>("get_remote_mod_locations", { connection: remoteConnection })
+        : await invokeTauri<ModLocation[]>("get_mod_locations")
       setModLocations(locations)
-      writeSettingsViewCache(currentSettingsSnapshot(loadedSettings, {
+      writeSettingsViewCache(cacheKey, currentSettingsSnapshot(loadedSettings, {
         gameExecutablePath,
         clientRam,
         serverRam,
@@ -196,9 +254,11 @@ export function Settings({ onRescanMods }: SettingsProps) {
     setMessage(null)
 
     try {
-      const locations = await invokeTauri<ModLocation[]>("get_mod_locations")
+      const locations = isRemoteWorkspace && remoteConnection
+        ? await invokeTauri<ModLocation[]>("get_remote_mod_locations", { connection: remoteConnection })
+        : await invokeTauri<ModLocation[]>("get_mod_locations")
       setModLocations(locations)
-      writeSettingsViewCache(currentSettingsSnapshot(loadedSettings, {
+      writeSettingsViewCache(cacheKey, currentSettingsSnapshot(loadedSettings, {
         gameExecutablePath,
         clientRam,
         serverRam,
@@ -222,7 +282,9 @@ export function Settings({ onRescanMods }: SettingsProps) {
 
     try {
       await onRescanMods()
-      setModLocations(await invokeTauri<ModLocation[]>("get_mod_locations"))
+      setModLocations(isRemoteWorkspace && remoteConnection
+        ? await invokeTauri<ModLocation[]>("get_remote_mod_locations", { connection: remoteConnection })
+        : await invokeTauri<ModLocation[]>("get_mod_locations"))
       setMessage(t("settings.modLocations.rescanned"))
     } catch (rescanError) {
       setError(getErrorMessage(rescanError))
@@ -235,6 +297,14 @@ export function Settings({ onRescanMods }: SettingsProps) {
     setError(null)
 
     try {
+      if (isRemoteWorkspace && remoteConnection) {
+        await invokeTauri<void>("open_remote_mod_location", {
+          request: { connection: remoteConnection, path },
+        })
+        setMessage(`Remote folder is reachable: ${path}`)
+        return
+      }
+
       await invokeTauri<void>("open_mod_location", { path })
     } catch (openError) {
       setError(getErrorMessage(openError))
@@ -247,17 +317,23 @@ export function Settings({ onRescanMods }: SettingsProps) {
     setMessage(null)
 
     try {
-      const selectedPath = await invokeTauri<string | null>("select_mod_folder")
+      const selectedPath = isRemoteWorkspace
+        ? window.prompt("Remote mod folder path")
+        : await invokeTauri<string | null>("select_mod_folder")
 
       if (!selectedPath) {
         return
       }
 
-      const locations = await invokeTauri<ModLocation[]>("add_mod_location", {
-        path: selectedPath,
-      })
+      const locations = isRemoteWorkspace && remoteConnection
+        ? await invokeTauri<ModLocation[]>("add_remote_mod_location", {
+          request: { connection: remoteConnection, path: selectedPath },
+        })
+        : await invokeTauri<ModLocation[]>("add_mod_location", {
+          path: selectedPath,
+        })
       setModLocations(locations)
-      writeSettingsViewCache(currentSettingsSnapshot(loadedSettings, {
+      writeSettingsViewCache(cacheKey, currentSettingsSnapshot(loadedSettings, {
         gameExecutablePath,
         clientRam,
         serverRam,
@@ -273,8 +349,28 @@ export function Settings({ onRescanMods }: SettingsProps) {
   }
 
   useEffect(() => {
+    const nextCachedView = readSettingsViewCache(cacheKey)
+
+    if (nextCachedView) {
+      applySettings(nextCachedView.settings)
+      setModLocations(nextCachedView.modLocations)
+      setTotalSystemRam(nextCachedView.totalSystemRam)
+    } else {
+      setLoadedSettings(null)
+      setGameExecutablePath("")
+      setClientRam("4.00")
+      setServerRam("4.00")
+      setMaxConcurrentDownloads(1)
+      setLanguagePreferenceState("auto")
+      setTotalSystemRam(16)
+      setModLocations([])
+      setResolvedPath(null)
+      setIsConfigured(false)
+      setZomboidStatus(null)
+    }
+
     void loadSettings()
-  }, [])
+  }, [cacheKey])
 
   useEffect(() => {
     if (activeTab === "ram") {
@@ -351,6 +447,7 @@ export function Settings({ onRescanMods }: SettingsProps) {
                   onBrowse={() => void browseGameExecutable()}
                   onOpenFolder={() => void openSteamZomboidFolder()}
                   onScan={() => void scanZomboidInstallation()}
+                  isRemoteWorkspace={isRemoteWorkspace}
                 />
               )}
 
@@ -409,9 +506,24 @@ function getErrorMessage(error: unknown) {
   return "Could not load settings."
 }
 
-function readSettingsViewCache(): SettingsViewCache | null {
+function getSettingsViewCacheKey(remoteConnection: RemoteConnectionDraft | null) {
+  if (!remoteConnection) {
+    return SETTINGS_VIEW_CACHE_KEY
+  }
+
+  const remoteId = [
+    remoteConnection.name,
+    remoteConnection.username,
+    remoteConnection.host,
+    remoteConnection.port,
+  ].map((part) => encodeURIComponent(part.trim())).join(":")
+
+  return `${REMOTE_SETTINGS_VIEW_CACHE_PREFIX}:${remoteId}`
+}
+
+function readSettingsViewCache(cacheKey: string): SettingsViewCache | null {
   try {
-    const rawCache = window.localStorage.getItem(SETTINGS_VIEW_CACHE_KEY)
+    const rawCache = window.localStorage.getItem(cacheKey)
 
     if (!rawCache) {
       return null
@@ -426,7 +538,7 @@ function readSettingsViewCache(): SettingsViewCache | null {
       !cache.modLocations.every(isModLocation) ||
       typeof cache.totalSystemRam !== "number"
     ) {
-      window.localStorage.removeItem(SETTINGS_VIEW_CACHE_KEY)
+      window.localStorage.removeItem(cacheKey)
       return null
     }
 
@@ -436,9 +548,9 @@ function readSettingsViewCache(): SettingsViewCache | null {
   }
 }
 
-function writeSettingsViewCache(settings: AppSettings, modLocations: ModLocation[], totalSystemRam: number) {
+function writeSettingsViewCache(cacheKey: string, settings: AppSettings, modLocations: ModLocation[], totalSystemRam: number) {
   try {
-    window.localStorage.setItem(SETTINGS_VIEW_CACHE_KEY, JSON.stringify({
+    window.localStorage.setItem(cacheKey, JSON.stringify({
       version: SETTINGS_VIEW_CACHE_VERSION,
       settings,
       modLocations,

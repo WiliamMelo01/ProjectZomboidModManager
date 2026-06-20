@@ -11,17 +11,22 @@ import { DownloadMods } from "@/components/DownloadMods"
 import { DownloadProgressCard } from "@/components/DownloadProgressCard"
 import { LoadingModsPanel } from "@/components/LoadingModsPanel"
 import { ModsList } from "@/components/ModsList"
+import { RemoteSteamCmdModal } from "@/components/RemoteSteamCmdModal"
+import { RemoteTerminalModal } from "@/components/RemoteTerminalModal"
 import { ServerConfigurationModal } from "@/components/ServerConfigurationModal"
 import { ServerDetail } from "@/components/ServerDetail"
 import { ServerTestPanel } from "@/components/ServerTestPanel"
 import { Settings as SettingsView } from "@/components/Settings"
+import { WorkspaceSelector } from "@/components/WorkspaceSelector"
 import { WorkshopWindow } from "@/components/WorkshopWindow"
 import { useModsLibrary } from "@/hooks/useModsLibrary"
 import { useWorkshopDownloadManager } from "@/hooks/useWorkshopDownloadManager"
+import type { RemoteConnectionDraft } from "@/lib/commandRunner"
 import { getErrorMessage } from "@/lib/errors"
 import { findModForServerId, resolveModForBuild } from "@/lib/modBuilds"
 import { clearModsLibraryCache } from "@/lib/modsCache"
 import { getActiveDependencyChain, getWorkshopIdsForModIds } from "@/lib/serverMods"
+import { readServersCache, writeServersCache } from "@/lib/serversCache"
 import { invokeTauri } from "@/lib/tauri"
 import type { ZomboidMod } from "@/types/mod"
 import type { ServerIniSettings, ZomboidServer } from "@/types/server"
@@ -40,13 +45,60 @@ function App() {
     return <WorkshopWindow />
   }
 
+  const [workspaceMode, setWorkspaceMode] = useState<"local" | "remote" | null>(null)
+  const [remoteConnection, setRemoteConnection] = useState<RemoteConnectionDraft | null>(null)
+
+  if (workspaceMode === null) {
+    return (
+      <WorkspaceSelector
+        onSelectLocal={() => {
+          setRemoteConnection(null)
+          setWorkspaceMode("local")
+        }}
+        onSelectRemote={(connection) => {
+          setRemoteConnection(connection)
+          setWorkspaceMode("remote")
+        }}
+      />
+    )
+  }
+
+  return (
+    <LocalWorkspaceApp
+      onChangeWorkspace={() => setWorkspaceMode(null)}
+      remoteConnection={workspaceMode === "remote" ? remoteConnection : null}
+    />
+  )
+}
+
+function LocalWorkspaceApp({
+  onChangeWorkspace,
+  remoteConnection,
+}: {
+  onChangeWorkspace: () => void
+  remoteConnection: RemoteConnectionDraft | null
+}) {
   const [isCreateServerModalOpen, setIsCreateServerModalOpen] = useState(false)
+  const [isRemoteSteamCmdModalOpen, setIsRemoteSteamCmdModalOpen] = useState(false)
+  const [isRemoteTerminalModalOpen, setIsRemoteTerminalModalOpen] = useState(false)
+  const isRemoteWorkspace = remoteConnection !== null
+  const workspaceCacheId = remoteConnection
+    ? `remote:${[
+      remoteConnection.name,
+      remoteConnection.username,
+      remoteConnection.host,
+      remoteConnection.port,
+    ].map((part) => encodeURIComponent(part.trim())).join(":")}`
+    : "local"
+  const modsCacheKey = workspaceCacheId === "local" ? "pzmm:mods-library" : `pzmm:mods-library:${workspaceCacheId}`
+  const serversCacheKey = workspaceCacheId === "local" ? "pzmm:servers" : `pzmm:servers:${workspaceCacheId}`
+  const cachedServers = useMemo(() => readServersCache(serversCacheKey), [serversCacheKey])
   const [serverConfigTarget, setServerConfigTarget] = useState<ZomboidServer | null>(null)
   const [activeTab, setActiveTab] = useState("dashboard")
   const [selectedServer, setSelectedServer] = useState<ZomboidServer | null>(null)
-  const [servers, setServers] = useState<ZomboidServer[]>([])
+  const [servers, setServers] = useState<ZomboidServer[]>(cachedServers?.servers ?? [])
   const [serversError, setServersError] = useState<string | null>(null)
-  const [isLoadingServers, setIsLoadingServers] = useState(true)
+  const [isLoadingServers, setIsLoadingServers] = useState(!cachedServers)
   const [searchQuery, setSearchQuery] = useState("")
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [runningServerTestId, setRunningServerTestId] = useState<string | null>(null)
@@ -63,7 +115,17 @@ function App() {
     installMods,
     installAllUninstalledMods,
     loadModsInBackground,
-  } = useModsLibrary()
+  } = useModsLibrary({
+    listCommand: isRemoteWorkspace ? "list_remote_zomboid_mods" : "list_zomboid_mods",
+    listArgs: isRemoteWorkspace && remoteConnection ? { connection: remoteConnection } : undefined,
+    installCommand: isRemoteWorkspace ? "install_remote_zomboid_mod" : "install_zomboid_mod",
+    installArgs: isRemoteWorkspace && remoteConnection ? { connection: remoteConnection } : undefined,
+    clearCacheCommand: isRemoteWorkspace ? "clear_remote_zomboid_mods_cache" : undefined,
+    clearCacheArgs: isRemoteWorkspace && remoteConnection ? { connection: remoteConnection } : undefined,
+    reloadAfterInstall: isRemoteWorkspace,
+    useCache: true,
+    cacheKey: modsCacheKey,
+  })
   const navItems = useMemo(
     () => [
       { id: "dashboard", label: t("nav.servers"), icon: Server },
@@ -75,24 +137,68 @@ function App() {
   )
   const downloadManager = useWorkshopDownloadManager({
     isDownloadScreenActive: activeTab === "download",
+    remoteConnection,
     onDownloadFinished: loadMods,
     onNotification: addNotification,
   })
 
+  function normalizeServers(nextServers: ZomboidServer[]) {
+    return [...nextServers].sort((left, right) =>
+      left.name.toLowerCase().localeCompare(right.name.toLowerCase()),
+    )
+  }
+
+  function applyServers(nextServers: ZomboidServer[]) {
+    const sortedServers = normalizeServers(nextServers)
+
+    setServers(sortedServers)
+    writeServersCache(sortedServers, serversCacheKey)
+    return sortedServers
+  }
+
+  function updateServers(updater: (currentServers: ZomboidServer[]) => ZomboidServer[]) {
+    setServers((currentServers) => {
+      const nextServers = normalizeServers(updater(currentServers))
+      writeServersCache(nextServers, serversCacheKey)
+      return nextServers
+    })
+  }
+
   async function loadServers() {
+    if (isRemoteWorkspace) {
+      if (!remoteConnection) return
+      setIsLoadingServers(true)
+      setServersError(null)
+
+      try {
+        const foundServers = await invokeTauri<ZomboidServer[]>("list_remote_zomboid_servers", {
+          connection: remoteConnection,
+        })
+        applyServers(foundServers)
+        setSelectedServer((current) =>
+          current ? foundServers.find((server) => server.id === current.id) ?? null : null,
+        )
+      } catch (error) {
+        const message = getErrorMessage(error)
+        setServersError(message)
+      } finally {
+        setIsLoadingServers(false)
+      }
+      return
+    }
+
     setIsLoadingServers(true)
     setServersError(null)
 
     try {
       const foundServers = await invokeTauri<ZomboidServer[]>("list_zomboid_servers")
-      setServers(foundServers)
+      applyServers(foundServers)
       setSelectedServer((current) =>
         current ? foundServers.find((server) => server.id === current.id) ?? null : null,
       )
     } catch (error) {
       const message = getErrorMessage(error)
       setServersError(message)
-      setServers([])
     } finally {
       setIsLoadingServers(false)
     }
@@ -102,7 +208,8 @@ function App() {
     setServersError(null)
     const workshopIds = getWorkshopIdsForModIds(activeModIds, mods, server.gameBuild)
 
-    await invokeTauri<void>("update_zomboid_server_mods", {
+    await invokeTauri<void>(isRemoteWorkspace && remoteConnection ? "update_remote_zomboid_server_mods" : "update_zomboid_server_mods", {
+      ...(isRemoteWorkspace && remoteConnection ? { connection: remoteConnection } : {}),
       serverId: server.id,
       modIds: activeModIds,
       workshopIds,
@@ -115,7 +222,7 @@ function App() {
     }
 
     setSelectedServer(updatedServer)
-    setServers((currentServers) =>
+    updateServers((currentServers) =>
       currentServers.map((currentServer) => (currentServer.id === server.id ? updatedServer : currentServer)),
     )
   }
@@ -200,15 +307,19 @@ function App() {
       return resolved ? [resolved.id] : []
     })
     const workshopIds = getWorkshopIdsForModIds(resolvedModIds, mods, data.gameBuild)
-    const createdServer = await invokeTauri<ZomboidServer>("create_zomboid_server", {
-      name: data.name,
-      modIds: resolvedModIds,
-      workshopIds,
-      gameBuild: data.gameBuild,
-      maxPlayers: data.maxPlayers,
-    })
+    const createdServer = await invokeTauri<ZomboidServer>(
+      isRemoteWorkspace && remoteConnection ? "create_remote_zomboid_server" : "create_zomboid_server",
+      {
+        ...(isRemoteWorkspace && remoteConnection ? { connection: remoteConnection } : {}),
+        name: data.name,
+        modIds: resolvedModIds,
+        workshopIds,
+        gameBuild: data.gameBuild,
+        maxPlayers: data.maxPlayers,
+      },
+    )
 
-    setServers((currentServers) =>
+    updateServers((currentServers) =>
       [...currentServers.filter((server) => server.id !== createdServer.id), createdServer].sort((left, right) =>
         left.name.toLowerCase().localeCompare(right.name.toLowerCase()),
       ),
@@ -221,12 +332,13 @@ function App() {
   async function updateServerSettings(settings: ServerIniSettings) {
     if (!serverConfigTarget) return
 
-    const updatedServer = await invokeTauri<ZomboidServer>("update_zomboid_server_settings", {
+    const updatedServer = await invokeTauri<ZomboidServer>(isRemoteWorkspace && remoteConnection ? "update_remote_zomboid_server_settings" : "update_zomboid_server_settings", {
+      ...(isRemoteWorkspace && remoteConnection ? { connection: remoteConnection } : {}),
       serverId: serverConfigTarget.id,
       settings,
     })
 
-    setServers((currentServers) =>
+    updateServers((currentServers) =>
       currentServers.map((server) => server.id === updatedServer.id ? updatedServer : server).sort((left, right) =>
         left.name.toLowerCase().localeCompare(right.name.toLowerCase()),
       ),
@@ -258,10 +370,14 @@ function App() {
   }
 
   async function changeServerBuild(server: ZomboidServer, gameBuild: "b41" | "b42") {
-    await invokeTauri<void>("update_zomboid_server_build", { serverId: server.id, gameBuild })
+    await invokeTauri<void>(isRemoteWorkspace && remoteConnection ? "update_remote_zomboid_server_build" : "update_zomboid_server_build", {
+      ...(isRemoteWorkspace && remoteConnection ? { connection: remoteConnection } : {}),
+      serverId: server.id,
+      gameBuild,
+    })
     const updatedServer = { ...server, gameBuild }
     setSelectedServer(updatedServer)
-    setServers((currentServers) => currentServers.map((item) => item.id === server.id ? updatedServer : item))
+    updateServers((currentServers) => currentServers.map((item) => item.id === server.id ? updatedServer : item))
   }
 
   async function deleteServer(server: ZomboidServer) {
@@ -270,7 +386,7 @@ function App() {
         serverId: server.id,
       })
 
-      setServers((currentServers) => currentServers.filter((item) => item.id !== server.id))
+      updateServers((currentServers) => currentServers.filter((item) => item.id !== server.id))
       setSelectedServer((current) => current?.id === server.id ? null : current)
       await loadServers()
       addNotification({
@@ -290,18 +406,39 @@ function App() {
   }
 
   async function scanData() {
+    if (isRemoteWorkspace) {
+      await loadServers()
+      void loadModsInBackground()
+      return
+    }
+
     await loadServers()
 
     void loadModsInBackground()
   }
 
   async function rescanModsFromScratch() {
-    clearModsLibraryCache()
+    if (isRemoteWorkspace) {
+      clearModsLibraryCache(modsCacheKey)
+      if (remoteConnection) {
+        await invokeTauri<void>("clear_remote_zomboid_mods_cache", { connection: remoteConnection })
+      }
+      await loadMods()
+      return
+    }
+
+    clearModsLibraryCache(modsCacheKey)
     await invokeTauri<void>("clear_zomboid_mods_cache")
     await loadMods()
   }
 
   async function loadInitialData() {
+    if (isRemoteWorkspace) {
+      await loadServers()
+      void loadModsInBackground()
+      return
+    }
+
     await loadServers()
     void loadModsInBackground()
   }
@@ -389,6 +526,10 @@ function App() {
           void ensureModsLoaded()
           break
         case "show_downloads":
+          if (isRemoteWorkspace) {
+            setActiveTab("dashboard")
+            break
+          }
           setSelectedServer(null)
           setActiveTab("download")
           break
@@ -400,7 +541,9 @@ function App() {
           void scanData()
           break
         case "bring_steam_mods":
-          void installAllUninstalledMods()
+          if (!isRemoteWorkspace) {
+            void installAllUninstalledMods()
+          }
           break
         case "reload":
           window.location.reload()
@@ -420,10 +563,11 @@ function App() {
       <AppSidebar
         activeTab={activeTab}
         items={navItems}
+        onChangeWorkspace={onChangeWorkspace}
         onTabChange={(tabId) => {
           setActiveTab(tabId)
           setSelectedServer(null)
-          if (tabId === "mods") {
+          if (!isRemoteWorkspace && tabId === "mods") {
             void ensureModsLoaded()
           }
         }}
@@ -432,8 +576,11 @@ function App() {
       <div className="flex-1 flex flex-col min-w-0">
         <AppHeader
           onScanMods={scanData}
-          onInstallAllMods={installAllUninstalledMods}
+          onInstallAllMods={isRemoteWorkspace ? undefined : installAllUninstalledMods}
           isInstallingAllMods={isInstallingAllMods}
+          isRemoteWorkspace={isRemoteWorkspace}
+          onConfigureRemoteSteamCmd={() => setIsRemoteSteamCmdModalOpen(true)}
+          onOpenRemoteTerminal={() => setIsRemoteTerminalModalOpen(true)}
           showSearch={!(activeTab === "dashboard" && selectedServer)}
           onOpenSettings={() => setActiveTab("settings")}
           notifications={notifications}
@@ -465,6 +612,7 @@ function App() {
                   runningServerTestId={runningServerTestId}
                   onChangeBuild={(gameBuild) => changeServerBuild(selectedServer, gameBuild)}
                   onConfigureServer={setServerConfigTarget}
+                  remoteConnection={remoteConnection}
                 />
               )
             ) : (
@@ -473,10 +621,15 @@ function App() {
                 isLoading={isLoadingServers}
                 error={serversError}
                 onRefresh={loadServers}
-                onCreateServer={() => setIsCreateServerModalOpen(true)}
+                onCreateServer={() => {
+                  setIsCreateServerModalOpen(true)
+                  void ensureModsLoaded()
+                }}
                 searchQuery={searchQuery}
                 onDeleteServer={deleteServer}
                 onConfigureServer={setServerConfigTarget}
+                isReadOnly={isRemoteWorkspace}
+                canCreateServer
                 onServerClick={(server) => {
                   setSelectedServer(server)
                   void ensureModsLoaded()
@@ -496,16 +649,18 @@ function App() {
               onOpenSettings={() => setActiveTab("settings")}
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
+              isReadOnly={isRemoteWorkspace}
             />
           )}
           {activeTab === "download" && (
             <DownloadMods
               manager={downloadManager}
+              remoteConnection={remoteConnection}
               onOpenSettings={() => setActiveTab("settings")}
             />
           )}
           {activeTab === "settings" && (
-            <SettingsView onRescanMods={rescanModsFromScratch} />
+            <SettingsView onRescanMods={rescanModsFromScratch} remoteConnection={remoteConnection} />
           )}
         </div>
       </div>
@@ -521,9 +676,25 @@ function App() {
       <ServerConfigurationModal
         isOpen={serverConfigTarget !== null}
         server={serverConfigTarget}
+        remoteConnection={remoteConnection}
         onClose={() => setServerConfigTarget(null)}
         onSave={updateServerSettings}
       />
+
+      {remoteConnection && (
+        <>
+          <RemoteSteamCmdModal
+            connection={remoteConnection}
+            isOpen={isRemoteSteamCmdModalOpen}
+            onClose={() => setIsRemoteSteamCmdModalOpen(false)}
+          />
+          <RemoteTerminalModal
+            connection={remoteConnection}
+            isOpen={isRemoteTerminalModalOpen}
+            onClose={() => setIsRemoteTerminalModalOpen(false)}
+          />
+        </>
+      )}
 
       <ServerTestPanel
         hasDownloadProgressCard={downloadManager.isDownloading && activeTab !== "download"}

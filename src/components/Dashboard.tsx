@@ -14,6 +14,8 @@ type DashboardProps = {
   onServerClick: (server: ZomboidServer) => void
   onConfigureServer: (server: ZomboidServer) => void
   onDeleteServer: (server: ZomboidServer) => Promise<void>
+  isReadOnly?: boolean
+  canCreateServer?: boolean
 }
 
 const HIDDEN_SERVERS_KEY = "pzmm_hidden_servers"
@@ -29,6 +31,8 @@ export function Dashboard({
   onServerClick,
   onConfigureServer,
   onDeleteServer,
+  isReadOnly = false,
+  canCreateServer = !isReadOnly,
 }: DashboardProps) {
   const { t } = useTranslation()
   const [hiddenServerIds, setHiddenServerIds] = useState<Set<string>>(new Set())
@@ -199,7 +203,7 @@ export function Dashboard({
           />
         ))}
 
-        <AddServerCard onClick={onCreateServer} />
+        {canCreateServer && <AddServerCard onClick={onCreateServer} />}
       </div>
 
       {/* Hidden Servers Section */}
@@ -269,20 +273,24 @@ export function Dashboard({
               </>
             )}
           </button>
-          <button
-            onClick={() => configureServer(contextMenu.server)}
-            className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-orange-500/10 hover:text-orange-300"
-          >
-            <Settings size={16} />
-            {t("dashboard.configure")}
-          </button>
-          <button
-            onClick={() => requestDeleteServer(contextMenu.server)}
-            className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200"
-          >
-            <Trash2 size={16} />
-            {t("dashboard.delete")}
-          </button>
+          {!isReadOnly && (
+            <>
+              <button
+                onClick={() => configureServer(contextMenu.server)}
+                className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-orange-500/10 hover:text-orange-300"
+              >
+                <Settings size={16} />
+                {t("dashboard.configure")}
+              </button>
+              <button
+                onClick={() => requestDeleteServer(contextMenu.server)}
+                className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200"
+              >
+                <Trash2 size={16} />
+                {t("dashboard.delete")}
+              </button>
+            </>
+          )}
         </div>
       )}
 

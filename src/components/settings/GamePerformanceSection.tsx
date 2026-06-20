@@ -17,6 +17,7 @@ type GamePerformanceSectionProps = {
   onBrowse: () => void
   onOpenFolder: () => void
   onScan: () => void
+  isRemoteWorkspace?: boolean
 }
 
 export function GamePerformanceSection({
@@ -32,9 +33,12 @@ export function GamePerformanceSection({
   onBrowse,
   onOpenFolder,
   onScan,
+  isRemoteWorkspace = false,
 }: GamePerformanceSectionProps) {
   const { t } = useTranslation()
-  const isConfigured = status?.isExecutableFound && status?.isClientConfigFound
+  const isConfigured = isRemoteWorkspace
+    ? Boolean(path.trim()) && Boolean(status?.isServerConfigFound)
+    : status?.isExecutableFound && status?.isClientConfigFound
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -64,6 +68,7 @@ export function GamePerformanceSection({
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <p className="text-sm font-bold text-white">
                     {isConfigured ? t("settings.performanceSection.configured") : t("settings.performanceSection.notConfigured")}
+                    {isRemoteWorkspace && <span className="ml-2 rounded-full border border-cyan-300/20 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-black uppercase text-cyan-200">Remote</span>}
                   </p>
                   <button type="button" onClick={onScan} className="flex items-center gap-2 rounded-xl border border-orange-500/20 bg-orange-500/10 px-3 py-1.5 text-xs font-bold text-orange-400 transition-all hover:bg-orange-500 hover:text-white">
                     <RefreshCw size={14} className={isScanning ? "animate-spin" : ""} />
@@ -78,14 +83,14 @@ export function GamePerformanceSection({
                     {t("settings.performanceSection.steamFolder")}: {status?.isGameDirFound ? t("settings.performanceSection.found") : t("settings.performanceSection.notFound")}
                   </span>
                   <span className={status?.isClientConfigFound ? "text-green-300" : "text-red-300"}>
-                    Launcher: {status?.isClientConfigFound ? "ok" : t("settings.performanceSection.pending")}
+                    Launcher: {isRemoteWorkspace ? "remote" : status?.isClientConfigFound ? "ok" : t("settings.performanceSection.pending")}
                   </span>
                   <span className={status?.isServerConfigFound ? "text-green-300" : "text-yellow-300"}>
                     {t("settings.performanceSection.server")}: {status?.isServerConfigFound ? "ok" : t("settings.performanceSection.notFound")}
                   </span>
                 </div>
                 <p className="mt-2 text-[11px] text-gray-600 break-all">
-                  {t("settings.performanceSection.defaultFolder")}: {status?.defaultGameDir || "C:\\Program Files (x86)\\Steam\\steamapps\\common\\ProjectZomboid"}
+                  {t("settings.performanceSection.defaultFolder")}: {status?.defaultGameDir || (isRemoteWorkspace ? "remote-workspace.ini" : "C:\\Program Files (x86)\\Steam\\steamapps\\common\\ProjectZomboid")}
                 </p>
               </div>
             </div>
@@ -93,7 +98,7 @@ export function GamePerformanceSection({
 
           <div className="space-y-3">
             <label htmlFor="game-path" className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">
-              {t("settings.performanceSection.gameExecutable")}
+              {isRemoteWorkspace ? "Remote server launch path" : t("settings.performanceSection.gameExecutable")}
             </label>
             <div className="flex flex-col gap-3 md:flex-row">
               <div className="relative flex-1 group/input">
@@ -103,7 +108,7 @@ export function GamePerformanceSection({
                   type="text"
                   value={path}
                   onChange={(event) => onPathChange(event.target.value)}
-                  placeholder="C:\\SteamLibrary\\steamapps\\common\\ProjectZomboid\\ProjectZomboid64.exe"
+                  placeholder={isRemoteWorkspace ? "C:\\Users\\Administrator\\AppData\\Local\\ZomboidServerModManager\\zomboid-server\\StartServer64.bat" : "C:\\SteamLibrary\\steamapps\\common\\ProjectZomboid\\ProjectZomboid64.exe"}
                   className="w-full bg-[#1e2327] border border-white/5 rounded-2xl py-3.5 pl-12 pr-4 text-sm focus:outline-none focus:border-orange-400/50 focus:ring-1 focus:ring-orange-400/20 transition-all placeholder:text-gray-700"
                 />
               </div>

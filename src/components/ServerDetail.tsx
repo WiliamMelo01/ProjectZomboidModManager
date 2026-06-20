@@ -21,6 +21,7 @@ import { ServerPortConflictModal } from "@/components/server/ServerPortConflictM
 import { buildActivationDependencyPlan, isLocalMod, normalizeModId } from "@/lib/modDependencies"
 import { resolveModForBuild } from "@/lib/modBuilds"
 import { invokeTauri } from "@/lib/tauri"
+import type { RemoteConnectionDraft } from "@/lib/commandRunner"
 import { i18n } from "@/i18n"
 import type { ZomboidMod } from "@/types/mod"
 import type { ZomboidServer } from "@/types/server"
@@ -40,6 +41,7 @@ type ServerDetailProps = {
   runningServerTestId?: string | null
   onChangeBuild: (gameBuild: "b41" | "b42") => Promise<void>
   onConfigureServer: (server: ZomboidServer) => void
+  remoteConnection?: RemoteConnectionDraft | null
 }
 
 const MOVE_MOD_WARNING_KEY = "pzmm_move_mod_warning_modal_seen"
@@ -71,6 +73,7 @@ export function ServerDetail({
   runningServerTestId,
   onChangeBuild,
   onConfigureServer,
+  remoteConnection = null,
 }: ServerDetailProps) {
   const { t } = useTranslation()
   const [search, setSearch] = useState("")
@@ -284,7 +287,8 @@ export function ServerDetail({
         await onInstallMods(modsToInstall)
       }
 
-      await invokeTauri("install_zomboid_server_map", {
+      await invokeTauri(remoteConnection ? "install_remote_zomboid_server_map" : "install_zomboid_server_map", {
+        ...(remoteConnection ? { connection: remoteConnection } : {}),
         serverId: server.id,
         modPath: mod.path,
       })

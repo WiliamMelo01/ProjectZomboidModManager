@@ -4,12 +4,14 @@ import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
 import { i18n } from "@/i18n"
+import type { RemoteConnectionDraft } from "@/lib/commandRunner"
 import { invokeTauri } from "@/lib/tauri"
 import type { ServerIniSettings, ServerLuaSetting, ServerLuaSettings, ZomboidServer } from "@/types/server"
 
 type ServerConfigurationModalProps = {
   isOpen: boolean
   server: ZomboidServer | null
+  remoteConnection?: RemoteConnectionDraft | null
   onClose: () => void
   onSave: (settings: ServerIniSettings) => Promise<void> | void
 }
@@ -48,7 +50,7 @@ const VANILLA_SECTIONS = [
   "WaterAndElectricity", "Fire"
 ]
 
-export function ServerConfigurationModal({ isOpen, server, onClose, onSave }: ServerConfigurationModalProps) {
+export function ServerConfigurationModal({ isOpen, server, remoteConnection = null, onClose, onSave }: ServerConfigurationModalProps) {
   const { t } = useTranslation()
   const [activeConfigTab, setActiveConfigTab] = useState<"server" | "sandbox">("server")
   const [settings, setSettings] = useState<ServerIniSettings>(FALLBACK_SETTINGS)
@@ -73,8 +75,14 @@ export function ServerConfigurationModal({ isOpen, server, onClose, onSave }: Se
     setSettings({ ...FALLBACK_SETTINGS, publicName: server.name, maxPlayers: server.maxPlayers || 32, defaultPort: server.port || "16261" })
 
     Promise.allSettled([
-      invokeTauri<ServerIniSettings>("get_zomboid_server_settings", { serverId: server.id }),
-      invokeTauri<ServerLuaSettings>("get_zomboid_server_lua_settings", { serverId: server.id }),
+      invokeTauri<ServerIniSettings>(remoteConnection ? "get_remote_zomboid_server_settings" : "get_zomboid_server_settings", {
+        ...(remoteConnection ? { connection: remoteConnection } : {}),
+        serverId: server.id,
+      }),
+      invokeTauri<ServerLuaSettings>(remoteConnection ? "get_remote_zomboid_server_lua_settings" : "get_zomboid_server_lua_settings", {
+        ...(remoteConnection ? { connection: remoteConnection } : {}),
+        serverId: server.id,
+      }),
     ])
       .then(([iniResult, sandboxResult]) => {
         if (iniResult.status === "fulfilled") {
@@ -92,7 +100,7 @@ export function ServerConfigurationModal({ isOpen, server, onClose, onSave }: Se
         }
       })
       .finally(() => setIsLoading(false))
-  }, [isOpen, server])
+  }, [isOpen, server, remoteConnection])
 
   const filteredLuaSettings = useMemo(() => {
     return luaSettings.filter((setting) => {
@@ -171,7 +179,8 @@ export function ServerConfigurationModal({ isOpen, server, onClose, onSave }: Se
       if (activeConfigTab === "server") {
         await onSave(settings)
       } else {
-        const saved = await invokeTauri<ServerLuaSettings>("update_zomboid_server_lua_settings", {
+        const saved = await invokeTauri<ServerLuaSettings>(remoteConnection ? "update_remote_zomboid_server_lua_settings" : "update_zomboid_server_lua_settings", {
+          ...(remoteConnection ? { connection: remoteConnection } : {}),
           serverId: server.id,
           settings: luaSettings,
         })

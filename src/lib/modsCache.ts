@@ -1,7 +1,7 @@
 import type { ZomboidMod } from "@/types/mod"
 
 const MODS_LIBRARY_CACHE_KEY = "pzmm:mods-library"
-const MODS_LIBRARY_CACHE_VERSION = 5
+const MODS_LIBRARY_CACHE_VERSION = 6
 const MODS_LIBRARY_COMPATIBLE_CACHE_VERSIONS = new Set([MODS_LIBRARY_CACHE_VERSION])
 const MODS_LIBRARY_CACHE_LIMIT = 30
 const MOD_IMAGE_THUMBNAIL_WIDTH = 320
@@ -51,9 +51,14 @@ function isCachedMod(value: unknown): value is ZomboidMod {
   )
 }
 
-export function readModsLibraryCache(): ModsLibraryCache | null {
+function resolveModsLibraryCacheKey(cacheKey = MODS_LIBRARY_CACHE_KEY) {
+  return cacheKey
+}
+
+export function readModsLibraryCache(cacheKey = MODS_LIBRARY_CACHE_KEY): ModsLibraryCache | null {
   try {
-    const rawCache = window.localStorage.getItem(MODS_LIBRARY_CACHE_KEY)
+    const key = resolveModsLibraryCacheKey(cacheKey)
+    const rawCache = window.localStorage.getItem(key)
 
     if (!rawCache) {
       return null
@@ -69,7 +74,7 @@ export function readModsLibraryCache(): ModsLibraryCache | null {
       cache.mods.length > MODS_LIBRARY_CACHE_LIMIT ||
       !cache.mods.every(isCachedMod)
     ) {
-      window.localStorage.removeItem(MODS_LIBRARY_CACHE_KEY)
+      window.localStorage.removeItem(key)
       return null
     }
 
@@ -126,16 +131,16 @@ async function compactCachedMods(mods: ZomboidMod[]) {
   )
 }
 
-function persistCache(cache: ModsLibraryCache) {
+function persistCache(cache: ModsLibraryCache, cacheKey = MODS_LIBRARY_CACHE_KEY) {
   try {
-    window.localStorage.setItem(MODS_LIBRARY_CACHE_KEY, JSON.stringify(cache))
+    window.localStorage.setItem(resolveModsLibraryCacheKey(cacheKey), JSON.stringify(cache))
     return true
   } catch {
     return false
   }
 }
 
-export async function writeModsLibraryCache(mods: ZomboidMod[]) {
+export async function writeModsLibraryCache(mods: ZomboidMod[], cacheKey = MODS_LIBRARY_CACHE_KEY) {
   try {
     const cache: ModsLibraryCache = {
       version: MODS_LIBRARY_CACHE_VERSION,
@@ -144,7 +149,7 @@ export async function writeModsLibraryCache(mods: ZomboidMod[]) {
       mods: await compactCachedMods(mods),
     }
 
-    if (persistCache(cache)) {
+    if (persistCache(cache, cacheKey)) {
       return
     }
 
@@ -152,7 +157,7 @@ export async function writeModsLibraryCache(mods: ZomboidMod[]) {
     for (let index = cache.mods.length - 1; index >= 0; index -= 1) {
       cache.mods[index] = { ...cache.mods[index], imageUrl: undefined }
 
-      if (persistCache(cache)) {
+      if (persistCache(cache, cacheKey)) {
         return
       }
     }
@@ -161,9 +166,9 @@ export async function writeModsLibraryCache(mods: ZomboidMod[]) {
   }
 }
 
-export function clearModsLibraryCache() {
+export function clearModsLibraryCache(cacheKey = MODS_LIBRARY_CACHE_KEY) {
   try {
-    window.localStorage.removeItem(MODS_LIBRARY_CACHE_KEY)
+    window.localStorage.removeItem(resolveModsLibraryCacheKey(cacheKey))
   } catch {
     // The backend scan remains the source of truth if browser storage is unavailable.
   }

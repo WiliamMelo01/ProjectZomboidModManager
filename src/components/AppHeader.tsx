@@ -1,4 +1,4 @@
-import { Download, FolderSync, Settings, Search, Bell, RefreshCw } from "lucide-react"
+import { Download, FolderSync, Settings, Search, Bell, RefreshCw, SquareTerminal, Wrench } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -26,6 +26,9 @@ type AppHeaderProps = {
   isInstallingAllMods?: boolean
   showSearch?: boolean
   onOpenSettings?: () => void
+  onConfigureRemoteSteamCmd?: () => void
+  onOpenRemoteTerminal?: () => void
+  isRemoteWorkspace?: boolean
   notifications?: AppNotification[]
   onNotificationClick?: (notification: AppNotification) => void
   onMarkAllNotificationsRead?: () => void
@@ -39,6 +42,9 @@ export function AppHeader({
   isInstallingAllMods = false,
   showSearch = true,
   onOpenSettings,
+  onConfigureRemoteSteamCmd,
+  onOpenRemoteTerminal,
+  isRemoteWorkspace = false,
   notifications = [],
   onNotificationClick,
   onMarkAllNotificationsRead,
@@ -84,6 +90,26 @@ export function AppHeader({
       )}
 
       <div className="flex items-center gap-3">
+        {isRemoteWorkspace && (
+          <>
+            <button
+              className="flex items-center gap-2 bg-cyan-400/10 text-cyan-300 hover:bg-cyan-500 hover:text-white px-4 py-2 rounded-xl transition-all duration-300 font-medium text-sm"
+              onClick={onConfigureRemoteSteamCmd}
+            >
+              <Wrench size={20} />
+              <span>Setup remoto</span>
+            </button>
+
+            <button
+              className="flex items-center gap-2 bg-[#2b3238] border border-cyan-300/20 text-cyan-200 hover:text-white hover:border-cyan-300/40 px-4 py-2 rounded-xl transition-all duration-300 font-medium text-sm"
+              onClick={onOpenRemoteTerminal}
+            >
+              <SquareTerminal size={20} />
+              <span>Terminal VM</span>
+            </button>
+          </>
+        )}
+
         <button
           className="flex items-center gap-2 bg-orange-400/10 text-orange-400 hover:bg-orange-400 hover:text-white px-4 py-2 rounded-xl transition-all duration-300 font-medium text-sm group"
           onClick={onScanMods}
@@ -92,14 +118,16 @@ export function AppHeader({
           <span>{t("header.scanMods")}</span>
         </button>
 
-        <button
-          disabled={isInstallingAllMods}
-          className="flex items-center gap-2 bg-[#2b3238] border border-white/5 text-gray-300 hover:text-white hover:border-orange-400/30 disabled:text-gray-600 disabled:cursor-not-allowed px-4 py-2 rounded-xl transition-all duration-300 font-medium text-sm"
-          onClick={onInstallAllMods}
-        >
-          {isInstallingAllMods ? <RefreshCw size={20} className="animate-spin" /> : <Download size={20} />}
-          <span>{t("header.bringSteam")}</span>
-        </button>
+        {onInstallAllMods && (
+          <button
+            disabled={isInstallingAllMods}
+            className="flex items-center gap-2 bg-[#2b3238] border border-white/5 text-gray-300 hover:text-white hover:border-orange-400/30 disabled:text-gray-600 disabled:cursor-not-allowed px-4 py-2 rounded-xl transition-all duration-300 font-medium text-sm"
+            onClick={onInstallAllMods}
+          >
+            {isInstallingAllMods ? <RefreshCw size={20} className="animate-spin" /> : <Download size={20} />}
+            <span>{t("header.bringSteam")}</span>
+          </button>
+        )}
 
         <div className="w-[1px] h-8 bg-white/5 mx-2" />
 

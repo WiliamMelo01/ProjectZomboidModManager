@@ -1,3 +1,4 @@
+import { Network } from "lucide-react"
 import { AppSidebarItem, type SidebarItem } from "@/components/AppSidebarItem"
 import { Logo } from "@/components/Logo"
 import { useTranslation } from "react-i18next"
@@ -7,9 +8,10 @@ type AppSidebarProps = {
   activeTab: string
   items: SidebarItem[]
   onTabChange: (tabId: string) => void
+  onChangeWorkspace: () => void
 }
 
-export function AppSidebar({ activeTab, items, onTabChange }: AppSidebarProps) {
+export function AppSidebar({ activeTab, items, onTabChange, onChangeWorkspace }: AppSidebarProps) {
   const { t } = useTranslation()
   const appChannel = formatAppChannel(packageMetadata.appChannel ?? "beta")
 
@@ -34,6 +36,21 @@ export function AppSidebar({ activeTab, items, onTabChange }: AppSidebarProps) {
       </div>
 
       <div className="mt-auto px-4 pb-8 pt-6 border-t border-white/5">
+        <button
+          type="button"
+          onClick={onChangeWorkspace}
+          className="mb-3 flex w-full items-center gap-3 rounded-xl border border-white/5 bg-[#171b1f]/70 px-3 py-2.5 text-left text-gray-300 transition-all hover:border-cyan-300/30 hover:bg-cyan-500/10 hover:text-cyan-100"
+          title="Trocar workspace"
+        >
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#22272b] text-cyan-200">
+            <Network size={17} />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-[9px] font-black uppercase tracking-widest text-gray-500">Workspace</span>
+            <span className="block truncate text-xs font-bold">Trocar local/remoto</span>
+          </span>
+        </button>
+
         <div className="rounded-xl border border-white/5 bg-[#171b1f]/70 px-3 py-2.5">
           <div className="mb-1.5 flex items-center justify-between gap-3">
             <span className="text-[9px] font-bold uppercase tracking-widest text-gray-500">PZ Manager</span>

@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { WorkshopDownloadManager } from "@/hooks/useWorkshopDownloadManager"
+import type { RemoteConnectionDraft } from "@/lib/commandRunner"
 import { invokeTauri } from "@/lib/tauri"
 import type { DownloadItemStatus, DownloadListItem, DownloadType, WorkshopDownloadResult, WorkshopDownloadStatus } from "@/types/download"
 
@@ -28,6 +29,7 @@ type AppSettings = {
 
 type DownloadModsProps = {
   manager: WorkshopDownloadManager
+  remoteConnection?: RemoteConnectionDraft | null
   onOpenSettings?: () => void
 }
 
@@ -41,7 +43,7 @@ function extractWorkshopId(value: string) {
   return trimmed.match(/[?&]id=(\d+)/)?.[1] ?? ""
 }
 
-export function DownloadMods({ manager, onOpenSettings }: DownloadModsProps) {
+export function DownloadMods({ manager, remoteConnection = null, onOpenSettings }: DownloadModsProps) {
   const { t } = useTranslation()
   const [workshopInput, setWorkshopInput] = useState("")
   const [downloadType, setDownloadType] = useState<DownloadType>("item")
@@ -57,7 +59,9 @@ export function DownloadMods({ manager, onOpenSettings }: DownloadModsProps) {
     setIsCheckingSettings(true)
 
     try {
-      const settings = await invokeTauri<AppSettings>("get_app_settings")
+      const settings = remoteConnection
+        ? await invokeTauri<AppSettings>("get_remote_app_settings", { connection: remoteConnection })
+        : await invokeTauri<AppSettings>("get_app_settings")
       setIsSteamcmdConfigured(settings.isSteamcmdConfigured)
       setResolvedSteamcmdPath(settings.resolvedSteamcmdPath)
     } finally {
@@ -83,7 +87,7 @@ export function DownloadMods({ manager, onOpenSettings }: DownloadModsProps) {
 
   useEffect(() => {
     void loadSettings()
-  }, [])
+  }, [remoteConnection])
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ block: "end" })

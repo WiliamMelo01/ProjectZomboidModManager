@@ -21,7 +21,7 @@ pub(crate) async fn list_zomboid_servers() -> Result<Vec<ZomboidServer>, String>
     run_blocking(list_zomboid_servers_impl).await
 }
 
-fn list_zomboid_servers_impl() -> Result<Vec<ZomboidServer>, String> {
+pub(crate) fn list_zomboid_servers_impl() -> Result<Vec<ZomboidServer>, String> {
     let server_dir = zomboid_server_dir()?;
 
     if !server_dir.exists() {
@@ -256,7 +256,7 @@ pub(crate) async fn get_zomboid_server_settings(
     run_blocking(move || get_zomboid_server_settings_impl(&server_id)).await
 }
 
-fn get_zomboid_server_settings_impl(server_id: &str) -> Result<ServerIniSettings, String> {
+pub(crate) fn get_zomboid_server_settings_impl(server_id: &str) -> Result<ServerIniSettings, String> {
     let server_path = canonical_zomboid_server_path(server_id)?;
     let content = read_text_lossy(&server_path)?;
 
@@ -270,7 +270,9 @@ pub(crate) async fn get_zomboid_server_lua_settings(
     run_blocking(move || get_zomboid_server_lua_settings_impl(&server_id)).await
 }
 
-fn get_zomboid_server_lua_settings_impl(server_id: &str) -> Result<ServerLuaSettings, String> {
+pub(crate) fn get_zomboid_server_lua_settings_impl(
+    server_id: &str,
+) -> Result<ServerLuaSettings, String> {
     let sandbox_path = canonical_zomboid_server_sandbox_path(server_id)?;
     let file_name = sandbox_path
         .file_name()
@@ -331,7 +333,7 @@ pub(crate) async fn update_zomboid_server_mods(
     run_blocking(move || update_zomboid_server_mods_impl(&server_id, &mod_ids, &workshop_ids)).await
 }
 
-fn update_zomboid_server_mods_impl(
+pub(crate) fn update_zomboid_server_mods_impl(
     server_id: &str,
     mod_ids: &[String],
     workshop_ids: &[String],
@@ -442,8 +444,9 @@ pub(crate) async fn create_zomboid_server(
     max_players: u32,
 ) -> Result<ZomboidServer, String> {
     run_blocking(move || {
-        create_zomboid_server_impl(
-            &app,
+        let example_dir = server_example_dir(&app)?;
+        create_zomboid_server_from_template_impl(
+            &example_dir,
             &name,
             &mod_ids,
             &workshop_ids,
@@ -454,8 +457,8 @@ pub(crate) async fn create_zomboid_server(
     .await
 }
 
-fn create_zomboid_server_impl(
-    app: &tauri::AppHandle,
+pub(crate) fn create_zomboid_server_from_template_impl(
+    example_dir: &Path,
     name: &str,
     mod_ids: &[String],
     workshop_ids: &[String],
@@ -495,7 +498,6 @@ fn create_zomboid_server_impl(
         ));
     }
 
-    let example_dir = server_example_dir(app)?;
     let template_ini = example_dir.join("servertest.ini");
     let template_sandbox = example_dir.join("servertest_SandboxVars.lua");
     let template_spawnregions = example_dir.join("servertest_spawnregions.lua");
@@ -548,7 +550,7 @@ pub(crate) async fn update_zomboid_server_settings(
     run_blocking(move || update_zomboid_server_settings_impl(&server_id, &settings)).await
 }
 
-fn update_zomboid_server_settings_impl(
+pub(crate) fn update_zomboid_server_settings_impl(
     server_id: &str,
     settings: &ServerIniSettings,
 ) -> Result<ZomboidServer, String> {
@@ -581,7 +583,7 @@ pub(crate) async fn update_zomboid_server_lua_settings(
     run_blocking(move || update_zomboid_server_lua_settings_impl(&server_id, &settings)).await
 }
 
-fn update_zomboid_server_lua_settings_impl(
+pub(crate) fn update_zomboid_server_lua_settings_impl(
     server_id: &str,
     settings: &[ServerLuaSetting],
 ) -> Result<ServerLuaSettings, String> {

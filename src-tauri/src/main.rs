@@ -15,6 +15,7 @@ mod game;
 mod i18n;
 mod models;
 mod mods;
+mod remote;
 mod server_test;
 mod servers;
 mod settings;
@@ -33,6 +34,20 @@ use mods::{
     clear_zomboid_mods_cache, count_zomboid_mods, get_zomboid_mod_package_size,
     install_zomboid_mod, list_zomboid_mods,
 };
+use remote::{
+    add_remote_mod_location, cancel_remote_steam_workshop_download,
+    clear_remote_zomboid_mods_cache, create_remote_zomboid_server,
+    download_remote_steam_workshop_collection, download_remote_steam_workshop_item,
+    download_remote_steam_workshop_items, get_remote_app_settings, get_remote_mod_locations,
+    get_remote_system_ram, get_remote_workspace_config, get_remote_zomboid_server_lua_settings,
+    get_remote_zomboid_server_settings, install_remote_zomboid_mod,
+    install_remote_zomboid_server_map, install_zomboid_server_on_remote, list_remote_zomboid_mods,
+    list_remote_zomboid_servers, open_remote_mod_location, run_terminal_command,
+    save_remote_app_settings, save_remote_workspace_config, select_ssh_key_file,
+    setup_remote_helper, test_remote_server_connection, update_remote_zomboid_server_build,
+    update_remote_zomboid_server_lua_settings, update_remote_zomboid_server_mods,
+    update_remote_zomboid_server_settings, upload_steamcmd_to_remote,
+};
 use server_test::{
     check_zomboid_server_ports, kill_processes_by_pid, start_zomboid_server_test,
     test_zomboid_server,
@@ -45,8 +60,7 @@ use servers::{
 };
 use settings::{
     add_mod_location, get_app_settings, get_mod_locations, open_mod_location, push_mod_location,
-    save_app_settings, select_mod_folder,
-    DEFAULT_MAX_CONCURRENT_DOWNLOADS,
+    save_app_settings, select_mod_folder, DEFAULT_MAX_CONCURRENT_DOWNLOADS,
 };
 use util::*;
 use workshop::{
@@ -283,7 +297,7 @@ fn managed_steamcmd_pool_workshop_dirs() -> Vec<PathBuf> {
         .collect()
 }
 
-fn steamcmd_zip_resource_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn steamcmd_zip_resource_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
 
     for relative_path in ["steacmd/steamcmd.zip", "steamcmd/steamcmd.zip"] {
@@ -463,9 +477,10 @@ fn main() {
     tauri::Builder::default()
         .on_menu_event(|app, event| emit_native_menu(app, event.id().as_ref()))
         .setup(|app| {
-            if let Err(error) =
-                ensure_managed_steamcmd_pool(app.handle(), DEFAULT_MAX_CONCURRENT_DOWNLOADS as usize)
-            {
+            if let Err(error) = ensure_managed_steamcmd_pool(
+                app.handle(),
+                DEFAULT_MAX_CONCURRENT_DOWNLOADS as usize,
+            ) {
                 eprintln!("Nao foi possivel preparar o pool SteamCMD gerenciado: {error}");
             }
 
@@ -488,6 +503,36 @@ fn main() {
             update_zomboid_server_settings,
             update_zomboid_server_lua_settings,
             install_zomboid_server_map,
+            get_remote_workspace_config,
+            get_remote_app_settings,
+            get_remote_system_ram,
+            get_remote_mod_locations,
+            add_remote_mod_location,
+            open_remote_mod_location,
+            download_remote_steam_workshop_item,
+            download_remote_steam_workshop_collection,
+            download_remote_steam_workshop_items,
+            cancel_remote_steam_workshop_download,
+            list_remote_zomboid_mods,
+            clear_remote_zomboid_mods_cache,
+            list_remote_zomboid_servers,
+            create_remote_zomboid_server,
+            get_remote_zomboid_server_settings,
+            get_remote_zomboid_server_lua_settings,
+            update_remote_zomboid_server_mods,
+            update_remote_zomboid_server_build,
+            update_remote_zomboid_server_settings,
+            update_remote_zomboid_server_lua_settings,
+            install_remote_zomboid_mod,
+            install_remote_zomboid_server_map,
+            run_terminal_command,
+            save_remote_app_settings,
+            save_remote_workspace_config,
+            select_ssh_key_file,
+            test_remote_server_connection,
+            setup_remote_helper,
+            upload_steamcmd_to_remote,
+            install_zomboid_server_on_remote,
             list_zomboid_mods,
             count_zomboid_mods,
             clear_zomboid_mods_cache,

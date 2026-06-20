@@ -10,7 +10,6 @@ mod install;
 mod metadata;
 mod server_values;
 
-use cache::clear_persisted_cache;
 use catalog::count_zomboid_mods_impl;
 pub(crate) use catalog::list_zomboid_mods_impl;
 pub(crate) use discovery::steam_workshop_dirs;
@@ -31,7 +30,11 @@ pub(crate) async fn count_zomboid_mods() -> Result<usize, String> {
 
 #[tauri::command]
 pub(crate) async fn clear_zomboid_mods_cache() -> Result<(), String> {
-    run_blocking(clear_persisted_cache).await
+    run_blocking(clear_zomboid_mods_cache_impl).await
+}
+
+pub(crate) fn clear_zomboid_mods_cache_impl() -> Result<(), String> {
+    cache::clear_persisted_cache()
 }
 
 #[tauri::command]

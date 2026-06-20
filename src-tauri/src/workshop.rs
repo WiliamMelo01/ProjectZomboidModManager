@@ -1,7 +1,7 @@
 use crate::models::WorkshopDownloadResult;
 use crate::run_blocking;
 
-mod api;
+pub(crate) mod api;
 mod download;
 mod navigation;
 

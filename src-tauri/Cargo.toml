@@ -1,7 +1,8 @@
 [package]
 name = "zomboid_server_mod_manager"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
+default-run = "zomboid_server_mod_manager"
 description = "Desktop mod manager for Project Zomboid servers"
 authors = ["Wiliam Melo"]
 
@@ -15,4 +16,13 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["protocol-asset"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+base64 = "0.22"
 rust-i18n = "4"
+
+[[bin]]
+name = "zomboid_server_mod_manager"
+path = "src/main.rs"
+
+[[bin]]
+name = "pzmm-helper"
+path = "src/helper_main.rs"

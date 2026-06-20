@@ -6,7 +6,7 @@ use std::{
     process::Command,
 };
 
-pub(super) fn fetch_steam_workshop_item_names(
+pub(crate) fn fetch_steam_workshop_item_names(
     workshop_ids: &[String],
 ) -> Result<HashMap<String, String>, String> {
     if workshop_ids.is_empty() {
@@ -52,7 +52,7 @@ pub(super) fn fetch_steam_workshop_item_names(
     Ok(names)
 }
 
-pub(super) fn validate_workshop_id(value: &str, item_label: &str) -> Result<String, String> {
+pub(crate) fn validate_workshop_id(value: &str, item_label: &str) -> Result<String, String> {
     let value = value.trim();
 
     if value.is_empty() || !value.chars().all(|char| char.is_ascii_digit()) {
@@ -69,7 +69,7 @@ pub(super) fn validate_workshop_id(value: &str, item_label: &str) -> Result<Stri
     Ok(value.to_string())
 }
 
-pub(super) fn fetch_steam_workshop_collection_items(
+pub(crate) fn fetch_steam_workshop_collection_items(
     collection_id: &str,
 ) -> Result<Vec<String>, String> {
     let collection_id = validate_workshop_id(collection_id, &text("collection", "colecao"))?;
@@ -138,7 +138,10 @@ fn fetch_steam_workshop_collection_items_from_page(
     );
     let html = run_powershell_text_request(
         &script,
-        &text("fetch the Steam collection page", "consultar a pagina da colecao na Steam"),
+        &text(
+            "fetch the Steam collection page",
+            "consultar a pagina da colecao na Steam",
+        ),
     )?;
 
     Ok(collection_item_ids_from_html(&html, collection_id))
@@ -152,10 +155,7 @@ fn collection_item_ids_from_html(html: &str, collection_id: &str) -> Vec<String>
     let mut seen = HashSet::new();
     let mut workshop_ids = Vec::new();
 
-    for pattern in [
-        "sharedfiles/filedetails/?id=",
-        "workshop/filedetails/?id=",
-    ] {
+    for pattern in ["sharedfiles/filedetails/?id=", "workshop/filedetails/?id="] {
         let mut remaining = html;
 
         while let Some(index) = remaining.find(pattern) {

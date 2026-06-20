@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) const BUILD_41: &str = "b41";
 pub(crate) const BUILD_42: &str = "b42";
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ZomboidServer {
     pub(crate) id: String,
@@ -206,6 +206,144 @@ pub(crate) struct PortUsage {
     pub(crate) protocol: String,
     pub(crate) pid: u32,
     pub(crate) process_name: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteServerConnectionRequest {
+    pub(crate) name: String,
+    pub(crate) host: String,
+    pub(crate) port: String,
+    pub(crate) username: String,
+    pub(crate) auth_method: String,
+    pub(crate) password: String,
+    pub(crate) ssh_key_path: String,
+    pub(crate) server_path: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteServerConnectionResult {
+    pub(crate) name: String,
+    pub(crate) host: String,
+    pub(crate) port: u16,
+    pub(crate) server_path: String,
+    pub(crate) message: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteWorkspaceConfig {
+    pub(crate) name: String,
+    pub(crate) host: String,
+    pub(crate) port: String,
+    pub(crate) username: String,
+    pub(crate) auth_method: String,
+    pub(crate) ssh_key_path: String,
+    pub(crate) server_path: String,
+    pub(crate) remote_steamcmd_dir: String,
+    pub(crate) remote_steamcmd_path: String,
+    pub(crate) remote_zomboid_server_dir: String,
+    pub(crate) remote_zomboid_server_path: String,
+    pub(crate) remote_client_ram: String,
+    pub(crate) remote_server_ram: String,
+    pub(crate) remote_mod_locations: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TerminalCommandRequest {
+    pub(crate) target: String,
+    pub(crate) command: String,
+    pub(crate) working_directory: String,
+    pub(crate) connection: Option<RemoteServerConnectionRequest>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TerminalCommandResult {
+    pub(crate) target: String,
+    pub(crate) command: String,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) success: bool,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteSteamCmdUploadRequest {
+    pub(crate) connection: RemoteServerConnectionRequest,
+    pub(crate) remote_directory: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteSteamCmdUploadResult {
+    pub(crate) local_path: String,
+    pub(crate) remote_path: String,
+    pub(crate) steamcmd_executable_path: String,
+    pub(crate) command: String,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) success: bool,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteHelperSetupResult {
+    pub(crate) local_path: String,
+    pub(crate) remote_path: String,
+    pub(crate) command: String,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) success: bool,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteZomboidServerInstallRequest {
+    pub(crate) connection: RemoteServerConnectionRequest,
+    pub(crate) steamcmd_path: String,
+    pub(crate) install_directory: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteZomboidServerInstallResult {
+    pub(crate) install_directory: String,
+    pub(crate) server_executable_path: String,
+    pub(crate) command: String,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) success: bool,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteSetupLogEvent {
+    pub(crate) phase: String,
+    pub(crate) stream: String,
+    pub(crate) line: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteAppSettingsRequest {
+    pub(crate) connection: RemoteServerConnectionRequest,
+    pub(crate) game_executable_path: String,
+    pub(crate) client_ram: String,
+    pub(crate) server_ram: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteModLocationRequest {
+    pub(crate) connection: RemoteServerConnectionRequest,
+    pub(crate) path: String,
 }
 
 #[derive(Serialize, Clone)]

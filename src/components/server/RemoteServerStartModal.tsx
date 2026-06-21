@@ -1,5 +1,5 @@
-import { CheckCircle2, Play, RefreshCw, ShieldAlert, ShieldCheck, Terminal, X, XCircle } from "lucide-react"
-import type { ReactNode } from "react"
+import { CheckCircle2, Play, RefreshCw, Send, ShieldAlert, ShieldCheck, Terminal, X, XCircle } from "lucide-react"
+import { useState, type ReactNode } from "react"
 
 import type { ZomboidServer } from "@/types/server"
 
@@ -39,6 +39,7 @@ type RemoteServerStartModalProps = {
   onRecheck: () => void
   onConfigureFirewall: () => void
   onStartServer: () => void
+  onSendCommand: (command: string) => Promise<void>
 }
 
 export function RemoteServerStartModal({
@@ -55,7 +56,11 @@ export function RemoteServerStartModal({
   onRecheck,
   onConfigureFirewall,
   onStartServer,
+  onSendCommand,
 }: RemoteServerStartModalProps) {
+  const [commandText, setCommandText] = useState("")
+  const [isSendingCommand, setIsSendingCommand] = useState(false)
+
   if (!isOpen) {
     return null
   }
@@ -63,7 +68,21 @@ export function RemoteServerStartModal({
   const isBusy = isChecking || isConfiguring || isStarting
   const canConfigureFirewall = Boolean(firewallCheck && !firewallCheck.isConfigured && !isBusy)
   const canStartServer = Boolean(firewallCheck?.isConfigured && !isBusy)
+  const canSendCommand = Boolean(startResult?.success && commandText.trim() && !isSendingCommand)
   const visibleLogs = logs.length > 0 ? logs : ["Waiting for firewall check..."]
+
+  async function submitCommand() {
+    const command = commandText.trim()
+    if (!command || isSendingCommand) return
+
+    setIsSendingCommand(true)
+    try {
+      await onSendCommand(command)
+      setCommandText("")
+    } finally {
+      setIsSendingCommand(false)
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
@@ -154,6 +173,37 @@ export function RemoteServerStartModal({
                 </p>
               ))}
             </div>
+
+            {startResult?.success && (
+              <div className="border-t border-white/10 bg-[#171b1f] px-4 py-3">
+                <form
+                  className="flex flex-col gap-2 sm:flex-row"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    void submitCommand()
+                  }}
+                >
+                  <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 font-mono text-sm text-gray-200">
+                    <Terminal size={16} className="shrink-0 text-cyan-300" />
+                    <input
+                      value={commandText}
+                      onChange={(event) => setCommandText(event.target.value)}
+                      placeholder="save, servermsg hello, quit..."
+                      disabled={isSendingCommand}
+                      className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-gray-600 disabled:opacity-60"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={!canSendCommand}
+                    className="flex items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm font-black text-cyan-200 transition-colors hover:bg-cyan-400 hover:text-[#071014] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isSendingCommand ? <RefreshCw size={18} className="animate-spin" /> : <Send size={18} />}
+                    <span>Send command</span>
+                  </button>
+                </form>
+              </div>
+            )}
 
             <div className="flex flex-wrap justify-end gap-3 border-t border-white/10 bg-[#171b1f] px-4 py-3">
               {canConfigureFirewall && (

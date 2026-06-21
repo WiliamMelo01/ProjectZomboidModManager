@@ -152,6 +152,24 @@ pub(crate) async fn configure_remote_zomboid_server_firewall(
 }
 
 #[tauri::command]
+pub(crate) async fn send_remote_zomboid_server_command(
+    connection: RemoteServerConnectionRequest,
+    server_id: String,
+    command: String,
+) -> Result<RemoteServerActionResult, String> {
+    run_blocking(move || {
+        run_remote_helper_json(
+            &connection,
+            "send-server-command",
+            Some(&serde_json::json!({
+                "serverId": server_id,
+                "command": command,
+            })),
+        )
+    })
+    .await
+}
+#[tauri::command]
 pub(crate) async fn start_remote_zomboid_server(
     connection: RemoteServerConnectionRequest,
     server_id: String,

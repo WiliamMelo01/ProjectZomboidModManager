@@ -616,6 +616,28 @@ function LocalWorkspaceApp({
     }
   }
 
+  async function sendRemoteServerCommand(server: ZomboidServer, command: string) {
+    if (!remoteConnection || !server) {
+      return
+    }
+
+    setRemoteStartError(null)
+    setRemoteStartLogs((currentLogs) => [...currentLogs, `> ${command}`])
+
+    try {
+      const result = await invokeTauri<RemoteServerActionResult>("send_remote_zomboid_server_command", {
+        connection: remoteConnection,
+        serverId: server.id,
+        command,
+      })
+      setRemoteStartLogs((currentLogs) => [...currentLogs, ...result.logs, result.message])
+    } catch (error) {
+      setRemoteStartError(getErrorMessage(error))
+      setRemoteStartLogs((currentLogs) => [...currentLogs, getErrorMessage(error)])
+      throw error
+    }
+  }
+
   async function openRemoteServerStart(server: ZomboidServer) {
     setActiveStartServer(server)
     setIsRemoteStartOpen(true)
@@ -908,6 +930,7 @@ function LocalWorkspaceApp({
           onRecheck={() => void checkRemoteServerFirewall(activeStartServer)}
           onConfigureFirewall={() => void configureRemoteServerFirewall(activeStartServer)}
           onStartServer={() => void startRemoteServer(activeStartServer)}
+          onSendCommand={(command) => sendRemoteServerCommand(activeStartServer, command)}
         />
       )}
 

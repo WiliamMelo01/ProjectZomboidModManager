@@ -16,6 +16,14 @@ import { RemoteTerminalModal } from "@/components/RemoteTerminalModal"
 import { ServerConfigurationModal } from "@/components/ServerConfigurationModal"
 import { ServerDetail } from "@/components/ServerDetail"
 import { ServerTestPanel } from "@/components/ServerTestPanel"
+import {
+  RemoteServerStartModal,
+  type RemoteServerActionResult,
+  type RemoteServerFirewallCheck,
+} from "@/components/server/RemoteServerStartModal"
+import { ServerPortConflictModal } from "@/components/server/ServerPortConflictModal"
+import type { ServerPortCheck } from "@/components/server/ServerPortConflictModal"
+import { DeployLocalServerModal } from "@/components/server/DeployLocalServerModal"
 import { Settings as SettingsView } from "@/components/Settings"
 import { WorkspaceSelector } from "@/components/WorkspaceSelector"
 import { WorkshopWindow } from "@/components/WorkshopWindow"
@@ -81,6 +89,7 @@ function LocalWorkspaceApp({
   const [isCreateServerModalOpen, setIsCreateServerModalOpen] = useState(false)
   const [isRemoteSteamCmdModalOpen, setIsRemoteSteamCmdModalOpen] = useState(false)
   const [isRemoteTerminalModalOpen, setIsRemoteTerminalModalOpen] = useState(false)
+  const [isDeployLocalModalOpen, setIsDeployLocalModalOpen] = useState(false)
   const isRemoteWorkspace = remoteConnection !== null
   const workspaceCacheId = remoteConnection
     ? `remote:${[
@@ -102,6 +111,19 @@ function LocalWorkspaceApp({
   const [searchQuery, setSearchQuery] = useState("")
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [runningServerTestId, setRunningServerTestId] = useState<string | null>(null)
+  const [isTestingServer, setIsTestingServer] = useState(false)
+  const [portConflictCheck, setPortConflictCheck] = useState<ServerPortCheck | null>(null)
+  const [isCheckingPorts, setIsCheckingPorts] = useState(false)
+  const [isKillingPorts, setIsKillingPorts] = useState(false)
+  const [isRemoteStartOpen, setIsRemoteStartOpen] = useState(false)
+  const [remoteFirewallCheck, setRemoteFirewallCheck] = useState<RemoteServerFirewallCheck | null>(null)
+  const [remoteStartResult, setRemoteStartResult] = useState<RemoteServerActionResult | null>(null)
+  const [remoteStartLogs, setRemoteStartLogs] = useState<string[]>([])
+  const [remoteStartError, setRemoteStartError] = useState<string | null>(null)
+  const [isCheckingRemoteFirewall, setIsCheckingRemoteFirewall] = useState(false)
+  const [isConfiguringRemoteFirewall, setIsConfiguringRemoteFirewall] = useState(false)
+  const [isStartingRemoteServer, setIsStartingRemoteServer] = useState(false)
+  const [activeStartServer, setActiveStartServer] = useState<ZomboidServer | null>(null)
   const { t } = useTranslation()
   const {
     mods,
@@ -120,9 +142,7 @@ function LocalWorkspaceApp({
     listArgs: isRemoteWorkspace && remoteConnection ? { connection: remoteConnection } : undefined,
     installCommand: isRemoteWorkspace ? "install_remote_zomboid_mod" : "install_zomboid_mod",
     installArgs: isRemoteWorkspace && remoteConnection ? { connection: remoteConnection } : undefined,
-    clearCacheCommand: isRemoteWorkspace ? "clear_remote_zomboid_mods_cache" : undefined,
-    clearCacheArgs: isRemoteWorkspace && remoteConnection ? { connection: remoteConnection } : undefined,
-    reloadAfterInstall: isRemoteWorkspace,
+    backgroundReloadAfterInstall: isRemoteWorkspace,
     useCache: true,
     cacheKey: modsCacheKey,
   })
@@ -327,6 +347,7 @@ function LocalWorkspaceApp({
     setSelectedServer(createdServer)
     setServerConfigTarget(createdServer)
     setActiveTab("dashboard")
+    window.dispatchEvent(new CustomEvent("pzmm-reveal-server", { detail: { serverId: createdServer.id } }))
   }
 
   async function updateServerSettings(settings: ServerIniSettings) {
@@ -382,9 +403,13 @@ function LocalWorkspaceApp({
 
   async function deleteServer(server: ZomboidServer) {
     try {
-      const result = await invokeTauri<DeleteServerResult>("delete_zomboid_server", {
-        serverId: server.id,
-      })
+      const result = await invokeTauri<DeleteServerResult>(
+        isRemoteWorkspace && remoteConnection ? "delete_remote_zomboid_server" : "delete_zomboid_server",
+        {
+          ...(isRemoteWorkspace && remoteConnection ? { connection: remoteConnection } : {}),
+          serverId: server.id,
+        }
+      )
 
       updateServers((currentServers) => currentServers.filter((item) => item.id !== server.id))
       setSelectedServer((current) => current?.id === server.id ? null : current)
@@ -421,7 +446,7 @@ function LocalWorkspaceApp({
     if (isRemoteWorkspace) {
       clearModsLibraryCache(modsCacheKey)
       if (remoteConnection) {
-        await invokeTauri<void>("clear_remote_zomboid_mods_cache", { connection: remoteConnection })
+        await invokeTauri<void>("clear_remote_zomboid_mods_and_images_cache", { connection: remoteConnection })
       }
       await loadMods()
       return
@@ -441,6 +466,180 @@ function LocalWorkspaceApp({
 
     await loadServers()
     void loadModsInBackground()
+  }
+
+  async function testServer(server: ZomboidServer, skipPortCheck = false) {
+    const isCurrentServerTesting = isTestingServer || runningServerTestId === server.id
+    if (isCurrentServerTesting) {
+      window.dispatchEvent(new CustomEvent("pzmm-open-server-test-panel", { detail: { serverId: server.id } }))
+      return
+    }
+
+    setActiveStartServer(server)
+
+    if (!remoteConnection && !skipPortCheck) {
+      setIsCheckingPorts(true)
+
+      try {
+        const check = await invokeTauri<ServerPortCheck>("check_zomboid_server_ports", {
+          serverId: server.id,
+        })
+
+        if (check.usages.length > 0) {
+          setPortConflictCheck(check)
+          return
+        }
+      } catch (error) {
+        window.dispatchEvent(new CustomEvent("pzmm-open-server-test-panel", { detail: { serverId: server.id, error: getErrorMessage(error) } }))
+        return
+      } finally {
+        setIsCheckingPorts(false)
+      }
+    }
+
+    setIsTestingServer(true)
+    window.dispatchEvent(new CustomEvent("pzmm-open-server-test-panel", { detail: { serverId: server.id } }))
+
+    try {
+      await invokeTauri(remoteConnection ? "start_remote_zomboid_server_test" : "start_zomboid_server_test", {
+        ...(remoteConnection ? { connection: remoteConnection } : {}),
+        serverId: server.id,
+      })
+    } catch (error) {
+      window.dispatchEvent(new CustomEvent("pzmm-open-server-test-panel", { detail: { serverId: server.id, error: getErrorMessage(error) } }))
+    } finally {
+      setIsTestingServer(false)
+    }
+  }
+
+  async function cancelServerTest(serverId: string) {
+    try {
+      await invokeTauri<void>(remoteConnection ? "cancel_remote_zomboid_server_test" : "cancel_zomboid_server_test", {
+        ...(remoteConnection ? { connection: remoteConnection } : {}),
+        serverId,
+      })
+    } catch (error) {
+      addNotification({
+        title: t("serverTest.failedTitle"),
+        message: getErrorMessage(error),
+        tone: "error",
+      })
+    } finally {
+      setRunningServerTestId((currentServerId) => currentServerId === serverId ? null : currentServerId)
+      setIsTestingServer(false)
+    }
+  }
+  async function checkRemoteServerFirewall(server: ZomboidServer) {
+    if (!remoteConnection || !server) {
+      return
+    }
+
+    setIsRemoteStartOpen(true)
+    setRemoteStartResult(null)
+    setRemoteStartError(null)
+    setRemoteStartLogs([`Checking remote firewall for ${server.name}...`])
+    setIsCheckingRemoteFirewall(true)
+
+    try {
+      const check = await invokeTauri<RemoteServerFirewallCheck>("check_remote_zomboid_server_firewall", {
+        connection: remoteConnection,
+        serverId: server.id,
+      })
+      setRemoteFirewallCheck(check)
+      setRemoteStartLogs([
+        ...check.logs,
+        check.isConfigured ? "Firewall is configured. You can run the server." : "Firewall needs configuration before running the server.",
+      ])
+    } catch (error) {
+      setRemoteStartError(getErrorMessage(error))
+      setRemoteStartLogs((currentLogs) => [...currentLogs, getErrorMessage(error)])
+    } finally {
+      setIsCheckingRemoteFirewall(false)
+    }
+  }
+
+  async function configureRemoteServerFirewall(server: ZomboidServer) {
+    if (!remoteConnection || !server) {
+      return
+    }
+
+    setRemoteStartError(null)
+    setIsConfiguringRemoteFirewall(true)
+    setRemoteStartLogs((currentLogs) => [...currentLogs, "Configuring remote firewall rules..."])
+
+    try {
+      const result = await invokeTauri<RemoteServerActionResult>("configure_remote_zomboid_server_firewall", {
+        connection: remoteConnection,
+        serverId: server.id,
+      })
+      setRemoteStartLogs((currentLogs) => [...currentLogs, ...result.logs, result.message])
+
+      const check = await invokeTauri<RemoteServerFirewallCheck>("check_remote_zomboid_server_firewall", {
+        connection: remoteConnection,
+        serverId: server.id,
+      })
+      setRemoteFirewallCheck(check)
+      setRemoteStartLogs((currentLogs) => [
+        ...currentLogs,
+        ...check.logs,
+        check.isConfigured ? "Firewall is configured. You can run the server." : "Firewall still needs attention.",
+      ])
+    } catch (error) {
+      setRemoteStartError(getErrorMessage(error))
+      setRemoteStartLogs((currentLogs) => [...currentLogs, getErrorMessage(error)])
+    } finally {
+      setIsConfiguringRemoteFirewall(false)
+    }
+  }
+
+  async function startRemoteServer(server: ZomboidServer) {
+    if (!remoteConnection || !server) {
+      return
+    }
+
+    setRemoteStartError(null)
+    setIsStartingRemoteServer(true)
+    setRemoteStartLogs((currentLogs) => [...currentLogs, "Starting remote Project Zomboid server..."])
+
+    try {
+      const result = await invokeTauri<RemoteServerActionResult>("start_remote_zomboid_server", {
+        connection: remoteConnection,
+        serverId: server.id,
+      })
+      setRemoteStartResult(result)
+      setRemoteStartLogs((currentLogs) => [...currentLogs, ...result.logs, result.message])
+    } catch (error) {
+      setRemoteStartError(getErrorMessage(error))
+      setRemoteStartLogs((currentLogs) => [...currentLogs, getErrorMessage(error)])
+    } finally {
+      setIsStartingRemoteServer(false)
+    }
+  }
+
+  async function openRemoteServerStart(server: ZomboidServer) {
+    setActiveStartServer(server)
+    setIsRemoteStartOpen(true)
+    await checkRemoteServerFirewall(server)
+  }
+
+  async function killPortConflictsAndContinue(server: ZomboidServer) {
+    if (!portConflictCheck) {
+      return
+    }
+
+    setIsKillingPorts(true)
+
+    try {
+      await invokeTauri("kill_processes_by_pid", {
+        pids: Array.from(new Set(portConflictCheck.usages.map((usage) => usage.pid))),
+      })
+      setPortConflictCheck(null)
+      await testServer(server, true)
+    } catch (error) {
+      window.dispatchEvent(new CustomEvent("pzmm-open-server-test-panel", { detail: { serverId: server.id, error: getErrorMessage(error) } }))
+    } finally {
+      setIsKillingPorts(false)
+    }
   }
 
   function addNotification(notification: Omit<AppNotification, "id" | "createdAt" | "isRead">) {
@@ -613,6 +812,13 @@ function LocalWorkspaceApp({
                   onChangeBuild={(gameBuild) => changeServerBuild(selectedServer, gameBuild)}
                   onConfigureServer={setServerConfigTarget}
                   remoteConnection={remoteConnection}
+                  isTestingServer={isTestingServer}
+                  isCheckingPorts={isCheckingPorts}
+                  isCheckingRemoteFirewall={isCheckingRemoteFirewall}
+                  isConfiguringRemoteFirewall={isConfiguringRemoteFirewall}
+                  isStartingRemoteServer={isStartingRemoteServer}
+                  onTestServer={testServer}
+                  onStartRemoteServer={openRemoteServerStart}
                 />
               )
             ) : (
@@ -634,6 +840,9 @@ function LocalWorkspaceApp({
                   setSelectedServer(server)
                   void ensureModsLoaded()
                 }}
+                onTestServer={testServer}
+                onStartServer={openRemoteServerStart}
+                onDeployLocalServer={() => setIsDeployLocalModalOpen(true)}
               />
             )
           )}
@@ -681,6 +890,39 @@ function LocalWorkspaceApp({
         onSave={updateServerSettings}
       />
 
+      {activeStartServer && remoteConnection && (
+        <RemoteServerStartModal
+          isOpen={isRemoteStartOpen}
+          server={activeStartServer}
+          firewallCheck={remoteFirewallCheck}
+          startResult={remoteStartResult}
+          logs={remoteStartLogs}
+          error={remoteStartError}
+          isChecking={isCheckingRemoteFirewall}
+          isConfiguring={isConfiguringRemoteFirewall}
+          isStarting={isStartingRemoteServer}
+          onClose={() => {
+            setIsRemoteStartOpen(false)
+            setActiveStartServer(null)
+          }}
+          onRecheck={() => void checkRemoteServerFirewall(activeStartServer)}
+          onConfigureFirewall={() => void configureRemoteServerFirewall(activeStartServer)}
+          onStartServer={() => void startRemoteServer(activeStartServer)}
+        />
+      )}
+
+      {portConflictCheck && activeStartServer && (
+        <ServerPortConflictModal
+          check={portConflictCheck}
+          isKilling={isKillingPorts}
+          onCancel={() => {
+            setPortConflictCheck(null)
+            setActiveStartServer(null)
+          }}
+          onConfirm={() => void killPortConflictsAndContinue(activeStartServer)}
+        />
+      )}
+
       {remoteConnection && (
         <>
           <RemoteSteamCmdModal
@@ -693,12 +935,31 @@ function LocalWorkspaceApp({
             isOpen={isRemoteTerminalModalOpen}
             onClose={() => setIsRemoteTerminalModalOpen(false)}
           />
+          <DeployLocalServerModal
+            isOpen={isDeployLocalModalOpen}
+            connection={remoteConnection}
+            onClose={() => setIsDeployLocalModalOpen(false)}
+            onSuccess={(deployedServerName, deployedServerId) => {
+              window.dispatchEvent(new CustomEvent("pzmm-reveal-server", { detail: { serverId: deployedServerId } }))
+              addNotification({
+                type: "success",
+                title: t("deployLocalServer.successTitle", "Deploy concluído"),
+                message: t("deployLocalServer.successMessage", {
+                  name: deployedServerName,
+                  defaultValue: `Servidor ${deployedServerName} implantado com sucesso na VM.`,
+                }),
+              })
+              void loadServers()
+              void loadMods()
+            }}
+          />
         </>
       )}
 
       <ServerTestPanel
         hasDownloadProgressCard={downloadManager.isDownloading && activeTab !== "download"}
         onNotification={addNotification}
+        onCancelTest={cancelServerTest}
       />
 
       {downloadManager.isDownloading && activeTab !== "download" && (

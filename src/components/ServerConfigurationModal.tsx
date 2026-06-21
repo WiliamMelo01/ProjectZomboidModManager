@@ -540,10 +540,10 @@ function CustomSelect({
           className={`flex w-full items-center justify-between rounded-xl border bg-[#161a1d] px-4 py-3.5 text-sm font-bold transition-all hover:border-white/10 focus:border-orange-500/50 focus:outline-none focus:ring-1 focus:ring-orange-500/20 shadow-inner ${isOpen ? "border-orange-500/50 ring-1 ring-orange-500/20 text-white" : "border-white/5 text-gray-100"}`}
         >
           <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate">{selectedOption.label}</span>
+            <span className="whitespace-normal text-left">{selectedOption.label}</span>
             {isSelectedDefault && <DefaultBadge tone="muted" />}
           </div>
-          <ChevronRight size={18} className={`text-orange-500 transition-transform duration-200 ${isOpen ? "-rotate-90" : "rotate-90"}`} strokeWidth={3} />
+          <ChevronRight size={18} className={`text-orange-500 transition-transform duration-200 shrink-0 ${isOpen ? "-rotate-90" : "rotate-90"}`} strokeWidth={3} />
         </button>
 
         {isOpen && (
@@ -568,7 +568,7 @@ function CustomSelect({
                           : "text-gray-300 font-medium"
                     }`}
                   >
-                    <span className="truncate">{option.label}</span>
+                    <span className="whitespace-normal text-left">{option.label}</span>
                     {isDefault && <DefaultBadge tone="strong" />}
                   </button>
                 );
@@ -617,7 +617,7 @@ function LuaSettingField({ setting, onChange }: { setting: ServerLuaSetting; onC
     <div className="flex flex-col gap-3 rounded-xl border border-white/5 bg-[#1c2126] p-4 transition-all hover:border-white/10 hover:bg-[#1f252a]">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-[10px] font-black uppercase tracking-wider truncate text-gray-400" title={setting.key}>
+          <span className="text-[10px] font-black uppercase tracking-wider whitespace-normal break-all text-gray-400" title={setting.key}>
             {setting.key}
           </span>
         </div>
@@ -826,8 +826,8 @@ function Toggle({ label, checked, onChange, icon }: { label: string; checked: bo
       className="flex w-full items-center justify-between gap-4 rounded-xl border border-white/5 bg-[#1c2126] px-4 py-3 text-left text-sm transition-all hover:border-orange-500/30 hover:bg-[#1f252a] group"
     >
       <span className="flex min-w-0 items-center gap-2.5 text-xs font-bold uppercase italic text-gray-400 group-hover:text-gray-200">
-        {icon && <span className="text-gray-600 transition-colors group-hover:text-orange-500">{icon}</span>}
-        <span className="truncate">{label}</span>
+        {icon && <span className="text-gray-600 transition-colors group-hover:text-orange-500 shrink-0">{icon}</span>}
+        <span className="whitespace-normal leading-tight text-left">{label}</span>
       </span>
       <span className={`h-6 w-11 shrink-0 rounded-full p-1 transition-all ${checked ? "bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.3)]" : "bg-gray-700"}`}>
         <span className={`block h-4 w-4 rounded-full bg-white transition-transform ${checked ? "translate-x-5" : ""}`} />

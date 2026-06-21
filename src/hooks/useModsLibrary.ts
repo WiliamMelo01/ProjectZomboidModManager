@@ -3,7 +3,7 @@ import { useRef, useState } from "react"
 import { getErrorMessage } from "@/lib/errors"
 import { readModsLibraryCache, writeModsLibraryCache } from "@/lib/modsCache"
 import { invokeTauri } from "@/lib/tauri"
-import type { ZomboidMod } from "@/types/mod"
+import type { ZomboidMod, ZomboidModInstallResult } from "@/types/mod"
 
 type UseModsLibraryOptions = {
   listCommand?: string
@@ -13,6 +13,7 @@ type UseModsLibraryOptions = {
   clearCacheCommand?: string
   clearCacheArgs?: Record<string, unknown>
   reloadAfterInstall?: boolean
+  backgroundReloadAfterInstall?: boolean
   useCache?: boolean
   cacheKey?: string
 }
@@ -25,6 +26,7 @@ export function useModsLibrary({
   clearCacheCommand,
   clearCacheArgs,
   reloadAfterInstall = false,
+  backgroundReloadAfterInstall = false,
   useCache = true,
   cacheKey,
 }: UseModsLibraryOptions = {}) {
@@ -79,14 +81,19 @@ export function useModsLibrary({
 
     try {
       const modsToMove = modsToInstall.filter((mod) => !mod.isInstalled && mod.source !== "local")
+      const installResults = new Map<string, ZomboidModInstallResult>()
 
       for (const mod of modsToMove) {
-        await invokeTauri<void>(installCommand, {
+        const result = await invokeTauri<ZomboidModInstallResult | null>(installCommand, {
           ...(installArgs ?? {}),
           packagePath: mod.packagePath,
           modId: mod.id,
           workshopId: mod.workshopId,
         })
+
+        if (result) {
+          installResults.set(mod.id.toLowerCase(), result)
+        }
       }
 
       if (clearCacheCommand) {
@@ -101,15 +108,29 @@ export function useModsLibrary({
       const installedModIds = new Set(modsToMove.map((mod) => mod.id.toLowerCase()))
 
       setMods((currentMods) => {
-        const updatedMods = currentMods.map((mod) =>
-          installedModIds.has(mod.id.toLowerCase())
-            ? { ...mod, isInstalled: true, source: mod.source === "steam" ? "local" : mod.source }
-            : mod,
-        )
+        const updatedMods = currentMods.map((mod) => {
+          const installKey = mod.id.toLowerCase()
+          const installResult = installResults.get(installKey)
+
+          if (!installedModIds.has(installKey)) {
+            return mod
+          }
+
+          return {
+            ...mod,
+            isInstalled: true,
+            source: mod.source === "steam" || mod.source === "steamcmd" ? "local" : mod.source,
+            path: installResult?.targetPath ?? mod.path,
+          }
+        })
 
         void writeModsLibraryCache(updatedMods, cacheKey)
         return updatedMods
       })
+
+      if (backgroundReloadAfterInstall) {
+        void loadMods()
+      }
     } catch (error) {
       setModsError(getErrorMessage(error))
       throw error

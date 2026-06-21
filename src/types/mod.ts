@@ -26,3 +26,10 @@ export type ZomboidMod = {
   variants: ZomboidModVariant[]
   packagePath: string
 }
+
+export type ZomboidModInstallResult = {
+  modId: string
+  workshopId: string
+  targetPath: string
+  wasCopied: boolean
+}

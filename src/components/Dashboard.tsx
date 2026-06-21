@@ -1,4 +1,4 @@
-import { Activity, ChevronRight, Eye, EyeOff, FolderOpen, Plus, RefreshCw, Server, Settings, Star, Trash2, Users, Wifi } from "lucide-react"
+import { Activity, ChevronRight, Eye, EyeOff, FolderOpen, Play, Plus, RefreshCw, Server, Settings, Star, Terminal, Trash2, Users, Wifi } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -16,6 +16,9 @@ type DashboardProps = {
   onDeleteServer: (server: ZomboidServer) => Promise<void>
   isReadOnly?: boolean
   canCreateServer?: boolean
+  onTestServer: (server: ZomboidServer) => void
+  onStartServer: (server: ZomboidServer) => void
+  onDeployLocalServer?: () => void
 }
 
 const HIDDEN_SERVERS_KEY = "pzmm_hidden_servers"
@@ -33,6 +36,9 @@ export function Dashboard({
   onDeleteServer,
   isReadOnly = false,
   canCreateServer = !isReadOnly,
+  onTestServer,
+  onStartServer,
+  onDeployLocalServer,
 }: DashboardProps) {
   const { t } = useTranslation()
   const [hiddenServerIds, setHiddenServerIds] = useState<Set<string>>(new Set())
@@ -61,6 +67,26 @@ export function Dashboard({
         console.error("Failed to parse favorite servers", e)
       }
     }
+  }, [])
+
+  useEffect(() => {
+    const handleRevealServer = (event: Event) => {
+      const serverId = (event as CustomEvent<{ serverId?: string }>).detail?.serverId
+      if (!serverId) return
+
+      setHiddenServerIds((current) => {
+        if (!current.has(serverId)) return current
+
+        const next = new Set(current)
+        next.delete(serverId)
+        window.localStorage.setItem(HIDDEN_SERVERS_KEY, JSON.stringify(Array.from(next)))
+        return next
+      })
+      setShowHidden(false)
+    }
+
+    window.addEventListener("pzmm-reveal-server", handleRevealServer)
+    return () => window.removeEventListener("pzmm-reveal-server", handleRevealServer)
   }, [])
 
   const toggleHideServer = (serverId: string) => {
@@ -165,6 +191,16 @@ export function Dashboard({
               </button>
             ))}
           </div>
+
+          {isReadOnly && onDeployLocalServer && (
+            <button
+              className="flex items-center justify-center gap-2 bg-orange-600/90 hover:bg-orange-500 text-white font-bold px-4 py-2 rounded-xl transition-all border border-orange-500/20 shadow-lg shadow-orange-950/20 text-xs uppercase tracking-wider"
+              onClick={onDeployLocalServer}
+            >
+              <Server size={16} />
+              {t("dashboard.deployLocalServer", "Deploy servidor local")}
+            </button>
+          )}
 
           <button
             className="flex items-center justify-center gap-2 bg-[#2b3238] border border-white/5 text-gray-300 hover:text-white hover:border-orange-400/30 px-4 py-2 rounded-xl transition-all"
@@ -273,24 +309,42 @@ export function Dashboard({
               </>
             )}
           </button>
-          {!isReadOnly && (
-            <>
-              <button
-                onClick={() => configureServer(contextMenu.server)}
-                className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-orange-500/10 hover:text-orange-300"
-              >
-                <Settings size={16} />
-                {t("dashboard.configure")}
-              </button>
-              <button
-                onClick={() => requestDeleteServer(contextMenu.server)}
-                className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200"
-              >
-                <Trash2 size={16} />
-                {t("dashboard.delete")}
-              </button>
-            </>
+          <button
+            onClick={() => {
+              onTestServer(contextMenu.server)
+              setContextMenu(null)
+            }}
+            className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-orange-500/10 hover:text-orange-300"
+          >
+            <Terminal size={16} />
+            {t("serverDetail.test")}
+          </button>
+          {isReadOnly && (
+            <button
+              onClick={() => {
+                onStartServer(contextMenu.server)
+                setContextMenu(null)
+              }}
+              className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-emerald-300 transition-colors hover:bg-emerald-500/10 hover:text-emerald-200"
+            >
+              <Play size={16} />
+              {t("serverDetail.start")}
+            </button>
           )}
+          <button
+            onClick={() => configureServer(contextMenu.server)}
+            className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-orange-500/10 hover:text-orange-300"
+          >
+            <Settings size={16} />
+            {t("dashboard.configure")}
+          </button>
+          <button
+            onClick={() => requestDeleteServer(contextMenu.server)}
+            className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200"
+          >
+            <Trash2 size={16} />
+            {t("dashboard.delete")}
+          </button>
         </div>
       )}
 

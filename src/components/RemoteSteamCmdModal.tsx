@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event"
 import { CheckCircle2, FileArchive, HardDriveDownload, Loader2, Save, UploadCloud, X } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
+import { useTranslation } from "react-i18next"
 
 import type { RemoteConnectionDraft, RemoteWorkspaceConfig } from "@/lib/commandRunner"
 import { getErrorMessage } from "@/lib/errors"
@@ -75,6 +76,12 @@ function joinWindowsPath(directory: string, fileName: string) {
   return `${directory.replace(/[\\/]+$/, "")}\\${fileName}`
 }
 
+function parentWindowsPath(path: string) {
+  const normalized = path.replace(/\//g, "\\")
+  const index = normalized.lastIndexOf("\\")
+  return index > 0 ? normalized.slice(0, index) : normalized
+}
+
 function isLegacyPzManagerPath(path?: string) {
   return Boolean(path?.trim().replace(/\//g, "\\").toLowerCase().startsWith("c:\\pzmanager\\"))
 }
@@ -84,8 +91,9 @@ function cleanLegacyPath(path?: string) {
 }
 
 export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteamCmdModalProps) {
+  const { t } = useTranslation()
   const defaultSteamcmdDir = useMemo(() => remoteSteamcmdDir(connection.username), [connection.username])
-  const defaultHelperPath = useMemo(() => joinWindowsPath(remoteHelperDir(connection.username), "pzmm-helper.exe"), [connection.username])
+  const defaultHelperDir = useMemo(() => remoteHelperDir(connection.username), [connection.username])
   const defaultZomboidServerDir = useMemo(() => remoteZomboidServerDir(connection.username), [connection.username])
   const [config, setConfig] = useState<RemoteWorkspaceConfig | null>(null)
   const [activeStep, setActiveStep] = useState(1)
@@ -244,6 +252,8 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
 
       if (result.success) {
         setActiveStep(steamcmdStatus === "success" ? (zomboidStatus === "success" ? 4 : 3) : 2)
+      } else {
+        setError(formatSetupFailure(result, "Remote setup upload failed."))
       }
     } catch (setupError) {
       setHelperStatus("error")
@@ -416,7 +426,7 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
               <FileArchive size={22} />
             </div>
             <div>
-              <h2 className="text-lg font-black text-white">Remote server setup</h2>
+              <h2 className="text-lg font-black text-white">{t("remoteSetup.modalTitle")}</h2>
               <p className="text-xs text-gray-500">{connection.username}@{connection.host}</p>
             </div>
           </div>
@@ -434,37 +444,45 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
             <div className="space-y-4">
               <SetupStep
                 index={1}
-                title="Remote helper"
-                description="Send pzmm-helper.exe so the VM can run the same workspace logic as local."
+                title={t("remoteSetup.step1Title")}
+                description={t("remoteSetup.step1Description")}
                 status={helperStatus}
                 active={activeStep === 1}
+                onClick={() => setActiveStep(1)}
+                disabled={isRunning}
               />
               <SetupStep
                 index={2}
-                title="SteamCMD"
-                description="Install steamcmd.exe in the same managed pool layout used by the local workspace."
+                title={t("remoteSetup.step2Title")}
+                description={t("remoteSetup.step2Description")}
                 status={steamcmdStatus}
                 active={activeStep === 2}
+                onClick={() => setActiveStep(2)}
+                disabled={isRunning}
               />
               <SetupStep
                 index={3}
-                title="Zomboid server"
-                description="Use an existing dedicated server folder or download it through SteamCMD."
+                title={t("remoteSetup.step3Title")}
+                description={t("remoteSetup.step3Description")}
                 status={zomboidStatus}
                 active={activeStep === 3}
+                onClick={() => setActiveStep(3)}
+                disabled={isRunning}
               />
               <SetupStep
                 index={4}
-                title="Ready"
-                description="Remote paths are saved in remote-workspace.ini."
+                title={t("remoteSetup.step4Title")}
+                description={t("remoteSetup.step4Description")}
                 status={helperStatus === "success" && steamcmdStatus === "success" && zomboidStatus === "success" ? "success" : "idle"}
                 active={activeStep === 4}
+                onClick={() => setActiveStep(4)}
+                disabled={isRunning}
               />
             </div>
 
             {connection.authMethod !== "key" && (
               <div className="mt-6 rounded-[8px] border border-yellow-400/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100">
-                Remote setup currently requires SSH private key authentication.
+                {t("remoteSetup.sshKeyNotice")}
               </div>
             )}
           </aside>
@@ -473,24 +491,24 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
             {activeStep === 1 && (
               <section className="space-y-5">
                 <div>
-                  <h3 className="text-xl font-black text-white">Install remote helper</h3>
+                  <h3 className="text-xl font-black text-white">{t("remoteSetup.step1Header")}</h3>
                   <p className="mt-1 text-sm text-gray-400">
-                    This sends pzmm-helper.exe to the VM so remote scans and configuration use the same logic as the local workspace.
+                    {t("remoteSetup.step1Subheader")}
                   </p>
                 </div>
 
                 <div className="grid gap-4">
                   <RemotePathInput
-                    label="Remote helper executable"
-                    value={helperResult?.remotePath || defaultHelperPath}
-                    placeholder={defaultHelperPath}
+                    label="Remote setup folder"
+                    value={helperResult?.remotePath ? parentWindowsPath(helperResult.remotePath) : defaultHelperDir}
+                    placeholder={defaultHelperDir}
                     disabled
                     onChange={() => undefined}
                   />
                 </div>
 
                 <ResultPanel
-                  title="Remote helper upload"
+                  title="Remote setup upload"
                   status={helperStatus}
                   result={helperResult}
                   liveLines={liveLogLines.filter((line) => line.phase === "helper")}
@@ -505,7 +523,7 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                     className="flex items-center justify-center gap-2 rounded-[8px] bg-cyan-500 px-5 py-2 text-sm font-black text-white transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-500"
                   >
                     {helperStatus === "running" ? <Loader2 size={17} className="animate-spin" /> : <UploadCloud size={17} />}
-                    {helperStatus === "running" ? "Sending..." : "Send helper"}
+                    {helperStatus === "running" ? "Sending..." : "Send setup"}
                   </button>
                 </div>
               </section>
@@ -514,22 +532,22 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
             {activeStep === 2 && (
               <section className="space-y-5">
                 <div>
-                  <h3 className="text-xl font-black text-white">Install SteamCMD</h3>
+                  <h3 className="text-xl font-black text-white">{t("remoteSetup.step2Header")}</h3>
                   <p className="mt-1 text-sm text-gray-400">
-                    This mirrors the local managed SteamCMD pool on the remote Windows user profile.
+                    {t("remoteSetup.step2Subheader")}
                   </p>
                 </div>
 
                 <div className="grid gap-4">
                   <RemotePathInput
-                    label="Remote SteamCMD pool instance"
+                    label={t("remoteSetup.step2DirLabel")}
                     value={steamcmdDir}
                     placeholder={defaultSteamcmdDir}
                     disabled={isRunning}
                     onChange={setSteamcmdDir}
                   />
                   <RemotePathInput
-                    label="steamcmd.exe"
+                    label={t("remoteSetup.step2PathLabel")}
                     value={resolvedSteamcmdPath}
                     placeholder={joinWindowsPath(defaultSteamcmdDir, "steamcmd.exe")}
                     disabled
@@ -538,7 +556,7 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                 </div>
 
                 <ResultPanel
-                  title="SteamCMD upload and extract"
+                   title={t("remoteSetup.step2PanelTitle")}
                   status={steamcmdStatus}
                   result={uploadResult}
                   liveLines={liveLogLines.filter((line) => line.phase === "steamcmd")}
@@ -552,7 +570,7 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                     onClick={() => setActiveStep(1)}
                     className="rounded-[8px] border border-white/10 px-4 py-2 text-sm font-bold text-gray-300 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    Back
+                    {t("remoteSetup.btnBack")}
                   </button>
                   <button
                     type="button"
@@ -561,7 +579,7 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                     className="flex items-center justify-center gap-2 rounded-[8px] bg-cyan-500 px-5 py-2 text-sm font-black text-white transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-500"
                   >
                     {steamcmdStatus === "running" ? <Loader2 size={17} className="animate-spin" /> : <UploadCloud size={17} />}
-                    {steamcmdStatus === "running" ? "Installing..." : "Install SteamCMD"}
+                    {steamcmdStatus === "running" ? t("remoteSetup.step2Installing") : t("remoteSetup.step2InstallBtn")}
                   </button>
                 </div>
               </section>
@@ -570,37 +588,37 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
             {activeStep === 3 && (
               <section className="space-y-5">
                 <div>
-                  <h3 className="text-xl font-black text-white">Configure Project Zomboid server</h3>
+                  <h3 className="text-xl font-black text-white">{t("remoteSetup.step3Header")}</h3>
                   <p className="mt-1 text-sm text-gray-400">
-                    Point to an existing dedicated server installation, or let SteamCMD download app 380870.
+                    {t("remoteSetup.step3Subheader")}
                   </p>
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2">
                   <ModeButton
                     active={zomboidMode === "existing"}
-                    title="Already installed"
-                    description="Save the remote folder and launch file path."
+                    title={t("remoteSetup.step3ModeExistingTitle")}
+                    description={t("remoteSetup.step3ModeExistingDesc")}
                     onClick={() => setZomboidMode("existing")}
                   />
                   <ModeButton
                     active={zomboidMode === "download"}
-                    title="Download with SteamCMD"
-                    description="Run app_update 380870 validate on the VM."
+                    title={t("remoteSetup.step3ModeDownloadTitle")}
+                    description={t("remoteSetup.step3ModeDownloadDesc")}
                     onClick={() => setZomboidMode("download")}
                   />
                 </div>
 
                 <div className="grid gap-4">
                   <RemotePathInput
-                    label="Remote Zomboid server folder"
+                    label={t("remoteSetup.step3DirLabel")}
                     value={zomboidServerDir}
                     placeholder={defaultZomboidServerDir}
                     disabled={isRunning}
                     onChange={setZomboidServerDir}
                   />
                   <RemotePathInput
-                    label="Server launch path"
+                    label={t("remoteSetup.step3PathLabel")}
                     value={resolvedZomboidServerPath}
                     placeholder={joinWindowsPath(defaultZomboidServerDir, "StartServer64.bat")}
                     disabled={isRunning || zomboidMode === "download"}
@@ -610,7 +628,7 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
 
                 {zomboidMode === "download" && (
                   <ResultPanel
-                    title="Dedicated server install"
+                    title={t("remoteSetup.step3PanelTitle")}
                     status={zomboidStatus}
                     result={installResult}
                     liveLines={liveLogLines.filter((line) => line.phase === "zomboid-server")}
@@ -625,7 +643,7 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                     onClick={() => setActiveStep(2)}
                     className="rounded-[8px] border border-white/10 px-4 py-2 text-sm font-bold text-gray-300 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    Back
+                    {t("remoteSetup.btnBack")}
                   </button>
                   {zomboidMode === "existing" ? (
                     <button
@@ -635,7 +653,7 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                       className="flex items-center justify-center gap-2 rounded-[8px] bg-cyan-500 px-5 py-2 text-sm font-black text-white transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-500"
                     >
                       {zomboidStatus === "running" ? <Loader2 size={17} className="animate-spin" /> : <Save size={17} />}
-                      {zomboidStatus === "running" ? "Saving..." : "Save existing path"}
+                      {zomboidStatus === "running" ? t("remoteSetup.step3Saving") : t("remoteSetup.step3SaveBtn")}
                     </button>
                   ) : (
                     <button
@@ -645,7 +663,7 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                       className="flex items-center justify-center gap-2 rounded-[8px] bg-cyan-500 px-5 py-2 text-sm font-black text-white transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-500"
                     >
                       {zomboidStatus === "running" ? <Loader2 size={17} className="animate-spin" /> : <HardDriveDownload size={17} />}
-                      {zomboidStatus === "running" ? "Downloading..." : "Download server"}
+                      {zomboidStatus === "running" ? t("remoteSetup.step3Downloading") : t("remoteSetup.step3DownloadBtn")}
                     </button>
                   )}
                 </div>
@@ -655,16 +673,16 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
             {activeStep === 4 && (
               <section className="space-y-5">
                 <div>
-                  <h3 className="text-xl font-black text-white">Remote workspace paths saved</h3>
+                  <h3 className="text-xl font-black text-white">{t("remoteSetup.step4Header")}</h3>
                   <p className="mt-1 text-sm text-gray-400">
-                    These paths are now stored in remote-workspace.ini and will be reused by the remote workspace.
+                    {t("remoteSetup.step4Subheader")}
                   </p>
                 </div>
                 <div className="grid gap-3 rounded-[8px] border border-green-400/20 bg-green-500/10 p-4 text-sm text-green-100">
-                  <SavedPath label="Remote helper" value={helperResult?.remotePath || defaultHelperPath} />
-                  <SavedPath label="SteamCMD" value={resolvedSteamcmdPath} />
-                  <SavedPath label="Zomboid server folder" value={zomboidServerDir} />
-                  <SavedPath label="Server launch path" value={resolvedZomboidServerPath} />
+                  <SavedPath label={t("remoteSetup.step1Title")} value={helperResult?.remotePath ? parentWindowsPath(helperResult.remotePath) : defaultHelperDir} />
+                  <SavedPath label={t("remoteSetup.step2Title")} value={resolvedSteamcmdPath} />
+                  <SavedPath label={t("remoteSetup.step3Title")} value={zomboidServerDir} />
+                  <SavedPath label={t("remoteSetup.step3PathLabel")} value={resolvedZomboidServerPath} />
                 </div>
                 <div className="flex justify-between gap-3">
                   <button
@@ -672,14 +690,14 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                     onClick={() => setActiveStep(3)}
                     className="rounded-[8px] border border-white/10 px-4 py-2 text-sm font-bold text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
                   >
-                    Back
+                    {t("remoteSetup.btnBack")}
                   </button>
                   <button
                     type="button"
                     onClick={onClose}
                     className="rounded-[8px] bg-cyan-500 px-5 py-2 text-sm font-black text-white transition-colors hover:bg-cyan-400"
                   >
-                    Done
+                    {t("remoteSetup.btnDone")}
                   </button>
                 </div>
               </section>
@@ -707,15 +725,28 @@ function SetupStep({
   description,
   status,
   active,
+  onClick,
+  disabled,
 }: {
   index: number
   title: string
   description: string
   status: StepStatus
   active: boolean
+  onClick?: () => void
+  disabled?: boolean
 }) {
   return (
-    <div className={`rounded-[8px] border p-4 ${active ? "border-cyan-300/30 bg-cyan-500/10" : "border-white/5 bg-[#22272b]"}`}>
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`w-full rounded-[8px] border p-4 text-left transition-all ${
+        active
+          ? "border-cyan-300/30 bg-cyan-500/10"
+          : "border-white/5 bg-[#22272b] hover:border-white/10 hover:bg-[#272e34]"
+      } disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[#22272b] disabled:hover:border-white/5`}
+    >
       <div className="flex items-start gap-3">
         <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] text-sm font-black ${
           status === "success"
@@ -733,7 +764,7 @@ function SetupStep({
           <p className="mt-1 text-xs leading-5 text-gray-500">{description}</p>
         </div>
       </div>
-    </div>
+    </button>
   )
 }
 
@@ -856,6 +887,14 @@ function SavedPath({ label, value }: { label: string; value: string }) {
   )
 }
 
+function formatSetupFailure(result: RemoteSetupResult, fallback: string) {
+  const details = [result.stderr, result.stdout]
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .join("\n")
+
+  return details ? `${fallback}\n\n${details}` : fallback
+}
 function formatResultOutput(result: RemoteSetupResult) {
   const output = [
     `exit ${result.exitCode ?? "-"}`,

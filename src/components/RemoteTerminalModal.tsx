@@ -58,7 +58,7 @@ export function RemoteTerminalModal({ connection, isOpen, onClose }: RemoteTermi
               <SquareTerminal size={22} />
             </div>
             <div>
-              <h2 className="text-lg font-black text-white">Remote VM terminal</h2>
+              <h2 className="text-lg font-black text-white">Terminal</h2>
               <p className="text-xs text-gray-500">{connection.username}@{connection.host}</p>
             </div>
           </div>

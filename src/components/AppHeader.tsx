@@ -97,7 +97,7 @@ export function AppHeader({
               onClick={onConfigureRemoteSteamCmd}
             >
               <Wrench size={20} />
-              <span>Setup remoto</span>
+              <span>{t("header.remoteSetup")}</span>
             </button>
 
             <button
@@ -105,7 +105,7 @@ export function AppHeader({
               onClick={onOpenRemoteTerminal}
             >
               <SquareTerminal size={20} />
-              <span>Terminal VM</span>
+              <span>Terminal</span>
             </button>
           </>
         )}

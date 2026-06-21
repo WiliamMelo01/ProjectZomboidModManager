@@ -17,7 +17,6 @@ import {
 import { ServerModContextMenu } from "@/components/server/ServerModContextMenu"
 import { ServerModDetailsModal } from "@/components/server/ServerModDetailsModal"
 import { ServerModList } from "@/components/server/ServerModList"
-import { ServerPortConflictModal } from "@/components/server/ServerPortConflictModal"
 import { buildActivationDependencyPlan, isLocalMod, normalizeModId } from "@/lib/modDependencies"
 import { resolveModForBuild } from "@/lib/modBuilds"
 import { invokeTauri } from "@/lib/tauri"
@@ -25,7 +24,6 @@ import type { RemoteConnectionDraft } from "@/lib/commandRunner"
 import { i18n } from "@/i18n"
 import type { ZomboidMod } from "@/types/mod"
 import type { ZomboidServer } from "@/types/server"
-import type { ServerPortCheck } from "@/components/server/ServerPortConflictModal"
 
 type ServerDetailProps = {
   server: ZomboidServer | null
@@ -42,6 +40,13 @@ type ServerDetailProps = {
   onChangeBuild: (gameBuild: "b41" | "b42") => Promise<void>
   onConfigureServer: (server: ZomboidServer) => void
   remoteConnection?: RemoteConnectionDraft | null
+  isTestingServer: boolean
+  isCheckingPorts: boolean
+  isCheckingRemoteFirewall: boolean
+  isConfiguringRemoteFirewall: boolean
+  isStartingRemoteServer: boolean
+  onTestServer: (server: ZomboidServer) => void
+  onStartRemoteServer: (server: ZomboidServer) => void
 }
 
 const MOVE_MOD_WARNING_KEY = "pzmm_move_mod_warning_modal_seen"
@@ -74,6 +79,13 @@ export function ServerDetail({
   onChangeBuild,
   onConfigureServer,
   remoteConnection = null,
+  isTestingServer,
+  isCheckingPorts,
+  isCheckingRemoteFirewall,
+  isConfiguringRemoteFirewall,
+  isStartingRemoteServer,
+  onTestServer,
+  onStartRemoteServer,
 }: ServerDetailProps) {
   const { t } = useTranslation()
   const [search, setSearch] = useState("")
@@ -84,10 +96,6 @@ export function ServerDetail({
   const [contextMenu, setContextMenu] = useState<{ mod: ZomboidMod; x: number; y: number } | null>(null)
   const [showMoveWarning, setShowMoveWarning] = useState<MoveModRequest | null>(null)
   const [dontShowAgainMove, setDontShowAgainMove] = useState(false)
-  const [isTestingServer, setIsTestingServer] = useState(false)
-  const [portConflictCheck, setPortConflictCheck] = useState<ServerPortCheck | null>(null)
-  const [isCheckingPorts, setIsCheckingPorts] = useState(false)
-  const [isKillingPorts, setIsKillingPorts] = useState(false)
   const [mapInstallError, setMapInstallError] = useState<string | null>(null)
   const [serverFileOpenError, setServerFileOpenError] = useState<string | null>(null)
   const [pendingMapInstall, setPendingMapInstall] = useState<ZomboidMod | null>(null)
@@ -299,66 +307,6 @@ export function ServerDetail({
     }
   }
 
-  const testServer = async (skipPortCheck = false) => {
-    if (isCurrentServerTesting) {
-      window.dispatchEvent(new CustomEvent("pzmm-open-server-test-panel", { detail: { serverId: server.id } }))
-      return
-    }
-
-    if (!skipPortCheck) {
-      setIsCheckingPorts(true)
-
-      try {
-        const check = await invokeTauri<ServerPortCheck>("check_zomboid_server_ports", {
-          serverId: server.id,
-        })
-
-        if (check.usages.length > 0) {
-          setPortConflictCheck(check)
-          return
-        }
-      } catch (error) {
-        window.dispatchEvent(new CustomEvent("pzmm-open-server-test-panel", { detail: { serverId: server.id, error: getErrorMessage(error) } }))
-        return
-      } finally {
-        setIsCheckingPorts(false)
-      }
-    }
-
-    setIsTestingServer(true)
-    window.dispatchEvent(new CustomEvent("pzmm-open-server-test-panel", { detail: { serverId: server.id } }))
-
-    try {
-      await invokeTauri("start_zomboid_server_test", {
-        serverId: server.id,
-      })
-    } catch (error) {
-      window.dispatchEvent(new CustomEvent("pzmm-open-server-test-panel", { detail: { serverId: server.id, error: getErrorMessage(error) } }))
-    } finally {
-      setIsTestingServer(false)
-    }
-  }
-
-  const killPortConflictsAndContinue = async () => {
-    if (!portConflictCheck) {
-      return
-    }
-
-    setIsKillingPorts(true)
-
-    try {
-      await invokeTauri("kill_processes_by_pid", {
-        pids: Array.from(new Set(portConflictCheck.usages.map((usage) => usage.pid))),
-      })
-      setPortConflictCheck(null)
-      await testServer(true)
-    } catch (error) {
-      window.dispatchEvent(new CustomEvent("pzmm-open-server-test-panel", { detail: { serverId: server.id, error: getErrorMessage(error) } }))
-    } finally {
-      setIsKillingPorts(false)
-    }
-  }
-
   const openServerFile = async () => {
     setServerFileOpenError(null)
 
@@ -450,13 +398,24 @@ export function ServerDetail({
                 <span>{t("serverDetail.configure")}</span>
              </button>
              <button
-                onClick={() => void testServer()}
+                onClick={() => void onTestServer(server)}
                 disabled={isCurrentServerTesting || isCheckingPorts}
                 className="flex items-center gap-2 rounded-xl border border-orange-500/20 bg-orange-500/10 px-4 py-2 text-sm font-black text-orange-400 transition-all hover:bg-orange-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
              >
                 {isCurrentServerTesting || isCheckingPorts ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
                 <span>{isCheckingPorts ? t("serverDetail.checkingPorts") : isCurrentServerTesting ? t("serverDetail.testing") : t("serverDetail.test")}</span>
              </button>
+             {remoteConnection && (
+               <button
+                  type="button"
+                  onClick={() => void onStartRemoteServer(server)}
+                  disabled={isCheckingRemoteFirewall || isConfiguringRemoteFirewall || isStartingRemoteServer}
+                  className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-sm font-black text-emerald-300 transition-all hover:bg-emerald-500 hover:text-[#071014] disabled:cursor-not-allowed disabled:opacity-60"
+               >
+                  {isCheckingRemoteFirewall || isConfiguringRemoteFirewall || isStartingRemoteServer ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
+                  <span>Iniciar remoto</span>
+               </button>
+             )}
              <div className="bg-[#22272b] px-4 py-2 rounded-xl border border-white/5 text-center">
                 <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest">{t("serverDetail.activeMods")}</p>
                 <p className="text-xl font-black text-orange-400">{activatedMods.length}</p>
@@ -551,14 +510,7 @@ export function ServerDetail({
         <ServerModDetailsModal mod={selectedMod} onClose={() => setSelectedMod(null)} />
       )}
 
-      {portConflictCheck && (
-        <ServerPortConflictModal
-          check={portConflictCheck}
-          isKilling={isKillingPorts}
-          onCancel={() => setPortConflictCheck(null)}
-          onConfirm={() => void killPortConflictsAndContinue()}
-        />
-      )}
+
 
       {/* Confirmation Modal */}
       {confirmDelete && (
@@ -630,8 +582,6 @@ export function ServerDetail({
           onClose={() => setShowIncompatibleMods(false)}
         />
       )}
-
-      {/* Missing Dependency Modal (Not in Library) */}
       {missingDependency && (
         <MissingDependencyModal
           mod={missingDependency.mod}

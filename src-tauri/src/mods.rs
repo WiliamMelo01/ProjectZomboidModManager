@@ -1,4 +1,5 @@
 use crate::models::ZomboidMod;
+use crate::models::ZomboidModInstallResult;
 use crate::run_blocking;
 use crate::util::{directory_size, format_size};
 use std::path::PathBuf;
@@ -56,6 +57,6 @@ pub(crate) fn install_zomboid_mod(
     package_path: String,
     mod_id: String,
     workshop_id: String,
-) -> Result<(), String> {
+) -> Result<ZomboidModInstallResult, String> {
     install::install_zomboid_mod_impl(package_path, mod_id, workshop_id)
 }

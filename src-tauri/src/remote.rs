@@ -1,20 +1,24 @@
 use crate::i18n::text;
 use crate::models::{
-    AppSettings, ModLocation, RemoteAppSettingsRequest, RemoteHelperSetupResult,
-    RemoteModLocationRequest, RemoteServerConnectionRequest, RemoteServerConnectionResult,
+    AppSettings, DeleteServerResult, ModLocation, RemoteAppSettingsRequest,
+    RemoteHelperSetupResult, RemoteModLocationRequest, RemoteServerActionResult,
+    RemoteServerConnectionRequest, RemoteServerConnectionResult, RemoteServerDeployRequest,
+    RemoteServerDeployResult, RemoteServerFirewallCheck, RemoteServerLatencyResult,
     RemoteSetupLogEvent, RemoteSteamCmdUploadRequest, RemoteSteamCmdUploadResult,
     RemoteWorkspaceConfig, RemoteZomboidServerInstallRequest, RemoteZomboidServerInstallResult,
-    ServerIniSettings, ServerLuaSetting, ServerLuaSettings, TerminalCommandRequest,
-    TerminalCommandResult, WorkshopDownloadEvent, WorkshopDownloadFailedItem,
-    WorkshopDownloadLogEvent, WorkshopDownloadResult, ZomboidServer,
+    ServerIniSettings, ServerLuaSetting, ServerLuaSettings, ServerTestEvent, ServerTestResult,
+    ServerTestStarted, TerminalCommandRequest, TerminalCommandResult, WorkshopDownloadEvent,
+    WorkshopDownloadFailedItem, WorkshopDownloadLogEvent, WorkshopDownloadResult,
+    ZomboidModInstallResult, ZomboidServer,
 };
+use crate::mods::{list_zomboid_mods_impl, parse_server_mod_ids};
 #[cfg(windows)]
 use crate::util::hide_command_window;
 use crate::util::{read_ini_value, read_ini_values, read_text_lossy, replace_or_append_ini_value};
 use crate::workshop::api::{fetch_steam_workshop_collection_items, validate_workshop_id};
 use crate::{app_config_dir, run_blocking, steamcmd_zip_resource_path};
 use base64::Engine;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::hash_map::DefaultHasher,
@@ -23,21 +27,157 @@ use std::{
     hash::{Hash, Hasher},
     io::{BufRead, BufReader, Write},
     net::{TcpStream, ToSocketAddrs},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Output, Stdio},
-    sync::mpsc,
+    sync::{mpsc, Mutex, OnceLock},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tauri::Emitter;
 
 const REMOTE_CONNECT_TIMEOUT_SECONDS: u64 = 5;
+
+static VERIFIED_REMOTE_HELPERS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 #[tauri::command]
 pub(crate) async fn test_remote_server_connection(
     connection: RemoteServerConnectionRequest,
 ) -> Result<RemoteServerConnectionResult, String> {
     run_blocking(move || test_remote_server_connection_impl(connection)).await
+}
+
+#[tauri::command]
+pub(crate) async fn test_remote_server_latency(
+    connection: RemoteServerConnectionRequest,
+) -> Result<RemoteServerLatencyResult, String> {
+    run_blocking(move || test_remote_server_latency_impl(connection)).await
+}
+
+#[tauri::command]
+pub(crate) fn start_remote_zomboid_server_test(
+    app: tauri::AppHandle,
+    connection: RemoteServerConnectionRequest,
+    server_id: String,
+) -> Result<ServerTestStarted, String> {
+    let server_id = server_id.trim().to_string();
+
+    if server_id.is_empty() {
+        return Err(text(
+            "Invalid server for testing.",
+            "Servidor invalido para teste.",
+        )
+        .to_string());
+    }
+
+    let config =
+        get_remote_workspace_config_impl()?.unwrap_or_else(default_remote_workspace_config);
+    let server_launch_path = config.remote_zomboid_server_path.trim().to_string();
+
+    if server_launch_path.is_empty() {
+        return Err(text(
+            "Configure the remote Project Zomboid server path before testing the server.",
+            "Configure o caminho do servidor Project Zomboid remoto antes de testar o servidor.",
+        )
+        .to_string());
+    }
+
+    let event_server_id = server_id.clone();
+    thread::spawn(move || {
+        if let Err(error) = run_remote_zomboid_server_test_streaming(
+            &app,
+            &connection,
+            &event_server_id,
+            &server_launch_path,
+        ) {
+            let _ = app.emit(
+                "server-test-event",
+                ServerTestEvent {
+                    server_id: event_server_id,
+                    event: "error".to_string(),
+                    timeout_seconds: None,
+                    line: None,
+                    result: None,
+                    error: Some(error),
+                },
+            );
+        }
+    });
+
+    Ok(ServerTestStarted { server_id })
+}
+
+#[tauri::command]
+pub(crate) async fn cancel_remote_zomboid_server_test(
+    connection: RemoteServerConnectionRequest,
+    server_id: String,
+) -> Result<(), String> {
+    run_blocking(move || {
+        let _value: Value = run_remote_helper_json(
+            &connection,
+            "cancel-server-test",
+            Some(&serde_json::json!({ "serverId": server_id })),
+        )?;
+        Ok(())
+    })
+    .await
+}
+#[tauri::command]
+pub(crate) async fn check_remote_zomboid_server_firewall(
+    connection: RemoteServerConnectionRequest,
+    server_id: String,
+) -> Result<RemoteServerFirewallCheck, String> {
+    run_blocking(move || {
+        run_remote_helper_json(
+            &connection,
+            "check-server-firewall",
+            Some(&serde_json::json!({ "serverId": server_id })),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub(crate) async fn configure_remote_zomboid_server_firewall(
+    connection: RemoteServerConnectionRequest,
+    server_id: String,
+) -> Result<RemoteServerActionResult, String> {
+    run_blocking(move || {
+        run_remote_helper_json(
+            &connection,
+            "configure-server-firewall",
+            Some(&serde_json::json!({ "serverId": server_id })),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub(crate) async fn start_remote_zomboid_server(
+    connection: RemoteServerConnectionRequest,
+    server_id: String,
+) -> Result<RemoteServerActionResult, String> {
+    run_blocking(move || {
+        let config = get_remote_workspace_config_impl()?.unwrap_or_else(default_remote_workspace_config);
+        let server_launch_path = config.remote_zomboid_server_path.trim().to_string();
+
+        if server_launch_path.is_empty() {
+            return Err(text(
+                "Configure the remote Project Zomboid server path before starting the server.",
+                "Configure o caminho do servidor Project Zomboid remoto antes de iniciar o servidor.",
+            )
+            .to_string());
+        }
+
+        run_remote_helper_json(
+            &connection,
+            "start-server",
+            Some(&serde_json::json!({
+                "serverId": server_id,
+                "serverLaunchPath": server_launch_path,
+            })),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -151,6 +291,18 @@ pub(crate) async fn clear_remote_zomboid_mods_cache(
     run_blocking(move || {
         let _value: Value =
             run_remote_helper_json(&connection, "clear-mods-cache", Option::<&Value>::None)?;
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+pub(crate) async fn clear_remote_zomboid_mods_and_images_cache(
+    connection: RemoteServerConnectionRequest,
+) -> Result<(), String> {
+    run_blocking(move || {
+        let _value: Value =
+            run_remote_helper_json(&connection, "clear-mods-cache", Option::<&Value>::None)?;
         clear_remote_image_cache(&connection)?;
         Ok(())
     })
@@ -177,6 +329,781 @@ pub(crate) async fn create_remote_zomboid_server(
                 "gameBuild": game_build,
                 "maxPlayers": max_players,
             })),
+        )
+    })
+    .await
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeployProgressPayload {
+    status: String,
+    detail: Option<String>,
+}
+
+#[tauri::command]
+pub(crate) async fn deploy_local_zomboid_server_to_remote(
+    app: tauri::AppHandle,
+    request: RemoteServerDeployRequest,
+) -> Result<RemoteServerDeployResult, String> {
+    run_blocking(move || deploy_local_zomboid_server_to_remote_impl(&app, request)).await
+}
+
+fn load_mods_from_cache() -> Option<Vec<crate::models::ZomboidMod>> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct CachedModsFileMin {
+        version: u32,
+        entries: HashMap<String, CachedModEntryMin>,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct CachedModEntryMin {
+        mod_item: crate::models::ZomboidMod,
+    }
+
+    let config_dir = app_config_dir().ok()?;
+    let cache_file = config_dir.join("mods-library-cache.json");
+    if !cache_file.is_file() {
+        return None;
+    }
+    let content = fs::read_to_string(cache_file).ok()?;
+    let parsed: CachedModsFileMin = serde_json::from_str(&content).ok()?;
+    if parsed.version != 1 {
+        return None;
+    }
+    let mods = parsed
+        .entries
+        .into_values()
+        .map(|entry| entry.mod_item)
+        .collect();
+    Some(mods)
+}
+
+fn deploy_local_zomboid_server_to_remote_impl(
+    app: &tauri::AppHandle,
+    request: RemoteServerDeployRequest,
+) -> Result<RemoteServerDeployResult, String> {
+    let connection = &request.connection;
+    let server_id = &request.server_id;
+
+    if server_id.trim().is_empty() {
+        return Err("Server ID cannot be empty.".to_string());
+    }
+
+    // 1. Locate local configuration files
+    let _ = app.emit(
+        "deploy-progress",
+        DeployProgressPayload {
+            status: "locating_configs".to_string(),
+            detail: None,
+        },
+    );
+    let local_server_dir = crate::zomboid_server_dir()?;
+    let local_zomboid_dir = local_server_dir
+        .parent()
+        .ok_or_else(|| "Could not resolve local Zomboid folder.".to_string())?
+        .to_path_buf();
+    let ini_path = local_server_dir.join(format!("{server_id}.ini"));
+    let lua_path = local_server_dir.join(format!("{server_id}.lua"));
+    let sandbox_path = local_server_dir.join(format!("{server_id}_SandboxVars.lua"));
+    let spawnregions_path = local_server_dir.join(format!("{server_id}_spawnregions.lua"));
+    let spawnpoints_path = local_server_dir.join(format!("{server_id}_spawnpoints.lua"));
+    let save_path = local_zomboid_dir
+        .join("Saves")
+        .join("Multiplayer")
+        .join(server_id);
+    let db_path = local_zomboid_dir.join("db").join(format!("{server_id}.db"));
+
+    if !ini_path.is_file() {
+        return Err(format!(
+            "Local server configuration file not found: {}",
+            ini_path.display()
+        ));
+    }
+
+    // 2. Determine mods to copy if include_mods is true
+    let _ = app.emit(
+        "deploy-progress",
+        DeployProgressPayload {
+            status: "scanning_mods".to_string(),
+            detail: None,
+        },
+    );
+    let mut folders_to_copy = HashSet::new();
+    let mut active_mods_count = 0;
+
+    if request.include_mods {
+        let ini_content = read_text_lossy(&ini_path)?;
+        let configured_mods = read_ini_value(&ini_content, "Mods").unwrap_or_default();
+        let active_mod_ids = parse_server_mod_ids(&configured_mods);
+
+        if !active_mod_ids.is_empty() {
+            let all_mods = load_mods_from_cache()
+                .unwrap_or_else(|| list_zomboid_mods_impl().unwrap_or_default());
+            for mod_item in all_mods {
+                if mod_item.source == "local" {
+                    let is_active = mod_item.variants.iter().any(|v| {
+                        active_mod_ids
+                            .iter()
+                            .any(|active_id| active_id.eq_ignore_ascii_case(&v.id))
+                    }) || active_mod_ids
+                        .iter()
+                        .any(|active_id| active_id.eq_ignore_ascii_case(&mod_item.id));
+
+                    if is_active {
+                        folders_to_copy.insert(PathBuf::from(mod_item.package_path));
+                    }
+                }
+            }
+            active_mods_count = folders_to_copy.len();
+        }
+    }
+
+    // 3. Prepare staging directory
+    let _ = app.emit(
+        "deploy-progress",
+        DeployProgressPayload {
+            status: "staging".to_string(),
+            detail: None,
+        },
+    );
+    let temp_root = app_config_dir()?.join("temp_deploy");
+    let temp_dir = temp_root.join(server_id);
+
+    if temp_dir.exists() {
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    let temp_server_bundle_dir = temp_dir.join("server-bundle");
+    let temp_server_dir = temp_server_bundle_dir.join("Server");
+    let temp_saves_multiplayer_dir = temp_server_bundle_dir.join("Saves").join("Multiplayer");
+    let temp_db_dir = temp_server_bundle_dir.join("db");
+    let temp_mods_dir = temp_dir.join("mods");
+
+    fs::create_dir_all(&temp_server_dir)
+        .map_err(|e| format!("Could not create local temp Server folder: {e}"))?;
+
+    if !folders_to_copy.is_empty() {
+        fs::create_dir_all(&temp_mods_dir)
+            .map_err(|e| format!("Could not create local temp mods folder: {e}"))?;
+    }
+
+    // 4. Copy config files
+    let _ = app.emit(
+        "deploy-progress",
+        DeployProgressPayload {
+            status: "copying_configs".to_string(),
+            detail: None,
+        },
+    );
+    let mut deployed_server_files = 0;
+
+    fs::copy(&ini_path, temp_server_dir.join(format!("{server_id}.ini")))
+        .map_err(|e| format!("Could not copy ini file to temp: {e}"))?;
+    deployed_server_files += 1;
+
+    let optional_server_files = [
+        (&lua_path, format!("{server_id}.lua"), "server lua file"),
+        (&sandbox_path, format!("{server_id}_SandboxVars.lua"), "SandboxVars file"),
+        (&spawnregions_path, format!("{server_id}_spawnregions.lua"), "spawnregions file"),
+        (&spawnpoints_path, format!("{server_id}_spawnpoints.lua"), "spawnpoints file"),
+    ];
+
+    for (source_path, target_name, label) in optional_server_files {
+        if source_path.is_file() {
+            fs::copy(source_path, temp_server_dir.join(target_name))
+                .map_err(|e| format!("Could not copy {label} to temp: {e}"))?;
+            deployed_server_files += 1;
+        }
+    }
+
+    if save_path.is_dir() {
+        let save_target = temp_saves_multiplayer_dir.join(server_id);
+        copy_dir_all(&save_path, &save_target)?;
+        deployed_server_files += count_files_recursive(&save_target)?;
+    }
+
+    if db_path.is_file() {
+        fs::create_dir_all(&temp_db_dir)
+            .map_err(|e| format!("Could not create local temp db folder: {e}"))?;
+        fs::copy(&db_path, temp_db_dir.join(format!("{server_id}.db")))
+            .map_err(|e| format!("Could not copy server db file to temp: {e}"))?;
+        deployed_server_files += 1;
+    }
+
+    // 5. Copy local mods
+    let total_mods = folders_to_copy.len();
+    for (i, folder) in folders_to_copy.iter().enumerate() {
+        let folder_name = folder
+            .file_name()
+            .ok_or_else(|| "Invalid mod folder name".to_string())?;
+
+        let _ = app.emit(
+            "deploy-progress",
+            DeployProgressPayload {
+                status: "copying_mods".to_string(),
+                detail: Some(format!(
+                    "{} ({} / {})",
+                    folder_name.to_string_lossy(),
+                    i + 1,
+                    total_mods
+                )),
+            },
+        );
+
+        let dest = temp_mods_dir.join(folder_name);
+        copy_dir_all(folder, &dest)?;
+    }
+
+    // 6. Zip server state and mods separately. The server archive keeps the Zomboid folder
+    // layout (Server, Saves, db) so it can be extracted directly at the remote Zomboid root.
+    let _ = app.emit(
+        "deploy-progress",
+        DeployProgressPayload {
+            status: "compressing".to_string(),
+            detail: Some("server.zip".to_string()),
+        },
+    );
+    let server_zip_path = temp_root.join(format!("{server_id}-server.zip"));
+    if server_zip_path.is_file() {
+        let _ = fs::remove_file(&server_zip_path);
+    }
+    compress_directory_to_zip(app, &temp_server_bundle_dir, &server_zip_path)?;
+
+    let mods_zip_path = temp_root.join(format!("{server_id}-mods.zip"));
+    let has_mods_zip = temp_mods_dir.is_dir() && active_mods_count > 0;
+    if has_mods_zip {
+        let _ = app.emit(
+            "deploy-progress",
+            DeployProgressPayload {
+                status: "compressing".to_string(),
+                detail: Some("mods.zip".to_string()),
+            },
+        );
+        if mods_zip_path.is_file() {
+            let _ = fs::remove_file(&mods_zip_path);
+        }
+        compress_directory_to_zip(app, &temp_mods_dir, &mods_zip_path)?;
+    }
+
+    // 7. Upload zips to VM via scp.exe
+    let server_zip_size_mb = fs::metadata(&server_zip_path)
+        .map(|meta| meta.len() as f64 / 1024.0 / 1024.0)
+        .unwrap_or(0.0);
+    let mods_zip_size_mb = if has_mods_zip {
+        fs::metadata(&mods_zip_path)
+            .map(|meta| meta.len() as f64 / 1024.0 / 1024.0)
+            .unwrap_or(0.0)
+    } else {
+        0.0
+    };
+
+    let remote_zomboid_dir = {
+        let server_path_normalized = connection.server_path.replace('/', "\\");
+        if let Some(idx) = server_path_normalized.rfind('\\') {
+            server_path_normalized[..idx].to_string()
+        } else {
+            format!("C:\\Users\\{}\\Zomboid", connection.username.trim())
+        }
+    };
+
+    let remote_server_zip_path = join_remote_windows_path(&remote_zomboid_dir, "deploy-server.zip");
+    let remote_mods_zip_path = join_remote_windows_path(&remote_zomboid_dir, "deploy-mods.zip");
+
+    let upload_err_handler = |e| {
+        let _ = fs::remove_dir_all(&temp_dir);
+        let _ = fs::remove_file(&server_zip_path);
+        let _ = fs::remove_file(&mods_zip_path);
+        e
+    };
+
+    let _ = app.emit(
+        "deploy-progress",
+        DeployProgressPayload {
+            status: "uploading".to_string(),
+            detail: Some(format!("server.zip {:.1} MB", server_zip_size_mb)),
+        },
+    );
+    upload_bundle_to_remote(connection, &server_zip_path, &remote_server_zip_path)
+        .map_err(upload_err_handler)?;
+
+    if has_mods_zip {
+        let _ = app.emit(
+            "deploy-progress",
+            DeployProgressPayload {
+                status: "uploading".to_string(),
+                detail: Some(format!("mods.zip {:.1} MB", mods_zip_size_mb)),
+            },
+        );
+        upload_bundle_to_remote(connection, &mods_zip_path, &remote_mods_zip_path)
+            .map_err(upload_err_handler)?;
+    }
+    // 8. Remote extraction script execution
+    let _ = app.emit(
+        "deploy-progress",
+        DeployProgressPayload {
+            status: "extracting".to_string(),
+            detail: None,
+        },
+    );
+    let overwrite_existing = if request.overwrite_existing_mods {
+        "$true"
+    } else {
+        "$false"
+    };
+    let remote_script = format!(
+        r#"$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$zomboidDir = '{}'
+$overwriteExisting = {}
+$serverZipPath = Join-Path $zomboidDir 'deploy-server.zip'
+$modsZipPath = Join-Path $zomboidDir 'deploy-mods.zip'
+$modsTarget = Join-Path $zomboidDir 'mods'
+
+function Expand-PzmmArchive([string]$zipPath, [string]$targetPath, [string]$label) {{
+    if (!(Test-Path -LiteralPath $zipPath -PathType Leaf)) {{
+        Write-Output "PZMM_STEP|Skipping missing $label archive"
+        return
+    }}
+
+    Write-Output "PZMM_STEP|Extracting $label archive directly to $targetPath"
+    New-Item -ItemType Directory -Force -Path $targetPath | Out-Null
+
+    if (Get-Command tar.exe -ErrorAction SilentlyContinue) {{
+        if ($overwriteExisting) {{
+            tar.exe -xf $zipPath -C $targetPath
+        }} else {{
+            tar.exe -k -xf $zipPath -C $targetPath
+        }}
+        if ($LASTEXITCODE -ne 0) {{ throw "tar.exe extraction failed for $label with exit code $LASTEXITCODE" }}
+    }} else {{
+        if ($overwriteExisting) {{
+            Expand-Archive -LiteralPath $zipPath -DestinationPath $targetPath -Force
+        }} else {{
+            Expand-Archive -LiteralPath $zipPath -DestinationPath $targetPath
+        }}
+    }}
+}}
+
+try {{
+    Expand-PzmmArchive $serverZipPath $zomboidDir 'server data'
+    Expand-PzmmArchive $modsZipPath $modsTarget 'mods'
+    Write-Output 'DEPLOY_SUCCESS'
+}} finally {{
+    Write-Output 'PZMM_STEP|Cleaning remote compressed deploy files'
+    Remove-Item -LiteralPath $serverZipPath -Force -Confirm:$false -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $modsZipPath -Force -Confirm:$false -ErrorAction SilentlyContinue
+}}
+"#,
+        quote_powershell_single_string(&remote_zomboid_dir),
+        overwrite_existing,
+    );
+    let remote_command = powershell_encoded_command(&remote_script);
+
+    let ssh_result = match run_ssh_deploy_streaming(app, connection, &remote_command) {
+        Ok(res) => res,
+        Err(e) => {
+            let _ = fs::remove_dir_all(&temp_dir);
+            let _ = fs::remove_file(&server_zip_path);
+            let _ = fs::remove_file(&mods_zip_path);
+            return Err(format!("Remote extraction failed: {e}"));
+        }
+    };
+
+    // cleanup temp local dir/zip
+    let _ = fs::remove_dir_all(&temp_dir);
+    let _ = fs::remove_file(&server_zip_path);
+    let _ = fs::remove_file(&mods_zip_path);
+
+    if !ssh_result.success || !ssh_result.stdout.contains("DEPLOY_SUCCESS") {
+        return Err(format!(
+            "Remote extraction script failed.\nStdout: {}\nStderr: {}",
+            ssh_result.stdout, ssh_result.stderr
+        ));
+    }
+
+    Ok(RemoteServerDeployResult {
+        success: true,
+        server_id: server_id.clone(),
+        deployed_server_files,
+        deployed_mods: active_mods_count,
+        skipped_mods: Vec::new(),
+        local_bundle_path: server_zip_path.display().to_string(),
+        remote_bundle_path: if has_mods_zip {
+            format!("{};{}", remote_server_zip_path, remote_mods_zip_path)
+        } else {
+            remote_server_zip_path
+        },
+        command: remote_script,
+        stdout: ssh_result.stdout,
+        stderr: ssh_result.stderr,
+        logs: Vec::new(),
+    })
+}
+
+fn run_ssh_deploy_streaming(
+    app: &tauri::AppHandle,
+    connection: &RemoteServerConnectionRequest,
+    command_text: &str,
+) -> Result<TerminalCommandResult, String> {
+    if !cfg!(windows) {
+        return Err(text(
+            "Remote terminal commands are available only on Windows for now.",
+            "Comandos remotos no terminal estao disponiveis apenas no Windows por enquanto.",
+        )
+        .to_string());
+    }
+
+    let host = required_field(&connection.host, "host")?;
+    let username = required_field(&connection.username, "Windows username")?;
+    let port = connection
+        .port
+        .trim()
+        .parse::<u16>()
+        .map_err(|_| "Enter a valid remote port.".to_string())?;
+
+    if connection.auth_method.trim() != "key" {
+        return Err(
+            "Remote command execution currently requires SSH private key authentication."
+                .to_string(),
+        );
+    }
+
+    let key_path = PathBuf::from(required_field(&connection.ssh_key_path, "SSH key file")?);
+    if !key_path.is_file() {
+        return Err(format!("SSH key file not found: {}.", key_path.display()));
+    }
+
+    let remote = format!("{username}@{host}");
+    let mut child = Command::new("ssh.exe")
+        .args([
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-i",
+        ])
+        .arg(&key_path)
+        .args(["-p", &port.to_string(), &remote, command_text])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("Could not run ssh.exe: {error}"))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Could not capture remote deploy stdout.".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Could not capture remote deploy stderr.".to_string())?;
+    let (sender, receiver) = mpsc::channel::<(&'static str, String)>();
+    let stdout_sender = sender.clone();
+
+    thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            let _ = stdout_sender.send(("stdout", line));
+        }
+    });
+
+    thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            let _ = sender.send(("stderr", line));
+        }
+    });
+
+    let mut stdout_lines = Vec::new();
+    let mut stderr_lines = Vec::new();
+
+    loop {
+        match receiver.recv_timeout(Duration::from_millis(120)) {
+            Ok((stream, line)) => {
+                emit_deploy_stream_line(app, stream, &line);
+                if stream == "stdout" {
+                    stdout_lines.push(line);
+                } else {
+                    stderr_lines.push(line);
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if let Some(status) = child
+                    .try_wait()
+                    .map_err(|error| format!("Could not read remote deploy status: {error}"))?
+                {
+                    while let Ok((stream, line)) = receiver.try_recv() {
+                        emit_deploy_stream_line(app, stream, &line);
+                        if stream == "stdout" {
+                            stdout_lines.push(line);
+                        } else {
+                            stderr_lines.push(line);
+                        }
+                    }
+
+                    return Ok(TerminalCommandResult {
+                        target: "remote".to_string(),
+                        command: command_text.to_string(),
+                        exit_code: status.code(),
+                        success: status.success(),
+                        stdout: stdout_lines.join("\n"),
+                        stderr: stderr_lines.join("\n"),
+                    });
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                let status = child.wait().map_err(|error| {
+                    format!("Could not wait for remote deploy command: {error}")
+                })?;
+                return Ok(TerminalCommandResult {
+                    target: "remote".to_string(),
+                    command: command_text.to_string(),
+                    exit_code: status.code(),
+                    success: status.success(),
+                    stdout: stdout_lines.join("\n"),
+                    stderr: stderr_lines.join("\n"),
+                });
+            }
+        }
+    }
+}
+
+fn emit_deploy_stream_line(app: &tauri::AppHandle, stream: &str, line: &str) {
+    let detail = if let Some(value) = line.strip_prefix("PZMM_STEP|") {
+        value.to_string()
+    } else if let Some(value) = line.strip_prefix("PZMM_FILE|") {
+        value.replace('|', " - ")
+    } else if let Some(value) = line.strip_prefix("PZMM_MOD_START|") {
+        let parts = value.split('|').collect::<Vec<_>>();
+        if parts.len() >= 3 {
+            format!("Installing {} ({} / {})", parts[0], parts[1], parts[2])
+        } else {
+            value.to_string()
+        }
+    } else if let Some(value) = line.strip_prefix("PZMM_MOD_DONE|") {
+        let parts = value.split('|').collect::<Vec<_>>();
+        if parts.len() >= 3 {
+            format!("Installed {} ({} / {})", parts[0], parts[1], parts[2])
+        } else {
+            value.to_string()
+        }
+    } else if let Some(value) = line.strip_prefix("PZMM_MOD_SKIPPED|") {
+        let parts = value.split('|').collect::<Vec<_>>();
+        if parts.len() >= 3 {
+            format!(
+                "Skipped existing {} ({} / {})",
+                parts[0], parts[1], parts[2]
+            )
+        } else {
+            value.to_string()
+        }
+    } else if stream == "stderr" {
+        format!("ERROR: {line}")
+    } else {
+        line.to_string()
+    };
+
+    let _ = app.emit(
+        "deploy-progress",
+        DeployProgressPayload {
+            status: "extracting".to_string(),
+            detail: Some(detail),
+        },
+    );
+}
+fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Result<(), String> {
+    fs::create_dir_all(&dst)
+        .map_err(|e| format!("Could not create directory {}: {e}", dst.as_ref().display()))?;
+    for entry in fs::read_dir(src).map_err(|e| format!("Could not read directory: {e}"))? {
+        let entry = entry.map_err(|e| format!("Could not read entry: {e}"))?;
+        let ty = entry
+            .file_type()
+            .map_err(|e| format!("Could not get file type: {e}"))?;
+        if ty.is_dir() {
+            copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()))?;
+        } else {
+            fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))
+                .map_err(|e| format!("Could not copy file: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn count_files_recursive(path: impl AsRef<Path>) -> Result<usize, String> {
+    let path = path.as_ref();
+    if !path.exists() {
+        return Ok(0);
+    }
+
+    let mut count = 0;
+    for entry in fs::read_dir(path).map_err(|e| format!("Could not read directory: {e}"))? {
+        let entry = entry.map_err(|e| format!("Could not read entry: {e}"))?;
+        let ty = entry
+            .file_type()
+            .map_err(|e| format!("Could not get file type: {e}"))?;
+        if ty.is_dir() {
+            count += count_files_recursive(entry.path())?;
+        } else {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+fn compress_directory_to_zip(
+    app: &tauri::AppHandle,
+    source_dir: &Path,
+    zip_path: &Path,
+) -> Result<(), String> {
+    use std::io::Read;
+
+    let script = format!(
+        r#"$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+[Reflection.Assembly]::LoadWithPartialName('System.IO.Compression') | Out-Null
+[Reflection.Assembly]::LoadWithPartialName('System.IO.Compression.FileSystem') | Out-Null
+
+$source = '{}'
+$zipPath = '{}'
+
+$archive = [System.IO.Compression.ZipFile]::Open($zipPath, [System.IO.Compression.ZipArchiveMode]::Create)
+$files = Get-ChildItem -Path $source -Recurse
+$fileList = $files | Where-Object {{ -not $_.PSIsContainer }}
+$total = $fileList.Count
+$count = 0
+
+foreach ($file in $fileList) {{
+    $count++
+    $relative = $file.FullName.Substring($source.Length + 1).Replace('\', '/')
+    Write-Output "COMPRESS_PROGRESS|$relative|$count|$total"
+    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $file.FullName, $relative) | Out-Null
+}}
+
+$archive.Dispose()
+"#,
+        quote_powershell_single_string(&source_dir.display().to_string()),
+        quote_powershell_single_string(&zip_path.display().to_string())
+    );
+
+    let mut command = Command::new("powershell.exe");
+    #[cfg(windows)]
+    let command = hide_command_window(&mut command);
+
+    let mut child = command
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &script,
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("Could not start powershell to compress: {error}"))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or("Could not capture compression stdout.")?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or("Could not capture compression stderr.")?;
+
+    let reader = BufReader::new(stdout);
+    for line_result in reader.lines() {
+        if let Ok(line) = line_result {
+            let line = line.trim();
+            if line.starts_with("COMPRESS_PROGRESS|") {
+                let parts: Vec<&str> = line.split('|').collect();
+                if parts.len() >= 4 {
+                    let relative = parts[1];
+                    let current = parts[2];
+                    let total = parts[3];
+                    let _ = app.emit(
+                        "deploy-progress",
+                        DeployProgressPayload {
+                            status: "compressing".to_string(),
+                            detail: Some(format!("{} ({} / {})", relative, current, total)),
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    let status = child
+        .wait()
+        .map_err(|error| format!("Could not wait for compression process: {error}"))?;
+
+    if !status.success() {
+        let mut err_str = String::new();
+        let mut err_reader = BufReader::new(stderr);
+        let _ = err_reader.read_to_string(&mut err_str);
+        return Err(format!("Compression failed: {}", err_str));
+    }
+
+    Ok(())
+}
+
+fn upload_bundle_to_remote(
+    connection: &RemoteServerConnectionRequest,
+    local_path: &Path,
+    remote_path: &str,
+) -> Result<(), String> {
+    let host = required_field(&connection.host, "host")?;
+    let username = required_field(&connection.username, "Windows username")?;
+    let port = connection
+        .port
+        .trim()
+        .parse::<u16>()
+        .map_err(|_| "Enter a valid remote port.".to_string())?;
+    let key_path = PathBuf::from(required_field(&connection.ssh_key_path, "SSH key file")?);
+
+    if !key_path.is_file() {
+        return Err(format!("SSH key file not found: {}.", key_path.display()));
+    }
+
+    let remote = format!("{username}@{host}:{remote_path}");
+    let output = Command::new("scp.exe")
+        .args([
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-i",
+        ])
+        .arg(&key_path)
+        .args(["-P", &port.to_string()])
+        .arg(local_path)
+        .arg(&remote)
+        .output()
+        .map_err(|error| format!("Could not run scp.exe: {error}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Err(format!("scp.exe failed: {}\n{}", stdout, stderr))
+}
+#[tauri::command]
+pub(crate) async fn delete_remote_zomboid_server(
+    connection: RemoteServerConnectionRequest,
+    server_id: String,
+) -> Result<DeleteServerResult, String> {
+    run_blocking(move || {
+        run_remote_helper_json(
+            &connection,
+            "delete-server",
+            Some(&serde_json::json!({ "serverId": server_id })),
         )
     })
     .await
@@ -289,9 +1216,9 @@ pub(crate) async fn install_remote_zomboid_mod(
     package_path: String,
     mod_id: String,
     workshop_id: String,
-) -> Result<(), String> {
+) -> Result<ZomboidModInstallResult, String> {
     run_blocking(move || {
-        let _value: Value = run_remote_helper_json(
+        run_remote_helper_json(
             &connection,
             "install-mod",
             Some(&serde_json::json!({
@@ -299,8 +1226,7 @@ pub(crate) async fn install_remote_zomboid_mod(
                 "modId": mod_id,
                 "workshopId": workshop_id,
             })),
-        )?;
-        Ok(())
+        )
     })
     .await
 }
@@ -695,19 +1621,7 @@ fn test_remote_server_connection_impl(
         return Err("Use a Windows server profile folder, for example C:\\Users\\Administrator\\Zomboid\\Server.".to_string());
     }
 
-    let address = format!("{host}:{port}");
-    let mut addresses = address
-        .to_socket_addrs()
-        .map_err(|error| format!("Could not resolve {host}: {error}"))?;
-    let socket_address = addresses
-        .next()
-        .ok_or_else(|| format!("Could not resolve {host}."))?;
-
-    TcpStream::connect_timeout(
-        &socket_address,
-        Duration::from_secs(REMOTE_CONNECT_TIMEOUT_SECONDS),
-    )
-    .map_err(|error| format!("Could not connect to {host}:{port}: {error}"))?;
+    let latency = measure_remote_tcp_latency(&host, port)?;
 
     if connection.auth_method.trim() == "key" {
         verify_ssh_key_authentication(&connection, port)?;
@@ -720,7 +1634,55 @@ fn test_remote_server_connection_impl(
         server_path,
         message: "Remote host is reachable. File access setup is ready for the next step."
             .to_string(),
+        latency_ms: latency.as_millis(),
     })
+}
+
+fn test_remote_server_latency_impl(
+    connection: RemoteServerConnectionRequest,
+) -> Result<RemoteServerLatencyResult, String> {
+    let host = required_field(&connection.host, "host")?;
+    let port = connection
+        .port
+        .trim()
+        .parse::<u16>()
+        .map_err(|_| "Enter a valid remote port.".to_string())?;
+
+    Ok(match measure_remote_tcp_latency(&host, port) {
+        Ok(latency) => RemoteServerLatencyResult {
+            host,
+            port,
+            success: true,
+            latency_ms: Some(latency.as_millis()),
+            error: None,
+        },
+        Err(error) => RemoteServerLatencyResult {
+            host,
+            port,
+            success: false,
+            latency_ms: None,
+            error: Some(error),
+        },
+    })
+}
+
+fn measure_remote_tcp_latency(host: &str, port: u16) -> Result<Duration, String> {
+    let address = format!("{host}:{port}");
+    let mut addresses = address
+        .to_socket_addrs()
+        .map_err(|error| format!("Could not resolve {host}: {error}"))?;
+    let socket_address = addresses
+        .next()
+        .ok_or_else(|| format!("Could not resolve {host}."))?;
+    let started_at = Instant::now();
+
+    TcpStream::connect_timeout(
+        &socket_address,
+        Duration::from_secs(REMOTE_CONNECT_TIMEOUT_SECONDS),
+    )
+    .map_err(|error| format!("Could not connect to {host}:{port}: {error}"))?;
+
+    Ok(started_at.elapsed())
 }
 
 fn apply_remote_performance_settings(
@@ -732,7 +1694,9 @@ fn apply_remote_performance_settings(
     let server_dir = remote_windows_parent_path(server_path)
         .ok_or_else(|| "Could not resolve the remote Project Zomboid server folder.".to_string())?;
     let script = format!(
-        r#"$ErrorActionPreference='Stop'; $serverPath='{}'; $serverDir='{}'; $ramMb={}; if (!(Test-Path -LiteralPath $serverPath)) {{ throw "Remote Project Zomboid server path not found: $serverPath" }}; function Update-Line([string]$line, [int]$ram) {{ $line = [regex]::Replace($line, '-Xms\S+', "-Xms${{ram}}m", 'IgnoreCase'); $line = [regex]::Replace($line, '-Xmx\S+', "-Xmx${{ram}}m", 'IgnoreCase'); if ($line -notmatch '-Xms') {{ $line = "-Xms${{ram}}m $line" }}; if ($line -notmatch '-Xmx') {{ $line = "-Xmx${{ram}}m $line" }}; return $line }}; function Update-Bat([string]$path, [int]$ram) {{ if (!(Test-Path -LiteralPath $path -PathType Leaf)) {{ return $false }}; $content = Get-Content -LiteralPath $path -Raw; if ($content -notmatch '-Xms' -and $content -notmatch '-Xmx') {{ return $false }}; $lines = $content -split "`r?`n" | ForEach-Object {{ if ($_ -match '-Xms|-Xmx') {{ Update-Line $_ $ram }} else {{ $_ }} }}; Set-Content -LiteralPath $path -Value ($lines -join "`r`n") -Encoding UTF8; return $true }}; function Update-Json([string]$path, [int]$ram) {{ if (!(Test-Path -LiteralPath $path -PathType Leaf)) {{ return $false }}; $json = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json; $args = @("-Xms${{ram}}m", "-Xmx${{ram}}m"); if ($json.PSObject.Properties.Name -contains 'vmArgs') {{ if ($json.vmArgs -is [array]) {{ $other = @($json.vmArgs | Where-Object {{ $_ -notmatch '^-Xm[sx]' }}); $json.vmArgs = @($args + $other) }} else {{ $json.vmArgs = (Update-Line ([string]$json.vmArgs) $ram) }} }} else {{ $json | Add-Member -NotePropertyName vmArgs -NotePropertyValue $args }}; $json | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8; return $true }}; $candidates = @($serverPath, (Join-Path $serverDir 'StartServer64.bat'), (Join-Path $serverDir 'ProjectZomboidServer.bat'), (Join-Path $serverDir 'ProjectZomboidServer64.json')); $updated = $false; foreach ($candidate in $candidates) {{ $ext = [IO.Path]::GetExtension($candidate).ToLowerInvariant(); if ($ext -eq '.bat') {{ $updated = (Update-Bat $candidate $ramMb) -or $updated }} elseif ($ext -eq '.json') {{ $updated = (Update-Json $candidate $ramMb) -or $updated }} }}; if (!$updated) {{ throw "Could not find -Xms/-Xmx settings in remote server launch files." }}; Write-Output "PZMM_REMOTE_PERFORMANCE_UPDATED=$serverDir""#,
+        r#"$ErrorActionPreference='Stop'; $serverPath='{}'; $serverDir='{}'; $ramMb={}; if (!(Test-Path -LiteralPath $serverPath)) {{ throw "Remote Project Zomboid server path not found: $serverPath" }}; function Update-Line([string]$line, [int]$ram) {{ $line = [regex]::Replace($line, '-Xms\S+', "-Xms${{ram}}m", 'IgnoreCase'); $line = [regex]::Replace($line, '-Xmx\S+', "-Xmx${{ram}}m", 'IgnoreCase'); if ($line -notmatch '-Xms') {{ $line = "-Xms${{ram}}m $line" }}; if ($line -notmatch '-Xmx') {{ $line = "-Xmx${{ram}}m $line" }}; return $line }}; function Update-Bat([string]$path, [int]$ram) {{ if (!(Test-Path -LiteralPath $path -PathType Leaf)) {{ return $false }}; $content = Get-Content -LiteralPath $path -Raw; if ($content -notmatch '-Xms' -and $content -notmatch '-Xmx') {{ return $false }}; $lines = $content -split "`r?
+" | ForEach-Object {{ if ($_ -match '-Xms|-Xmx') {{ Update-Line $_ $ram }} else {{ $_ }} }}; Set-Content -LiteralPath $path -Value ($lines -join "`r
+") -Encoding UTF8; return $true }}; function Update-Json([string]$path, [int]$ram) {{ if (!(Test-Path -LiteralPath $path -PathType Leaf)) {{ return $false }}; $json = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json; $args = @("-Xms${{ram}}m", "-Xmx${{ram}}m"); if ($json.PSObject.Properties.Name -contains 'vmArgs') {{ if ($json.vmArgs -is [array]) {{ $other = @($json.vmArgs | Where-Object {{ $_ -notmatch '^-Xm[sx]' }}); $json.vmArgs = @($args + $other) }} else {{ $json.vmArgs = (Update-Line ([string]$json.vmArgs) $ram) }} }} else {{ $json | Add-Member -NotePropertyName vmArgs -NotePropertyValue $args }}; $json | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8; return $true }}; $candidates = @($serverPath, (Join-Path $serverDir 'StartServer64.bat'), (Join-Path $serverDir 'ProjectZomboidServer.bat'), (Join-Path $serverDir 'ProjectZomboidServer64.json')); $updated = $false; foreach ($candidate in $candidates) {{ $ext = [IO.Path]::GetExtension($candidate).ToLowerInvariant(); if ($ext -eq '.bat') {{ $updated = (Update-Bat $candidate $ramMb) -or $updated }} elseif ($ext -eq '.json') {{ $updated = (Update-Json $candidate $ramMb) -or $updated }} }}; if (!$updated) {{ throw "Could not find -Xms/-Xmx settings in remote server launch files." }}; Write-Output "PZMM_REMOTE_PERFORMANCE_UPDATED=$serverDir""#,
         quote_powershell_single_string(server_path),
         quote_powershell_single_string(&server_dir),
         server_mb,
@@ -963,7 +1927,7 @@ where
     T: serde::de::DeserializeOwned,
     P: Serialize + ?Sized,
 {
-    let helper_path = ensure_remote_helper(connection)?;
+    let helper_path = ensure_cached_remote_helper(connection)?;
     let encoded_payload = payload
         .map(|payload| {
             let json = serde_json::to_vec(payload)
@@ -985,14 +1949,20 @@ where
     };
     let command = powershell_encoded_command(&script);
     let output = match encoded_payload {
-        Some(encoded_payload) => {
-            run_ssh_capture_with_stdin(connection, &command, &encoded_payload)?
+        Some(encoded_payload) => run_ssh_capture_with_stdin(connection, &command, &encoded_payload),
+        None => run_ssh_capture(connection, &command),
+    };
+    let output = match output {
+        Ok(output) => output,
+        Err(error) => {
+            invalidate_remote_helper_cache(connection);
+            return Err(error);
         }
-        None => run_ssh_capture(connection, &command)?,
     };
     let stdout = output.stdout.trim();
 
     if stdout.is_empty() {
+        invalidate_remote_helper_cache(connection);
         let message = format!("pzmm-helper returned no JSON output for {helper_command}.");
         return Err(join_command_output(&[
             message.as_str(),
@@ -1002,10 +1972,221 @@ where
     }
 
     serde_json::from_str::<T>(stdout).map_err(|error| {
+        invalidate_remote_helper_cache(connection);
         let message =
             format!("Could not parse pzmm-helper JSON output for {helper_command}: {error}");
         join_command_output(&[message.as_str(), stdout, output.stderr.as_str()])
     })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteServerTestRequest<'a> {
+    server_id: &'a str,
+    server_launch_path: Option<&'a str>,
+    server_profile_path: Option<&'a str>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteHelperServerTestEvent {
+    event: String,
+    timeout_seconds: Option<u64>,
+    line: Option<String>,
+    result: Option<ServerTestResult>,
+    error: Option<String>,
+}
+
+fn run_remote_zomboid_server_test_streaming(
+    app: &tauri::AppHandle,
+    connection: &RemoteServerConnectionRequest,
+    server_id: &str,
+    server_launch_path: &str,
+) -> Result<(), String> {
+    let helper_path = ensure_cached_remote_helper(connection)?;
+    let server_profile_path = connection.server_path.trim();
+    let payload = RemoteServerTestRequest {
+        server_id,
+        server_launch_path: Some(server_launch_path),
+        server_profile_path: (!server_profile_path.is_empty()).then_some(server_profile_path),
+    };
+    let json = serde_json::to_vec(&payload)
+        .map_err(|error| format!("Could not serialize remote server test payload: {error}"))?;
+    let encoded_payload = base64::engine::general_purpose::STANDARD.encode(json);
+    let script = format!(
+        r#"$ErrorActionPreference='Stop'; & '{}' 'test-server' '-'"#,
+        quote_powershell_single_string(&helper_path),
+    );
+    let command = powershell_encoded_command(&script);
+
+    stream_remote_server_test_command(app, connection, server_id, &command, &encoded_payload)
+        .map_err(|error| {
+            invalidate_remote_helper_cache(connection);
+            error
+        })
+}
+
+fn stream_remote_server_test_command(
+    app: &tauri::AppHandle,
+    connection: &RemoteServerConnectionRequest,
+    server_id: &str,
+    command_text: &str,
+    stdin_text: &str,
+) -> Result<(), String> {
+    if !cfg!(windows) {
+        return Err(text(
+            "Remote server testing is available only on Windows for now.",
+            "O teste remoto de servidor esta disponivel apenas no Windows por enquanto.",
+        )
+        .to_string());
+    }
+
+    let host = required_field(&connection.host, "host")?;
+    let username = required_field(&connection.username, "Windows username")?;
+    let port = connection
+        .port
+        .trim()
+        .parse::<u16>()
+        .map_err(|_| "Enter a valid remote port.".to_string())?;
+
+    if connection.auth_method.trim() != "key" {
+        return Err(
+            "Remote server testing currently requires SSH private key authentication.".to_string(),
+        );
+    }
+
+    let key_path = PathBuf::from(required_field(&connection.ssh_key_path, "SSH key file")?);
+    if !key_path.is_file() {
+        return Err(format!("SSH key file not found: {}.", key_path.display()));
+    }
+
+    let remote = format!("{username}@{host}");
+    let mut child = Command::new("ssh.exe")
+        .args([
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-i",
+        ])
+        .arg(&key_path)
+        .args(["-p", &port.to_string(), &remote, command_text])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("Could not run ssh.exe: {error}"))?;
+
+    {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "Could not open remote server test stdin.".to_string())?;
+        stdin
+            .write_all(stdin_text.as_bytes())
+            .map_err(|error| format!("Could not write remote server test stdin: {error}"))?;
+    }
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Could not capture remote server test stdout.".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Could not capture remote server test stderr.".to_string())?;
+    let (sender, receiver) = mpsc::channel::<(&'static str, String)>();
+    let stdout_sender = sender.clone();
+
+    thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            let _ = stdout_sender.send(("stdout", line));
+        }
+    });
+
+    thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            let _ = sender.send(("stderr", line));
+        }
+    });
+
+    loop {
+        match receiver.recv_timeout(Duration::from_millis(120)) {
+            Ok((stream, line)) => {
+                if stream == "stdout" {
+                    emit_remote_server_test_stdout(app, server_id, &line);
+                } else {
+                    emit_remote_server_test_line(app, server_id, &format!("[ERR] {line}"));
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if let Some(status) = child
+                    .try_wait()
+                    .map_err(|error| format!("Could not read remote server test status: {error}"))?
+                {
+                    while let Ok((stream, line)) = receiver.try_recv() {
+                        if stream == "stdout" {
+                            emit_remote_server_test_stdout(app, server_id, &line);
+                        } else {
+                            emit_remote_server_test_line(app, server_id, &format!("[ERR] {line}"));
+                        }
+                    }
+
+                    if status.success() {
+                        return Ok(());
+                    }
+
+                    return Err(format!("Remote server test command failed: {}.", status));
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                let status = child
+                    .wait()
+                    .map_err(|error| format!("Could not wait for remote server test: {error}"))?;
+
+                if status.success() {
+                    return Ok(());
+                }
+
+                return Err(format!("Remote server test command failed: {}.", status));
+            }
+        }
+    }
+}
+
+fn emit_remote_server_test_stdout(app: &tauri::AppHandle, server_id: &str, line: &str) {
+    match serde_json::from_str::<RemoteHelperServerTestEvent>(line) {
+        Ok(event) => {
+            let _ = app.emit(
+                "server-test-event",
+                ServerTestEvent {
+                    server_id: server_id.to_string(),
+                    event: event.event,
+                    timeout_seconds: event.timeout_seconds,
+                    line: event.line,
+                    result: event.result,
+                    error: event.error,
+                },
+            );
+        }
+        Err(_) => emit_remote_server_test_line(app, server_id, &format!("[OUT] {line}")),
+    }
+}
+
+fn emit_remote_server_test_line(app: &tauri::AppHandle, server_id: &str, line: &str) {
+    let _ = app.emit(
+        "server-test-event",
+        ServerTestEvent {
+            server_id: server_id.to_string(),
+            event: "line".to_string(),
+            timeout_seconds: None,
+            line: Some(line.to_string()),
+            result: None,
+            error: None,
+        },
+    );
 }
 
 fn hydrate_remote_mod_images(
@@ -1259,6 +2440,59 @@ fn download_remote_file_via_powershell(
     })
 }
 
+fn ensure_cached_remote_helper(
+    connection: &RemoteServerConnectionRequest,
+) -> Result<String, String> {
+    let cache_key = remote_helper_cache_key(connection)?;
+    let remote_path = join_remote_windows_path(
+        &default_remote_helper_dir(&connection.username),
+        "pzmm-helper.exe",
+    );
+    let cache = VERIFIED_REMOTE_HELPERS.get_or_init(|| Mutex::new(HashSet::new()));
+
+    if cache
+        .lock()
+        .map_err(|_| "Could not lock remote helper cache.".to_string())?
+        .contains(&cache_key)
+    {
+        return Ok(remote_path);
+    }
+
+    let helper_path = ensure_remote_helper(connection)?;
+    cache
+        .lock()
+        .map_err(|_| "Could not lock remote helper cache.".to_string())?
+        .insert(cache_key);
+
+    Ok(helper_path)
+}
+
+fn invalidate_remote_helper_cache(connection: &RemoteServerConnectionRequest) {
+    if let Ok(cache_key) = remote_helper_cache_key(connection) {
+        if let Some(cache) = VERIFIED_REMOTE_HELPERS.get() {
+            if let Ok(mut cache) = cache.lock() {
+                cache.remove(&cache_key);
+            }
+        }
+    }
+}
+
+fn remote_helper_cache_key(connection: &RemoteServerConnectionRequest) -> Result<String, String> {
+    let local_path = local_helper_executable_path()?;
+    let local_len = fs::metadata(&local_path)
+        .map_err(|error| format!("Could not read {}: {error}", local_path.display()))?
+        .len();
+
+    Ok(format!(
+        "{}|{}|{}|{}|{}",
+        connection.host.trim().to_lowercase(),
+        connection.port.trim(),
+        connection.username.trim().to_lowercase(),
+        default_remote_helper_dir(&connection.username).to_lowercase(),
+        local_len
+    ))
+}
+
 fn ensure_remote_helper(connection: &RemoteServerConnectionRequest) -> Result<String, String> {
     let result = setup_remote_helper_impl(None, connection)?;
 
@@ -1363,6 +2597,18 @@ fn upload_remote_helper(
     );
     let create_dir_result = run_ssh_capture(connection, &create_dir_command)?;
 
+    let stop_helper_script = r#"$ErrorActionPreference='SilentlyContinue'; Get-Process -Name 'pzmm-helper' | Stop-Process -Force; Start-Sleep -Milliseconds 300; exit 0"#;
+    let stop_helper_command = powershell_encoded_command(stop_helper_script);
+    emit_optional_remote_setup_log(
+        app,
+        "helper",
+        "info",
+        "Stopping any previous remote setup process before upload.",
+    );
+    let stop_helper_result = run_ssh_capture(connection, &stop_helper_command)?;
+    emit_optional_remote_setup_output(app, "helper", "stdout", &stop_helper_result.stdout);
+    emit_optional_remote_setup_output(app, "helper", "stderr", &stop_helper_result.stderr);
+
     let remote = format!("{username}@{host}:{remote_path}");
     emit_optional_remote_setup_log(
         app,
@@ -1386,9 +2632,12 @@ fn upload_remote_helper(
         .arg(&remote)
         .output()
         .map_err(|error| format!("Could not run scp.exe for pzmm-helper: {error}"))?;
+    let scp_stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let scp_stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let stdout = join_command_output(&[
         create_dir_result.stdout.as_str(),
-        String::from_utf8_lossy(&output.stdout).as_ref(),
+        stop_helper_result.stdout.as_str(),
+        scp_stdout.as_str(),
         if output.status.success() {
             "Remote helper upload completed."
         } else {
@@ -1397,11 +2646,13 @@ fn upload_remote_helper(
     ]);
     let stderr = join_command_output(&[
         create_dir_result.stderr.as_str(),
-        String::from_utf8_lossy(&output.stderr).as_ref(),
+        stop_helper_result.stderr.as_str(),
+        scp_stderr.as_str(),
     ]);
     let command = format!(
-        "{}\nscp.exe -i \"{}\" -P {} \"{}\" \"{}\"",
+        "{}\n{}\nscp.exe -i \"{}\" -P {} \"{}\" \"{}\"",
         create_dir_command,
+        stop_helper_command,
         key_path.display(),
         port,
         local_path.display(),
@@ -1412,6 +2663,8 @@ fn upload_remote_helper(
         emit_optional_remote_setup_log(app, "helper", "info", "Remote helper setup completed.");
     } else {
         emit_optional_remote_setup_log(app, "helper", "stderr", "Remote helper upload failed.");
+        emit_optional_remote_setup_output(app, "helper", "stdout", &scp_stdout);
+        emit_optional_remote_setup_output(app, "helper", "stderr", &scp_stderr);
     }
 
     Ok(RemoteHelperSetupResult {
@@ -2597,6 +3850,16 @@ fn emit_optional_remote_setup_log(
 ) {
     if let Some(app) = app {
         emit_remote_setup_log(app, phase, stream, line);
+    }
+}
+fn emit_optional_remote_setup_output(
+    app: Option<&tauri::AppHandle>,
+    phase: &str,
+    stream: &str,
+    output: &str,
+) {
+    for line in output.lines() {
+        emit_optional_remote_setup_log(app, phase, stream, line);
     }
 }
 

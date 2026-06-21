@@ -26,8 +26,6 @@ pub(super) fn find_critical_server_lines(log_lines: &[String]) -> Vec<String> {
         "java.lang",
         "error",
         "failed",
-        "required mod",
-        "workshop item",
         "nullpointerexception",
     ];
 

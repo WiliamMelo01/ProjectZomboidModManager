@@ -7,11 +7,12 @@ use crate::mods::{
     normalize_server_values, parse_server_mod_ids, resolve_server_workshop_ids,
     serialize_server_mod_ids,
 };
+use crate::server_test::ports::find_port_usages;
 use crate::util::*;
 use crate::workshop::open_file_external;
 use crate::{app_config_dir, run_blocking, server_example_dir, zomboid_server_dir};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
@@ -49,11 +50,42 @@ pub(crate) fn list_zomboid_servers_impl() -> Result<Vec<ZomboidServer>, String> 
         servers.push(read_zomboid_server_from_path(&path)?);
     }
 
+    hydrate_server_statuses(&mut servers);
     servers.sort_by_key(|server| server.name.to_lowercase());
 
     Ok(servers)
 }
 
+fn hydrate_server_statuses(servers: &mut [ZomboidServer]) {
+    let ports = servers
+        .iter()
+        .filter_map(|server| server.port.parse::<u16>().ok())
+        .collect::<HashSet<_>>();
+
+    if ports.is_empty() {
+        return;
+    }
+
+    let ports = ports.into_iter().collect::<Vec<_>>();
+    let Ok(usages) = find_port_usages(&ports) else {
+        return;
+    };
+    let active_ports = usages
+        .into_iter()
+        .map(|usage| usage.port)
+        .collect::<HashSet<_>>();
+
+    for server in servers {
+        if server
+            .port
+            .parse::<u16>()
+            .ok()
+            .is_some_and(|port| active_ports.contains(&port))
+        {
+            server.status = "online".to_string();
+        }
+    }
+}
 #[tauri::command]
 pub(crate) fn open_zomboid_server_file(server_id: String) -> Result<(), String> {
     open_file_external(&canonical_zomboid_server_path(&server_id)?)
@@ -64,7 +96,7 @@ pub(crate) async fn delete_zomboid_server(server_id: String) -> Result<DeleteSer
     run_blocking(move || delete_zomboid_server_impl(&server_id)).await
 }
 
-fn delete_zomboid_server_impl(server_id: &str) -> Result<DeleteServerResult, String> {
+pub(crate) fn delete_zomboid_server_impl(server_id: &str) -> Result<DeleteServerResult, String> {
     let server_dir = zomboid_server_dir()?;
     let server_path = server_dir.join(format!("{server_id}.ini"));
 
@@ -256,7 +288,9 @@ pub(crate) async fn get_zomboid_server_settings(
     run_blocking(move || get_zomboid_server_settings_impl(&server_id)).await
 }
 
-pub(crate) fn get_zomboid_server_settings_impl(server_id: &str) -> Result<ServerIniSettings, String> {
+pub(crate) fn get_zomboid_server_settings_impl(
+    server_id: &str,
+) -> Result<ServerIniSettings, String> {
     let server_path = canonical_zomboid_server_path(server_id)?;
     let content = read_text_lossy(&server_path)?;
 
@@ -1081,7 +1115,10 @@ fn format_lua_setting_value(setting: &ServerLuaSetting) -> Result<String, String
                 .map(|_| value.to_string())
                 .map_err(|_| format!("Valor numerico invalido para {}.", setting.path))
         }
-        "string" => Ok(format!("\"{}\"", setting.value.replace('\\', "\\\\").replace('"', "\\\""))),
+        "string" => Ok(format!(
+            "\"{}\"",
+            setting.value.replace('\\', "\\\\").replace('"', "\\\"")
+        )),
         _ => Err(format!("Tipo de valor invalido para {}.", setting.path)),
     }
 }

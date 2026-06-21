@@ -12,7 +12,7 @@ pub(super) fn check_zomboid_server_ports_impl(server_id: &str) -> Result<ServerP
     Ok(ServerPortCheck { ports, usages })
 }
 
-fn server_ports_for_id(server_id: &str) -> Result<Vec<u16>, String> {
+pub(crate) fn server_ports_for_id(server_id: &str) -> Result<Vec<u16>, String> {
     let server_id = server_id.trim();
     let server_path = zomboid_server_dir()?.join(format!("{server_id}.ini"));
 
@@ -35,7 +35,7 @@ fn server_ports_for_id(server_id: &str) -> Result<Vec<u16>, String> {
     Ok(ports)
 }
 
-fn find_port_usages(ports: &[u16]) -> Result<Vec<PortUsage>, String> {
+pub(crate) fn find_port_usages(ports: &[u16]) -> Result<Vec<PortUsage>, String> {
     let mut command = Command::new("netstat");
     let output = hide_command_window(&mut command)
         .arg("-ano")

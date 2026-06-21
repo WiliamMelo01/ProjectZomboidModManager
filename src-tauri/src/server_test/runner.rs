@@ -3,46 +3,44 @@ use super::logs::{
     count_warning_server_lines, find_critical_server_lines, is_server_started_line,
     server_test_setup_error, summarize_known_server_error, tail_log_lines,
 };
+use super::ports::{find_port_usages, server_ports_for_id};
 use super::preflight::{resolve_zomboid_game_dir, validate_server_mod_dependencies};
 use super::process::{kill_process_tree, spawn_output_reader};
 use crate::i18n::text;
-use crate::models::{ServerTestResult, BUILD_42};
-use crate::servers::read_zomboid_server_build;
+use crate::models::ServerTestResult;
 use crate::util::hide_command_window;
-use crate::zomboid_server_dir;
+use crate::{read_config_value, zomboid_server_dir};
 use std::{
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
 
-pub(super) fn test_zomboid_server_impl(server_id: &str) -> Result<ServerTestResult, String> {
+pub(crate) fn test_zomboid_server_impl(server_id: &str) -> Result<ServerTestResult, String> {
     test_zomboid_server_impl_with_line_callback(server_id, |_| {})
 }
 
-pub(super) fn server_test_timeout_seconds(server_id: &str) -> Result<u64, String> {
-    Ok(timeout_seconds_for_build(&read_zomboid_server_build(
-        server_id,
-    )?))
-}
-
-fn timeout_seconds_for_build(game_build: &str) -> u64 {
-    if game_build.eq_ignore_ascii_case(BUILD_42) {
-        360
-    } else {
-        180
-    }
-}
-
-pub(super) fn test_zomboid_server_impl_with_line_callback<F>(
+pub(crate) fn test_zomboid_server_impl_with_line_callback<F>(
     server_id: &str,
-    mut on_line: F,
+    on_line: F,
 ) -> Result<ServerTestResult, String>
 where
     F: FnMut(&str),
+{
+    test_zomboid_server_impl_with_line_callback_and_cancel(server_id, on_line, || false)
+}
+
+pub(crate) fn test_zomboid_server_impl_with_line_callback_and_cancel<F, C>(
+    server_id: &str,
+    mut on_line: F,
+    should_cancel: C,
+) -> Result<ServerTestResult, String>
+where
+    F: FnMut(&str),
+    C: Fn() -> bool,
 {
     let server_id = server_id.trim();
 
@@ -80,21 +78,46 @@ where
         return Ok(dependency_result);
     }
 
-    let timeout_seconds = server_test_timeout_seconds(server_id)?;
-    let test_timeout = Duration::from_secs(timeout_seconds);
+    let configured_launch_path = read_config_value("server_launch_path")?
+        .filter(|path| !path.trim().is_empty())
+        .map(PathBuf::from);
+    let (game_dir, bat_path) = if let Some(launch_path) = configured_launch_path {
+        let Some(parent) = launch_path
+            .parent()
+            .filter(|path| path.exists() && path.is_dir())
+        else {
+            return Ok(server_test_setup_error(
+                &format!(
+                    "{}: {}.",
+                    text(
+                        "Configured server launcher folder was not found",
+                        "A pasta configurada do inicializador do servidor nao foi encontrada"
+                    ),
+                    launch_path.display()
+                ),
+                &launch_path,
+                "",
+                0,
+            ));
+        };
 
-    let Some(game_dir) = resolve_zomboid_game_dir()? else {
-        return Ok(server_test_setup_error(
-            &text(
-                "Project Zomboid folder not found. Configure the game executable in settings.",
-                "Pasta do Project Zomboid nao encontrada. Configure o executavel do jogo nas configuracoes.",
-            ),
-            Path::new("ProjectZomboidServer.bat"),
-            "",
-            0,
-        ));
+        (parent.to_path_buf(), launch_path)
+    } else {
+        let Some(game_dir) = resolve_zomboid_game_dir()? else {
+            return Ok(server_test_setup_error(
+                &text(
+                    "Project Zomboid folder not found. Configure the game executable in settings.",
+                    "Pasta do Project Zomboid nao encontrada. Configure o executavel do jogo nas configuracoes.",
+                ),
+                Path::new("ProjectZomboidServer.bat"),
+                "",
+                0,
+            ));
+        };
+
+        let bat_path = game_dir.join("ProjectZomboidServer.bat");
+        (game_dir, bat_path)
     };
-    let bat_path = game_dir.join("ProjectZomboidServer.bat");
     let mut command = format!(
         "cmd.exe /C call \"{}\" -servername {}",
         bat_path.display(),
@@ -106,8 +129,8 @@ where
             &format!(
                 "{} {}.",
                 text(
-                    "ProjectZomboidServer.bat not found in",
-                    "ProjectZomboidServer.bat nao encontrado em"
+                    "Server launcher not found in",
+                    "Inicializador do servidor nao encontrado em"
                 ),
                 game_dir.display()
             ),
@@ -147,21 +170,63 @@ where
     spawn_output_reader(stdout, "OUT", sender.clone());
     spawn_output_reader(stderr, "ERR", sender);
 
+    let server_ports = server_ports_for_id(server_id).unwrap_or_default();
     let mut log_lines = Vec::new();
     let mut process_exited = false;
     let mut server_started = false;
+    let mut was_cancelled = false;
+    let mut last_port_probe = Instant::now();
+    let mut last_output_at = Instant::now();
+    let mut last_wait_message_at = Instant::now();
 
-    while started_at.elapsed() < test_timeout {
+    loop {
         while let Ok(line) = receiver.try_recv() {
             if is_server_started_line(&line.to_lowercase()) {
                 server_started = true;
             }
+            last_output_at = Instant::now();
             on_line(&line);
             log_lines.push(line);
         }
 
         if server_started {
             break;
+        }
+
+        if should_cancel() {
+            was_cancelled = true;
+            let line = "[INFO] Server test cancelled by user.";
+            on_line(line);
+            log_lines.push(line.to_string());
+            break;
+        }
+
+        if last_port_probe.elapsed() >= Duration::from_secs(2) {
+            last_port_probe = Instant::now();
+            if let Ok(usages) = find_port_usages(&server_ports) {
+                if !usages.is_empty() {
+                    server_started = true;
+                    let ports = usages
+                        .iter()
+                        .map(|usage| format!("{} {} PID {}", usage.protocol, usage.port, usage.pid))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let line =
+                        format!("[INFO] Detected Project Zomboid server port activity: {ports}.");
+                    on_line(&line);
+                    log_lines.push(line);
+                    break;
+                }
+            }
+        }
+
+        if last_output_at.elapsed() >= Duration::from_secs(60)
+            && last_wait_message_at.elapsed() >= Duration::from_secs(60)
+        {
+            last_wait_message_at = Instant::now();
+            let line = "[INFO] Still waiting for server startup confirmation. Use Cancel to stop this test.";
+            on_line(line);
+            log_lines.push(line.to_string());
         }
 
         if child
@@ -209,41 +274,45 @@ where
     }
 
     let duration_seconds = started_at.elapsed().as_secs();
-    let critical_lines = if server_started {
+    let critical_lines = if server_started || was_cancelled {
         Vec::new()
     } else {
         find_critical_server_lines(&log_lines)
     };
     let warning_count = count_warning_server_lines(&log_lines);
-    let status = if critical_lines.is_empty() {
-        "passed"
-    } else {
-        "failed"
-    };
+    let status = if server_started { "passed" } else { "failed" };
     let summary = if server_started {
         text(
             "Server started successfully: network active and port listening. The test was stopped automatically.",
             "Servidor iniciado com sucesso: rede ativa e porta escutando. O teste foi encerrado automaticamente.",
         ).to_string()
+    } else if was_cancelled {
+        text(
+            "Server test cancelled by user.",
+            "Teste do servidor cancelado pelo usuario.",
+        )
+        .to_string()
     } else if let Some(network_error_summary) = summarize_known_server_error(&log_lines) {
         network_error_summary
+    } else if process_exited {
+        text(
+            "The server process exited unexpectedly before starting.",
+            "O processo do servidor terminou inesperadamente antes de iniciar.",
+        )
+        .to_string()
     } else if critical_lines.is_empty() {
         if warning_count == 0 {
-            format!(
-                "{} {timeout_seconds}s: {}",
-                text("Quick test completed in", "Teste rapido concluido em"),
-                text(
-                    "no critical failures detected in captured logs.",
-                    "nenhuma falha critica detectada nos logs capturados."
-                )
+            text(
+                "Server test stopped without detecting startup and no critical failures were captured.",
+                "O teste do servidor parou sem detectar inicializacao e nenhuma falha critica foi capturada.",
             )
+            .to_string()
         } else {
             format!(
-                "{} {timeout_seconds}s: {} {warning_count} {}.",
-                text("Quick test completed in", "Teste rapido concluido em"),
+                "{} {warning_count} {}.",
                 text(
-                    "no critical failures detected. Captured",
-                    "nenhuma falha critica detectada. Foram capturados"
+                    "Server test stopped without detecting startup. Captured",
+                    "O teste do servidor parou sem detectar inicializacao. Foram capturados"
                 ),
                 text("warning(s)", "aviso(s)")
             )
@@ -270,16 +339,4 @@ where
         critical_count: critical_lines.len(),
         log_lines: tail_log_lines(log_lines, 240),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::models::BUILD_41;
-
-    #[test]
-    fn gives_b42_more_time_to_start() {
-        assert_eq!(timeout_seconds_for_build(BUILD_41), 180);
-        assert_eq!(timeout_seconds_for_build(BUILD_42), 360);
-    }
 }

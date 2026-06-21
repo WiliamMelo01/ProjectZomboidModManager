@@ -1,4 +1,5 @@
 use super::discovery::write_local_workshop_id;
+use crate::models::ZomboidModInstallResult;
 use crate::zomboid_mods_dir;
 use std::{
     fs,
@@ -9,7 +10,7 @@ pub(super) fn install_zomboid_mod_impl(
     package_path: String,
     mod_id: String,
     workshop_id: String,
-) -> Result<(), String> {
+) -> Result<ZomboidModInstallResult, String> {
     let source = PathBuf::from(&package_path);
 
     if !source.exists() || !source.is_dir() {
@@ -28,7 +29,7 @@ fn install_mod(
     mod_id: &str,
     target_root: &Path,
     workshop_id: Option<&str>,
-) -> Result<(), String> {
+) -> Result<ZomboidModInstallResult, String> {
     let folder_name = if mod_id.trim().is_empty() {
         source
             .file_name()
@@ -39,14 +40,20 @@ fn install_mod(
         sanitize_folder_name(mod_id)
     };
     let target = target_root.join(folder_name);
+    let was_copied = !target.exists();
 
-    if !target.exists() {
+    if was_copied {
         copy_dir_recursive(source, &target)?;
     }
 
     write_local_workshop_id(&target, workshop_id)?;
 
-    Ok(())
+    Ok(ZomboidModInstallResult {
+        mod_id: mod_id.to_string(),
+        workshop_id: workshop_id.unwrap_or_default().to_string(),
+        target_path: target.display().to_string(),
+        was_copied,
+    })
 }
 
 fn copy_dir_recursive(source: &Path, target: &Path) -> Result<(), String> {

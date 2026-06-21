@@ -33,8 +33,8 @@ pub(super) fn create_server_test_batch(
 
             let mut line = line.replace("%~dp0", &game_dir_text);
 
-            if line.contains("zombie.network.GameServer") && !line.contains("-servername") {
-                line.push_str(&format!(" -servername {server_id}"));
+            if line.contains("zombie.network.GameServer") {
+                line = replace_servername_argument(&line, server_id);
                 injected_server_name = true;
             }
 
@@ -70,4 +70,40 @@ pub(super) fn create_server_test_batch(
     })?;
 
     Ok(test_bat_path)
+}
+fn replace_servername_argument(line: &str, server_id: &str) -> String {
+    let lower_line = line.to_lowercase();
+    let Some(start) = lower_line.find("-servername") else {
+        return format!("{line} -servername {server_id}");
+    };
+
+    let after_flag = start + "-servername".len();
+    let bytes = line.as_bytes();
+    let mut value_start = after_flag;
+
+    while value_start < bytes.len() && bytes[value_start].is_ascii_whitespace() {
+        value_start += 1;
+    }
+
+    let mut value_end = value_start;
+    if value_start < bytes.len() && bytes[value_start] == b'"' {
+        value_end += 1;
+        while value_end < bytes.len() && bytes[value_end] != b'"' {
+            value_end += 1;
+        }
+        if value_end < bytes.len() {
+            value_end += 1;
+        }
+    } else {
+        while value_end < bytes.len() && !bytes[value_end].is_ascii_whitespace() {
+            value_end += 1;
+        }
+    }
+
+    format!(
+        "{}-servername {}{}",
+        &line[..start],
+        server_id,
+        &line[value_end..]
+    )
 }

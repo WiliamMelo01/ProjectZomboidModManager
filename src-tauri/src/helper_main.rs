@@ -6,13 +6,18 @@ use serde::Deserialize;
 use std::{
     collections::HashSet,
     env, fs,
-    io::Read,
+    io::{Read, Write},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
+    sync::OnceLock,
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+mod game;
 mod models;
 mod mods;
+mod server_test;
 mod servers;
 mod util;
 
@@ -28,9 +33,15 @@ mod workshop {
     pub(crate) fn open_file_external(_path: &Path) -> Result<(), String> {
         Err("Opening files is not available in pzmm-helper.".to_string())
     }
+
+    pub(crate) fn open_path_external(_path: &Path) -> Result<(), String> {
+        Err("Opening folders is not available in pzmm-helper.".to_string())
+    }
 }
 
 const MANAGED_STEAMCMD_POOL_DIR_NAME: &str = "steamcmd-pool";
+static HELPER_SERVER_LAUNCH_PATH: OnceLock<String> = OnceLock::new();
+static HELPER_SERVER_PROFILE_DIR: OnceLock<String> = OnceLock::new();
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,6 +55,31 @@ struct UpdateServerModsRequest {
 #[serde(rename_all = "camelCase")]
 struct ServerIdRequest {
     server_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TestServerRequest {
+    server_id: String,
+    server_launch_path: Option<String>,
+    server_profile_path: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ServerControlRequest {
+    server_id: String,
+    server_launch_path: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HelperServerTestEvent {
+    event: String,
+    timeout_seconds: Option<u64>,
+    line: Option<String>,
+    result: Option<models::ServerTestResult>,
+    error: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -133,6 +169,51 @@ fn run() -> Result<(), String> {
             print_json(&get_path_status(request.paths)?)
         }
         "list-servers" => print_json(&servers::list_zomboid_servers_impl()?),
+        "test-server" => {
+            let request = read_request::<TestServerRequest>()?;
+            if let Some(server_launch_path) = request
+                .server_launch_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+            {
+                let _ = HELPER_SERVER_LAUNCH_PATH.set(server_launch_path.to_string());
+            }
+            if let Some(server_profile_path) = request
+                .server_profile_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+            {
+                let _ = HELPER_SERVER_PROFILE_DIR.set(server_profile_path.to_string());
+            }
+            run_server_test(request.server_id)
+        }
+        "cancel-server-test" => {
+            let request = read_request::<ServerIdRequest>()?;
+            request_server_test_cancel(request.server_id)?;
+            print_json(&serde_json::json!({ "ok": true }))
+        }
+        "check-server-firewall" => {
+            let request = read_request::<ServerIdRequest>()?;
+            print_json(&check_server_firewall(request.server_id)?)
+        }
+        "configure-server-firewall" => {
+            let request = read_request::<ServerIdRequest>()?;
+            print_json(&configure_server_firewall(request.server_id)?)
+        }
+        "start-server" => {
+            let request = read_request::<ServerControlRequest>()?;
+            if let Some(server_launch_path) = request
+                .server_launch_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+            {
+                let _ = HELPER_SERVER_LAUNCH_PATH.set(server_launch_path.to_string());
+            }
+            print_json(&start_server(request.server_id)?)
+        }
         "create-server" => {
             let request = read_request::<CreateServerRequest>()?;
             let example_dir = ensure_embedded_server_example_dir()?;
@@ -187,14 +268,22 @@ fn run() -> Result<(), String> {
         }
         "install-mod" => {
             let request = read_request::<InstallModRequest>()?;
-            mods::install_zomboid_mod(request.package_path, request.mod_id, request.workshop_id)?;
+            let result = mods::install_zomboid_mod(
+                request.package_path,
+                request.mod_id,
+                request.workshop_id,
+            )?;
             mods::clear_zomboid_mods_cache_impl()?;
-            print_json(&serde_json::json!({ "ok": true }))
+            print_json(&result)
         }
         "install-server-map" => {
             let request = read_request::<InstallServerMapRequest>()?;
             servers::install_zomboid_server_map(request.server_id, request.mod_path)?;
             print_json(&serde_json::json!({ "ok": true }))
+        }
+        "delete-server" => {
+            let request = read_request::<ServerIdRequest>()?;
+            print_json(&servers::delete_zomboid_server_impl(&request.server_id)?)
         }
         _ => Err(format!("Unknown helper command: {command}")),
     }
@@ -230,7 +319,444 @@ fn print_json<T: serde::Serialize>(value: &T) -> Result<(), String> {
     let json = serde_json::to_string(value)
         .map_err(|error| format!("Could not serialize helper response: {error}"))?;
     println!("{json}");
+    std::io::stdout()
+        .flush()
+        .map_err(|error| format!("Could not flush helper response: {error}"))?;
     Ok(())
+}
+
+fn run_server_test(server_id: String) -> Result<(), String> {
+    clear_server_test_cancel(&server_id)?;
+    print_json(&HelperServerTestEvent {
+        event: "started".to_string(),
+        timeout_seconds: None,
+        line: None,
+        result: None,
+        error: None,
+    })?;
+
+    let result = server_test::test_zomboid_server_impl_with_line_callback_and_cancel(
+        &server_id,
+        |line| {
+            let _ = print_json(&HelperServerTestEvent {
+                event: "line".to_string(),
+                timeout_seconds: None,
+                line: Some(line.to_string()),
+                result: None,
+                error: None,
+            });
+        },
+        || server_test_cancel_requested(&server_id),
+    );
+    let _ = clear_server_test_cancel(&server_id);
+
+    match result {
+        Ok(result) => print_json(&HelperServerTestEvent {
+            event: "finished".to_string(),
+            timeout_seconds: None,
+            line: None,
+            result: Some(result),
+            error: None,
+        }),
+        Err(error) => print_json(&HelperServerTestEvent {
+            event: "error".to_string(),
+            timeout_seconds: None,
+            line: None,
+            result: None,
+            error: Some(error),
+        }),
+    }
+}
+
+fn server_test_cancel_flag_path(server_id: &str) -> Result<PathBuf, String> {
+    Ok(app_config_dir()?
+        .join("server-test-cancel")
+        .join(format!("{}.cancel", safe_server_test_id(server_id))))
+}
+
+fn safe_server_test_id(server_id: &str) -> String {
+    let safe_id = server_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+
+    if safe_id.trim().is_empty() {
+        "server".to_string()
+    } else {
+        safe_id
+    }
+}
+
+fn clear_server_test_cancel(server_id: &str) -> Result<(), String> {
+    let flag_path = server_test_cancel_flag_path(server_id)?;
+    if flag_path.exists() {
+        fs::remove_file(&flag_path).map_err(|error| {
+            format!(
+                "Could not clear remote server test cancel flag at {}: {error}",
+                flag_path.display()
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
+fn request_server_test_cancel(server_id: String) -> Result<(), String> {
+    let flag_path = server_test_cancel_flag_path(&server_id)?;
+    if let Some(parent) = flag_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "Could not create remote server test cancel folder at {}: {error}",
+                parent.display()
+            )
+        })?;
+    }
+
+    fs::write(&flag_path, "cancel").map_err(|error| {
+        format!(
+            "Could not request remote server test cancellation at {}: {error}",
+            flag_path.display()
+        )
+    })
+}
+
+fn server_test_cancel_requested(server_id: &str) -> bool {
+    server_test_cancel_flag_path(server_id)
+        .map(|path| path.exists())
+        .unwrap_or(false)
+}
+
+fn check_server_firewall(server_id: String) -> Result<models::RemoteServerFirewallCheck, String> {
+    let server_id = server_id.trim().to_string();
+    let ports = server_test::server_ports_for_id(&server_id)?;
+    let mut rules = Vec::new();
+    let mut logs = vec![format!(
+        "Checking Windows Firewall for {} on ports {}.",
+        server_id,
+        ports
+            .iter()
+            .map(u16::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    )];
+
+    for protocol in firewall_protocols() {
+        for port in &ports {
+            let allowed = is_firewall_rule_allowed(protocol, *port)?;
+            logs.push(format!(
+                "{} {} {}.",
+                protocol,
+                port,
+                if allowed {
+                    "is allowed"
+                } else {
+                    "is blocked or missing"
+                }
+            ));
+            rules.push(models::RemoteFirewallRuleStatus {
+                protocol: protocol.to_string(),
+                port: *port,
+                allowed,
+            });
+        }
+    }
+
+    let missing_rules = rules
+        .iter()
+        .filter(|rule| !rule.allowed)
+        .cloned()
+        .collect::<Vec<_>>();
+    let is_configured = missing_rules.is_empty();
+
+    if is_configured {
+        logs.push("Firewall is ready for inbound Project Zomboid connections.".to_string());
+    } else {
+        logs.push(format!(
+            "Firewall needs {} inbound rule(s) before the server is started.",
+            missing_rules.len()
+        ));
+    }
+
+    Ok(models::RemoteServerFirewallCheck {
+        server_id,
+        ports,
+        rules,
+        missing_rules,
+        is_configured,
+        logs,
+    })
+}
+
+fn configure_server_firewall(
+    server_id: String,
+) -> Result<models::RemoteServerActionResult, String> {
+    let check = check_server_firewall(server_id.clone())?;
+    let mut logs = check.logs;
+
+    if check.missing_rules.is_empty() {
+        return Ok(models::RemoteServerActionResult {
+            success: true,
+            message: "Firewall is already configured.".to_string(),
+            command: "Get-NetFirewallRule".to_string(),
+            logs,
+        });
+    }
+
+    for rule in check.missing_rules {
+        logs.push(format!(
+            "Creating inbound firewall rule for {} {}.",
+            rule.protocol, rule.port
+        ));
+        create_firewall_rule(&server_id, &rule.protocol, rule.port)?;
+    }
+
+    logs.push("Firewall rules created. Rechecking firewall state.".to_string());
+    let updated = check_server_firewall(server_id)?;
+    logs.extend(updated.logs);
+
+    Ok(models::RemoteServerActionResult {
+        success: updated.is_configured,
+        message: if updated.is_configured {
+            "Firewall configured successfully.".to_string()
+        } else {
+            "Firewall is still missing required inbound rules.".to_string()
+        },
+        command: "New-NetFirewallRule".to_string(),
+        logs,
+    })
+}
+
+fn start_server(server_id: String) -> Result<models::RemoteServerActionResult, String> {
+    let server_id = server_id.trim().to_string();
+    let launch_path = configured_server_launch_path()?;
+
+    if !launch_path.is_file() {
+        return Err(format!(
+            "Remote server launcher not found: {}.",
+            launch_path.display()
+        ));
+    }
+
+    let working_dir = launch_path
+        .parent()
+        .ok_or_else(|| "Remote server launcher has no parent folder.".to_string())?;
+    let log_path = next_server_start_log_path(&server_id)?;
+    let command_line = format!(
+        "cmd.exe /C call \"{}\" -servername {} > \"{}\" 2>&1",
+        launch_path.display(),
+        server_id,
+        log_path.display()
+    );
+    let mut command = Command::new("cmd.exe");
+    let mut child = util::hide_command_window(&mut command)
+        .arg("/C")
+        .arg(&format!(
+            "call \"{}\" -servername {} > \"{}\" 2>&1",
+            launch_path.display(),
+            server_id,
+            log_path.display()
+        ))
+        .current_dir(working_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("Could not start remote server: {error}"))?;
+
+    let pid = child.id();
+    let mut logs = vec![
+        format!("Launcher: {}", launch_path.display()),
+        format!("Working directory: {}", working_dir.display()),
+        format!("Startup log: {}", log_path.display()),
+        format!("Started process PID {}.", pid),
+        "Watching startup output for up to 45 seconds...".to_string(),
+    ];
+    let started_at = Instant::now();
+    let watch_timeout = Duration::from_secs(45);
+    let mut seen_lines = 0usize;
+    let mut server_started = false;
+    let mut process_exited = false;
+
+    while started_at.elapsed() < watch_timeout {
+        let current_lines = read_start_log_lines(&log_path);
+        for line in current_lines.iter().skip(seen_lines) {
+            if is_remote_server_started_line(line) {
+                server_started = true;
+            }
+            logs.push(line.clone());
+        }
+        seen_lines = current_lines.len();
+
+        if server_started {
+            logs.push("Server startup signal detected. Leaving process running.".to_string());
+            break;
+        }
+
+        if child
+            .try_wait()
+            .map_err(|error| format!("Could not inspect remote server process: {error}"))?
+            .is_some()
+        {
+            process_exited = true;
+            logs.push("Remote server process exited during startup watch.".to_string());
+            break;
+        }
+
+        thread::sleep(Duration::from_millis(500));
+    }
+
+    if !server_started && !process_exited {
+        logs.push("Startup watch window finished. The process is still running; check the terminal or server logs for continued output.".to_string());
+    }
+
+    let message = if server_started {
+        format!("Remote server started with PID {}.", pid)
+    } else if process_exited {
+        format!(
+            "Remote server process exited during startup. See {}.",
+            log_path.display()
+        )
+    } else {
+        format!("Remote server process is running with PID {}. Startup confirmation was not detected yet.", pid)
+    };
+
+    Ok(models::RemoteServerActionResult {
+        success: !process_exited,
+        message,
+        command: command_line,
+        logs,
+    })
+}
+
+fn next_server_start_log_path(server_id: &str) -> Result<PathBuf, String> {
+    let log_dir = app_config_dir()?.join("server-start-logs");
+    fs::create_dir_all(&log_dir)
+        .map_err(|error| format!("Could not create server start log dir: {error}"))?;
+    let safe_id = server_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default();
+
+    Ok(log_dir.join(format!("{safe_id}-{timestamp}.log")))
+}
+
+fn read_start_log_lines(log_path: &Path) -> Vec<String> {
+    let Ok(content) = fs::read_to_string(log_path) else {
+        return Vec::new();
+    };
+
+    content.lines().map(ToOwned::to_owned).collect()
+}
+
+fn is_remote_server_started_line(line: &str) -> bool {
+    let normalized_line = line.to_lowercase();
+
+    normalized_line.contains("*** server started")
+        || normalized_line.contains("server is listening on port")
+        || normalized_line.contains("raknet.startup() return code: 0")
+        || normalized_line.contains("luanet: initialization [done]")
+}
+fn configured_server_launch_path() -> Result<PathBuf, String> {
+    HELPER_SERVER_LAUNCH_PATH
+        .get()
+        .map(|path| PathBuf::from(path.trim()))
+        .filter(|path| !path.as_os_str().is_empty())
+        .ok_or_else(|| "Remote server launch path is not configured.".to_string())
+}
+
+fn firewall_protocols() -> [&'static str; 2] {
+    ["UDP", "TCP"]
+}
+
+fn is_firewall_rule_allowed(protocol: &str, port: u16) -> Result<bool, String> {
+    let port_text = port.to_string();
+    let script = r#"$ErrorActionPreference='Stop'; $protocol=__PROTOCOL__; $port=__PORT__; $filters=Get-NetFirewallPortFilter -Protocol $protocol -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -eq 'Any' -or (($_.LocalPort -split ',') | ForEach-Object { $_.Trim() }) -contains $port }; $allowed=$false; foreach($filter in $filters){ $rule=$filter | Get-NetFirewallRule -ErrorAction SilentlyContinue; if($rule -and $rule.Enabled -eq 'True' -and $rule.Direction -eq 'Inbound' -and $rule.Action -eq 'Allow'){ $allowed=$true; break } }; if($allowed){ 'true' } else { 'false' }"#
+        .replace("__PROTOCOL__", &quote_powershell_single_string(protocol))
+        .replace("__PORT__", &quote_powershell_single_string(&port_text));
+    let output = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &script,
+        ])
+        .output()
+        .map_err(|error| format!("Could not inspect Windows Firewall: {error}"))?;
+
+    if !output.status.success() {
+        return Err(command_output_error(
+            "Could not inspect Windows Firewall",
+            &output,
+        ));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .eq_ignore_ascii_case("true"))
+}
+
+fn create_firewall_rule(server_id: &str, protocol: &str, port: u16) -> Result<(), String> {
+    let port_text = port.to_string();
+    let display_name = format!("PZMM Project Zomboid {server_id} {protocol} {port}");
+    let script = r#"$ErrorActionPreference='Stop'; $protocol=__PROTOCOL__; $port=__PORT__; $displayName=__DISPLAY_NAME__; $existing=Get-NetFirewallRule -DisplayName $displayName -ErrorAction SilentlyContinue; if($existing){ Set-NetFirewallRule -DisplayName $displayName -Enabled True -Direction Inbound -Action Allow -Profile Any | Out-Null } else { New-NetFirewallRule -DisplayName $displayName -Direction Inbound -Action Allow -Protocol $protocol -LocalPort $port -Profile Any | Out-Null }; Write-Output $displayName"#
+        .replace("__PROTOCOL__", &quote_powershell_single_string(protocol))
+        .replace("__PORT__", &quote_powershell_single_string(&port_text))
+        .replace("__DISPLAY_NAME__", &quote_powershell_single_string(&display_name));
+    let output = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &script,
+        ])
+        .output()
+        .map_err(|error| format!("Could not create Windows Firewall rule: {error}"))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(command_output_error(
+            "Could not create Windows Firewall rule",
+            &output,
+        ))
+    }
+}
+
+fn quote_powershell_single_string(value: &str) -> String {
+    format!("'{}'", value.replace("'", "''"))
+}
+fn command_output_error(prefix: &str, output: &std::process::Output) -> String {
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let details = [stdout, stderr]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if details.is_empty() {
+        format!("{prefix}: {}", output.status)
+    } else {
+        format!("{prefix}:\n{details}")
+    }
 }
 
 fn get_system_ram() -> Result<u32, String> {
@@ -316,12 +842,48 @@ fn app_config_dir() -> Result<PathBuf, String> {
     Ok(PathBuf::from(config_root).join("ZomboidServerModManager"))
 }
 
+fn app_settings_path() -> Result<PathBuf, String> {
+    Ok(app_config_dir()?.join("settings.ini"))
+}
+
+fn read_config_value(key: &str) -> Result<Option<String>, String> {
+    if key == "server_launch_path" {
+        if let Some(server_launch_path) = HELPER_SERVER_LAUNCH_PATH
+            .get()
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+        {
+            return Ok(Some(server_launch_path.to_string()));
+        }
+    }
+
+    let settings_path = app_settings_path()?;
+
+    if !settings_path.exists() {
+        return Ok(None);
+    }
+
+    let content = util::read_text_lossy(&settings_path)?;
+
+    Ok(util::read_ini_value(&content, key).filter(|value| !value.trim().is_empty()))
+}
+
 fn zomboid_mods_dir() -> Result<PathBuf, String> {
     let home = user_home_dir()?;
     Ok(home.join("Zomboid").join("mods"))
 }
 
 fn zomboid_server_dir() -> Result<PathBuf, String> {
+    if let Some(server_profile_dir) = HELPER_SERVER_PROFILE_DIR
+        .get()
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        return Ok(PathBuf::from(server_profile_dir));
+    }
+
     let home = user_home_dir()?;
     Ok(home.join("Zomboid").join("Server"))
 }

@@ -9,9 +9,9 @@ use crate::{
     managed_steamcmd_pool_workshop_dirs, read_config_value, read_saved_custom_mod_locations,
     read_saved_mod_locations, run_blocking, zomboid_mods_dir,
 };
-use std::{collections::HashSet, env, fs, path::PathBuf};
 #[cfg(windows)]
 use std::process::Command;
+use std::{collections::HashSet, env, fs, path::PathBuf};
 
 pub(crate) const DEFAULT_MAX_CONCURRENT_DOWNLOADS: u32 = 1;
 pub(crate) const MAX_CONCURRENT_DOWNLOADS_LIMIT: u32 = 1;

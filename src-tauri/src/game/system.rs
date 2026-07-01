@@ -1,4 +1,3 @@
-#[cfg(windows)]
 use super::performance::validate_game_executable_path;
 use crate::i18n::text;
 #[cfg(windows)]
@@ -6,6 +5,8 @@ use crate::util::hide_command_window;
 #[cfg(not(windows))]
 use std::fs;
 #[cfg(windows)]
+use std::{path::PathBuf, process::Command};
+#[cfg(not(windows))]
 use std::{path::PathBuf, process::Command};
 
 #[cfg(windows)]
@@ -81,11 +82,45 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
 
 #[cfg(not(windows))]
 pub(super) fn select_game_executable_impl() -> Result<Option<String>, String> {
-    Err(text(
-        "Automatic file selection is available only on Windows.",
-        "Selecao de arquivo automatica esta disponivel apenas no Windows.",
-    )
-    .to_string())
+    let output = Command::new("sh")
+        .args([
+            "-lc",
+            &format!(
+                "command -v zenity >/dev/null 2>&1 && zenity --file-selection --title={} || command -v kdialog >/dev/null 2>&1 && kdialog --getopenfilename ~ '' || true",
+                shell_quote(text(
+                    "Select Project Zomboid executable",
+                    "Selecionar executavel do Project Zomboid"
+                ))
+            ),
+        ])
+        .output()
+        .map_err(|error| {
+            format!(
+                "{}: {error}",
+                text(
+                    "Could not open the file picker",
+                    "Nao foi possivel abrir o seletor de arquivos"
+                )
+            )
+        })?;
+
+    if !output.status.success() {
+        return Err(text(
+            "Could not select the Project Zomboid executable.",
+            "Nao foi possivel selecionar o executavel do Project Zomboid.",
+        )
+        .to_string());
+    }
+
+    let selected_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    if selected_path.is_empty() {
+        return Ok(None);
+    }
+
+    validate_game_executable_path(&PathBuf::from(&selected_path))?;
+
+    Ok(Some(selected_path))
 }
 
 #[cfg(windows)]
@@ -138,4 +173,9 @@ pub(super) fn get_system_ram_impl() -> Result<u32, String> {
     }
 
     Ok(16)
+}
+
+#[cfg(not(windows))]
+fn shell_quote(value: String) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }

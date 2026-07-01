@@ -1,4 +1,5 @@
 use crate::i18n::text;
+#[cfg(windows)]
 use crate::util::hide_command_window;
 use serde_json::Value;
 use std::{
@@ -20,16 +21,9 @@ pub(crate) fn fetch_steam_workshop_item_names(
         body.push_str(&format!("'publishedfileids[{index}]' = '{workshop_id}'; "));
     }
 
-    let script = format!(
-        "$ErrorActionPreference = 'Stop'; \
-         $body = @{{ {body} }}; \
-         $response = Invoke-RestMethod -Method Post \
-           -Uri 'https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/' \
-           -Body $body; \
-         $response | ConvertTo-Json -Depth 8 -Compress"
-    );
-    let response = run_powershell_json_request(
-        &script,
+    let response = run_steam_workshop_json_request(
+        "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/",
+        &body,
         &text("fetch mod details", "consultar os detalhes dos mods"),
     )?;
     let mut names = HashMap::new();
@@ -73,16 +67,9 @@ pub(crate) fn fetch_steam_workshop_collection_items(
     collection_id: &str,
 ) -> Result<Vec<String>, String> {
     let collection_id = validate_workshop_id(collection_id, &text("collection", "colecao"))?;
-    let script = format!(
-        "$ErrorActionPreference = 'Stop'; \
-         $body = @{{ collectioncount = '1'; 'publishedfileids[0]' = '{collection_id}' }}; \
-         $response = Invoke-RestMethod -Method Post \
-           -Uri 'https://api.steampowered.com/ISteamRemoteStorage/GetCollectionDetails/v1/' \
-           -Body $body; \
-         $response | ConvertTo-Json -Depth 8 -Compress"
-    );
-    let response = run_powershell_json_request(
-        &script,
+    let response = run_steam_workshop_json_request(
+        "https://api.steampowered.com/ISteamRemoteStorage/GetCollectionDetails/v1/",
+        &format!("collectioncount=1&publishedfileids[0]={collection_id}"),
         &text("fetch the Steam collection", "consultar a colecao na Steam"),
     )?;
 
@@ -129,15 +116,8 @@ fn collection_item_ids_from_api_response(response: &Value) -> Vec<String> {
 fn fetch_steam_workshop_collection_items_from_page(
     collection_id: &str,
 ) -> Result<Vec<String>, String> {
-    let script = format!(
-        "$ErrorActionPreference = 'Stop'; \
-         $response = Invoke-WebRequest \
-           -UseBasicParsing \
-           -Uri 'https://steamcommunity.com/sharedfiles/filedetails/?id={collection_id}'; \
-         $response.Content"
-    );
-    let html = run_powershell_text_request(
-        &script,
+    let html = run_steam_workshop_text_request(
+        &format!("https://steamcommunity.com/sharedfiles/filedetails/?id={collection_id}"),
         &text(
             "fetch the Steam collection page",
             "consultar a pagina da colecao na Steam",
@@ -178,6 +158,40 @@ fn collection_item_ids_from_html(html: &str, collection_id: &str) -> Vec<String>
     workshop_ids
 }
 
+#[cfg(windows)]
+fn run_steam_workshop_json_request(url: &str, body: &str, action: &str) -> Result<Value, String> {
+    let script = format!(
+        "$ErrorActionPreference = 'Stop'; \
+         $body = @{{ {body} }}; \
+         $response = Invoke-RestMethod -Method Post \
+           -Uri '{url}' \
+           -Body $body; \
+         $response | ConvertTo-Json -Depth 8 -Compress"
+    );
+    run_powershell_json_request(&script, action)
+}
+
+#[cfg(not(windows))]
+fn run_steam_workshop_json_request(url: &str, body: &str, action: &str) -> Result<Value, String> {
+    let command = format!(
+        "curl -fsSL -X POST -H 'Content-Type: application/x-www-form-urlencoded' --data {} {}",
+        shell_quote_single(body),
+        shell_quote_single(url)
+    );
+    let stdout = run_shell_capture(&command, action)?;
+
+    serde_json::from_str(&stdout).map_err(|error| {
+        format!(
+            "{} {action}: {error}",
+            text(
+                "Steam returned an invalid response while trying to",
+                "A Steam retornou uma resposta invalida ao tentar"
+            )
+        )
+    })
+}
+
+#[cfg(windows)]
 fn run_powershell_json_request(script: &str, action: &str) -> Result<Value, String> {
     let mut command = Command::new("powershell.exe");
     let output = hide_command_window(&mut command)
@@ -215,6 +229,25 @@ fn run_powershell_json_request(script: &str, action: &str) -> Result<Value, Stri
     })
 }
 
+#[cfg(windows)]
+fn run_steam_workshop_text_request(url: &str, action: &str) -> Result<String, String> {
+    let script = format!(
+        "$ErrorActionPreference = 'Stop'; \
+         $response = Invoke-WebRequest \
+           -UseBasicParsing \
+           -Uri '{url}'; \
+         $response.Content"
+    );
+    run_powershell_text_request(&script, action)
+}
+
+#[cfg(not(windows))]
+fn run_steam_workshop_text_request(url: &str, action: &str) -> Result<String, String> {
+    let command = format!("curl -fsSL {}", shell_quote_single(url));
+    run_shell_capture(&command, action)
+}
+
+#[cfg(windows)]
 fn run_powershell_text_request(script: &str, action: &str) -> Result<String, String> {
     let mut command = Command::new("powershell.exe");
     let output = hide_command_window(&mut command)
@@ -242,6 +275,32 @@ fn run_powershell_text_request(script: &str, action: &str) -> Result<String, Str
     }
 
     Ok(stdout)
+}
+
+#[cfg(not(windows))]
+fn run_shell_capture(command: &str, action: &str) -> Result<String, String> {
+    let output = Command::new("sh")
+        .args(["-lc", command])
+        .output()
+        .map_err(|error| format!("Could not {action}: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if !output.status.success() {
+        let details = stderr.trim();
+        return Err(if details.is_empty() {
+            format!("Could not {action}.")
+        } else {
+            format!("Could not {action}:\n{details}")
+        });
+    }
+
+    Ok(stdout)
+}
+
+#[cfg(not(windows))]
+fn shell_quote_single(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 #[cfg(test)]

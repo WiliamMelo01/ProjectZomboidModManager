@@ -11,6 +11,8 @@ use crate::{
 };
 #[cfg(windows)]
 use std::process::Command;
+#[cfg(not(windows))]
+use std::process::Command;
 use std::{collections::HashSet, env, fs, path::PathBuf};
 
 pub(crate) const DEFAULT_MAX_CONCURRENT_DOWNLOADS: u32 = 1;
@@ -500,9 +502,46 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
 
 #[cfg(not(windows))]
 fn select_mod_folder_impl() -> Result<Option<String>, String> {
-    Err(text(
-        "Automatic folder selection is available only on Windows.",
-        "Selecao de pasta automatica esta disponivel apenas no Windows.",
-    )
-    .to_string())
+    let output = Command::new("sh")
+        .args([
+            "-lc",
+            &format!(
+                "command -v zenity >/dev/null 2>&1 && zenity --file-selection --directory --title={} || command -v kdialog >/dev/null 2>&1 && kdialog --getexistingdirectory ~ || true",
+                shell_quote(text(
+                    "Select folder with Project Zomboid mods",
+                    "Selecionar pasta com mods do Project Zomboid"
+                ))
+            ),
+        ])
+        .output()
+        .map_err(|error| {
+            format!(
+                "{}: {error}",
+                text(
+                    "Could not open the folder picker",
+                    "Nao foi possivel abrir o seletor de pastas"
+                )
+            )
+        })?;
+
+    if !output.status.success() {
+        return Err(text(
+            "Could not select the mod folder.",
+            "Nao foi possivel selecionar a pasta de mods.",
+        )
+        .to_string());
+    }
+
+    let selected_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    if selected_path.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(selected_path))
+}
+
+#[cfg(not(windows))]
+fn shell_quote(value: String) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }

@@ -67,62 +67,128 @@ pub(super) fn scan_zomboid_installation_impl(
 }
 
 pub(crate) fn steam_zomboid_game_dirs() -> Vec<PathBuf> {
-    let mut steamapps_dirs = Vec::new();
-    let mut candidates = Vec::new();
+    #[cfg(windows)]
+    {
+        let mut steamapps_dirs = Vec::new();
+        let mut candidates = Vec::new();
 
-    if let Some(program_files_x86) = env::var_os("ProgramFiles(x86)") {
-        candidates.push(PathBuf::from(program_files_x86).join("Steam"));
-    }
-
-    if let Some(program_files) = env::var_os("ProgramFiles") {
-        candidates.push(PathBuf::from(program_files).join("Steam"));
-    }
-
-    if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
-        candidates.push(PathBuf::from(local_app_data).join("Steam"));
-    }
-
-    for steam_dir in candidates {
-        let steamapps_dir = steam_dir.join("steamapps");
-
-        if steamapps_dir.exists() {
-            steamapps_dirs.push(steamapps_dir.clone());
-            steamapps_dirs.extend(read_steam_library_dirs(
-                &steamapps_dir.join("libraryfolders.vdf"),
-            ));
+        if let Some(program_files_x86) = env::var_os("ProgramFiles(x86)") {
+            candidates.push(PathBuf::from(program_files_x86).join("Steam"));
         }
+
+        if let Some(program_files) = env::var_os("ProgramFiles") {
+            candidates.push(PathBuf::from(program_files).join("Steam"));
+        }
+
+        if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
+            candidates.push(PathBuf::from(local_app_data).join("Steam"));
+        }
+
+        for steam_dir in candidates {
+            let steamapps_dir = steam_dir.join("steamapps");
+
+            if steamapps_dir.exists() {
+                steamapps_dirs.push(steamapps_dir.clone());
+                steamapps_dirs.extend(read_steam_library_dirs(
+                    &steamapps_dir.join("libraryfolders.vdf"),
+                ));
+            }
+        }
+
+        dedupe_paths(
+            steamapps_dirs
+                .into_iter()
+                .map(|steamapps_dir| steamapps_dir.join("common").join("ProjectZomboid"))
+                .collect(),
+        )
     }
 
-    dedupe_paths(
-        steamapps_dirs
-            .into_iter()
-            .map(|steamapps_dir| steamapps_dir.join("common").join("ProjectZomboid"))
-            .collect(),
-    )
+    #[cfg(not(windows))]
+    {
+        let mut steamapps_dirs = Vec::new();
+        let mut candidates = Vec::new();
+
+        if let Some(home) = env::var_os("HOME") {
+            let home = PathBuf::from(home);
+            candidates.push(home.join(".steam").join("steam"));
+            candidates.push(home.join(".local").join("share").join("Steam"));
+            candidates.push(
+                home.join("snap")
+                    .join("steam")
+                    .join("common")
+                    .join(".steam")
+                    .join("steam"),
+            );
+        }
+
+        for steam_dir in candidates {
+            let steamapps_dir = steam_dir.join("steamapps");
+
+            if steamapps_dir.exists() {
+                steamapps_dirs.push(steamapps_dir.clone());
+                steamapps_dirs.extend(read_steam_library_dirs(
+                    &steamapps_dir.join("libraryfolders.vdf"),
+                ));
+            }
+        }
+
+        dedupe_paths(
+            steamapps_dirs
+                .into_iter()
+                .map(|steamapps_dir| steamapps_dir.join("common").join("ProjectZomboid"))
+                .collect(),
+        )
+    }
 }
 
 fn default_steam_zomboid_game_dir() -> PathBuf {
-    if let Some(program_files_x86) = env::var_os("ProgramFiles(x86)") {
-        return PathBuf::from(program_files_x86)
+    #[cfg(windows)]
+    {
+        if let Some(program_files_x86) = env::var_os("ProgramFiles(x86)") {
+            return PathBuf::from(program_files_x86)
+                .join("Steam")
+                .join("steamapps")
+                .join("common")
+                .join("ProjectZomboid");
+        }
+
+        PathBuf::from(r"C:\Program Files (x86)")
             .join("Steam")
             .join("steamapps")
             .join("common")
-            .join("ProjectZomboid");
+            .join("ProjectZomboid")
     }
 
-    PathBuf::from(r"C:\Program Files (x86)")
-        .join("Steam")
-        .join("steamapps")
-        .join("common")
-        .join("ProjectZomboid")
+    #[cfg(not(windows))]
+    {
+        if let Some(home) = env::var_os("HOME") {
+            return PathBuf::from(home)
+                .join(".steam")
+                .join("steam")
+                .join("steamapps")
+                .join("common")
+                .join("ProjectZomboid");
+        }
+
+        PathBuf::from("/usr/share/steam")
+            .join("steamapps")
+            .join("common")
+            .join("ProjectZomboid")
+    }
 }
 
 fn find_zomboid_executable_in_dir(game_dir: &Path) -> Option<PathBuf> {
-    for file_name in [
+    #[cfg(windows)]
+    let file_names = [
         "ProjectZomboid64.exe",
         "ProjectZomboid32.exe",
         "ProjectZomboid.exe",
-    ] {
+    ];
+
+    #[cfg(not(windows))]
+    let file_names = ["ProjectZomboid64", "ProjectZomboid32", "ProjectZomboid"];
+
+    for file_name in file_names {
         let candidate = game_dir.join(file_name);
 
         if candidate.exists() && candidate.is_file() {

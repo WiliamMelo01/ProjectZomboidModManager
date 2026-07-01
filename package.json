@@ -9,8 +9,8 @@
     "build": "vite build",
     "build:helper": "cd src-tauri && cargo build --bin pzmm-helper",
     "build:helper:release": "cd src-tauri && cargo build --release --bin pzmm-helper",
-    "tauri:dev": "npm run build:helper && tauri dev",
-    "tauri:build": "npm run build:helper:release && tauri build"
+    "tauri:dev": "npm run build:helper && node ./scripts/run-tauri-command.mjs dev",
+    "tauri:build": "npm run build:helper:release && node ./scripts/run-tauri-command.mjs build"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.0",

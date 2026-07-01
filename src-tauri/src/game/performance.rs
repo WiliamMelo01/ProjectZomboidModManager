@@ -45,13 +45,35 @@ pub(crate) fn validate_game_executable_path(path: &Path) -> Result<(), String> {
         ));
     }
 
-    let extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or_default();
+    #[cfg(windows)]
+    {
+        let extension = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or_default();
 
-    if !extension.eq_ignore_ascii_case("exe") {
-        return Err("Selecione um arquivo .exe do Project Zomboid.".to_string());
+        if !extension.eq_ignore_ascii_case("exe") {
+            return Err("Selecione um arquivo .exe do Project Zomboid.".to_string());
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let metadata = fs::metadata(path).map_err(|error| {
+            format!(
+                "Nao foi possivel verificar as permissoes de {}: {error}",
+                path.display()
+            )
+        })?;
+        let mode = metadata.permissions().mode();
+        if mode & 0o111 == 0 {
+            return Err(format!(
+                "O arquivo {} nao parece ser executavel. Marque permissoes de execucao ou selecione o launcher correto.",
+                path.display()
+            ));
+        }
     }
 
     Ok(())
@@ -87,7 +109,7 @@ pub(crate) fn apply_performance_settings(
         if extension == "json" {
             update_launcher_json(&candidate, server_mb)?;
             updated_server = true;
-        } else if extension == "bat" {
+        } else if extension == "bat" || extension == "sh" {
             updated_server = update_launcher_batch(&candidate, server_mb)? || updated_server;
         }
     }
@@ -111,19 +133,39 @@ pub(super) fn client_config_candidates(game_executable: &Path) -> Vec<PathBuf> {
     if let Some(stem) = game_executable.file_stem().and_then(|name| name.to_str()) {
         candidates.push(game_dir.join(format!("{stem}.json")));
         candidates.push(game_dir.join(format!("{stem}.bat")));
+        candidates.push(game_dir.join(format!("{stem}.sh")));
     }
 
+    #[cfg(windows)]
     candidates.extend([
         game_dir.join("ProjectZomboid64.json"),
         game_dir.join("ProjectZomboid32.json"),
         game_dir.join("ProjectZomboid64.bat"),
         game_dir.join("ProjectZomboid32.bat"),
     ]);
+    #[cfg(not(windows))]
+    candidates.extend([
+        game_dir.join("ProjectZomboid64.json"),
+        game_dir.join("ProjectZomboid32.json"),
+        game_dir.join("ProjectZomboid64.sh"),
+        game_dir.join("ProjectZomboid32.sh"),
+    ]);
     dedupe_paths(candidates)
 }
 
 pub(super) fn server_config_candidates(game_dir: &Path) -> Vec<PathBuf> {
-    dedupe_paths(vec![game_dir.join("ProjectZomboidServer.bat")])
+    #[cfg(windows)]
+    {
+        dedupe_paths(vec![game_dir.join("ProjectZomboidServer.bat")])
+    }
+
+    #[cfg(not(windows))]
+    {
+        dedupe_paths(vec![
+            game_dir.join("start-server.sh"),
+            game_dir.join("ProjectZomboidServer.sh"),
+        ])
+    }
 }
 
 fn update_launcher_configs(paths: &[PathBuf], ram_mb: u32) -> Result<bool, String> {
@@ -227,7 +269,11 @@ fn update_launcher_batch(path: &Path, ram_mb: u32) -> Result<bool, String> {
             }
         })
         .collect::<Vec<_>>()
-        .join("\n");
+        .join(if content.contains("\r\n") {
+            "\r\n"
+        } else {
+            "\n"
+        });
 
     fs::write(path, updated)
         .map_err(|error| format!("Nao foi possivel salvar {}: {error}", path.display()))?;

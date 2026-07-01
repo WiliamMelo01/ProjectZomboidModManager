@@ -1,4 +1,5 @@
 use super::batch::create_server_test_batch;
+use super::batch::default_server_launcher_name;
 use super::logs::{
     count_warning_server_lines, find_critical_server_lines, is_server_started_line,
     server_test_setup_error, summarize_known_server_error, tail_log_lines,
@@ -50,7 +51,7 @@ where
                 "Invalid server for testing.",
                 "Servidor invalido para teste.",
             ),
-            Path::new("ProjectZomboidServer.bat"),
+            Path::new(default_server_launcher_name()),
             "",
             0,
         ));
@@ -68,7 +69,7 @@ where
                 ),
                 server_path.display()
             ),
-            Path::new("ProjectZomboidServer.bat"),
+            Path::new(default_server_launcher_name()),
             "",
             0,
         ));
@@ -81,27 +82,50 @@ where
     let configured_launch_path = read_config_value("server_launch_path")?
         .filter(|path| !path.trim().is_empty())
         .map(PathBuf::from);
-    let (game_dir, bat_path) = if let Some(launch_path) = configured_launch_path {
-        let Some(parent) = launch_path
-            .parent()
-            .filter(|path| path.exists() && path.is_dir())
-        else {
-            return Ok(server_test_setup_error(
-                &format!(
-                    "{}: {}.",
-                    text(
-                        "Configured server launcher folder was not found",
-                        "A pasta configurada do inicializador do servidor nao foi encontrada"
+    let (game_dir, launcher_path) = if let Some(launch_path) = configured_launch_path {
+        if launch_path.is_dir() {
+            let launcher_path = launch_path.join(default_server_launcher_name());
+            let Some(parent) = launcher_path
+                .parent()
+                .filter(|path| path.exists() && path.is_dir())
+            else {
+                return Ok(server_test_setup_error(
+                    &format!(
+                        "{}: {}.",
+                        text(
+                            "Configured server launcher folder was not found",
+                            "A pasta configurada do inicializador do servidor nao foi encontrada"
+                        ),
+                        launch_path.display()
                     ),
-                    launch_path.display()
-                ),
-                &launch_path,
-                "",
-                0,
-            ));
-        };
+                    &launcher_path,
+                    "",
+                    0,
+                ));
+            };
+            (parent.to_path_buf(), launcher_path)
+        } else {
+            let Some(parent) = launch_path
+                .parent()
+                .filter(|path| path.exists() && path.is_dir())
+            else {
+                return Ok(server_test_setup_error(
+                    &format!(
+                        "{}: {}.",
+                        text(
+                            "Configured server launcher folder was not found",
+                            "A pasta configurada do inicializador do servidor nao foi encontrada"
+                        ),
+                        launch_path.display()
+                    ),
+                    &launch_path,
+                    "",
+                    0,
+                ));
+            };
 
-        (parent.to_path_buf(), launch_path)
+            (parent.to_path_buf(), launch_path)
+        }
     } else {
         let Some(game_dir) = resolve_zomboid_game_dir()? else {
             return Ok(server_test_setup_error(
@@ -109,22 +133,30 @@ where
                     "Project Zomboid folder not found. Configure the game executable in settings.",
                     "Pasta do Project Zomboid nao encontrada. Configure o executavel do jogo nas configuracoes.",
                 ),
-                Path::new("ProjectZomboidServer.bat"),
+                Path::new(default_server_launcher_name()),
                 "",
                 0,
             ));
         };
 
-        let bat_path = game_dir.join("ProjectZomboidServer.bat");
-        (game_dir, bat_path)
+        let launcher_path = game_dir.join(default_server_launcher_name());
+        (game_dir, launcher_path)
     };
-    let mut command = format!(
-        "cmd.exe /C call \"{}\" -servername {}",
-        bat_path.display(),
-        server_id
-    );
+    let mut command = if cfg!(windows) {
+        format!(
+            "cmd.exe /C call \"{}\" -servername {}",
+            launcher_path.display(),
+            server_id
+        )
+    } else {
+        format!(
+            "sh \"{}\" -servername {}",
+            launcher_path.display(),
+            server_id
+        )
+    };
 
-    if !bat_path.exists() || !bat_path.is_file() {
+    if !launcher_path.exists() || !launcher_path.is_file() {
         return Ok(server_test_setup_error(
             &format!(
                 "{} {}.",
@@ -134,34 +166,63 @@ where
                 ),
                 game_dir.display()
             ),
-            &bat_path,
+            &launcher_path,
             &command,
             0,
         ));
     }
 
-    let test_bat_path = create_server_test_batch(&game_dir, &bat_path, server_id)?;
-    command = format!("cmd.exe /C call \"{}\"", test_bat_path.display());
+    let test_bat_path = create_server_test_batch(&game_dir, &launcher_path, server_id)?;
+    command = if cfg!(windows) {
+        format!("cmd.exe /C call \"{}\"", test_bat_path.display())
+    } else {
+        format!("sh \"{}\"", test_bat_path.display())
+    };
     let started_at = Instant::now();
-    let mut command_process = Command::new("cmd.exe");
-    let mut child = hide_command_window(&mut command_process)
-        .arg("/C")
-        .arg("call")
-        .arg(&test_bat_path)
-        .current_dir(&game_dir)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .stdin(Stdio::null())
-        .spawn()
-        .map_err(|error| {
-            format!(
-                "{}: {error}",
-                text(
-                    "Could not start the server test",
-                    "Nao foi possivel iniciar o teste do servidor"
-                )
-            )
-        })?;
+    let mut child = {
+        #[cfg(windows)]
+        {
+            let mut command_process = Command::new("cmd.exe");
+            hide_command_window(&mut command_process)
+                .arg("/C")
+                .arg("call")
+                .arg(&test_bat_path)
+                .current_dir(&game_dir)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .stdin(Stdio::null())
+                .spawn()
+                .map_err(|error| {
+                    format!(
+                        "{}: {error}",
+                        text(
+                            "Could not start the server test",
+                            "Nao foi possivel iniciar o teste do servidor"
+                        )
+                    )
+                })?
+        }
+
+        #[cfg(not(windows))]
+        {
+            Command::new("sh")
+                .arg(&test_bat_path)
+                .current_dir(&game_dir)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .stdin(Stdio::null())
+                .spawn()
+                .map_err(|error| {
+                    format!(
+                        "{}: {error}",
+                        text(
+                            "Could not start the server test",
+                            "Nao foi possivel iniciar o teste do servidor"
+                        )
+                    )
+                })?
+        }
+    };
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
@@ -333,7 +394,7 @@ where
         status: status.to_string(),
         summary,
         duration_seconds,
-        bat_path: bat_path.display().to_string(),
+        bat_path: launcher_path.display().to_string(),
         command,
         warning_count,
         critical_count: critical_lines.len(),

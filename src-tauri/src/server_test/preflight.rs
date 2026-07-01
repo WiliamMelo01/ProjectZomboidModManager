@@ -4,6 +4,7 @@ use crate::i18n::text;
 use crate::models::{ServerTestResult, ZomboidMod, ZomboidModVariant};
 use crate::mods::{list_zomboid_mods_impl, parse_server_mod_ids};
 use crate::read_config_value;
+use crate::server_test::default_server_launcher_name;
 use crate::servers::read_zomboid_server_build;
 use crate::util::{read_ini_value, read_text_lossy};
 use std::{
@@ -134,7 +135,7 @@ pub(crate) fn validate_server_mod_dependencies(
             )
         ),
         duration_seconds: 0,
-        bat_path: "ProjectZomboidServer.bat".to_string(),
+        bat_path: default_server_launcher_name().to_string(),
         command: format!(
             "preflight: {}",
             text(

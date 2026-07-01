@@ -239,6 +239,7 @@ pub(crate) struct RemoteServerConnectionResult {
     pub(crate) server_path: String,
     pub(crate) message: String,
     pub(crate) latency_ms: u128,
+    pub(crate) diagnostic_log: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -324,10 +325,18 @@ pub(crate) struct RemoteHelperSetupResult {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteZomboidServerPathRequest {
+    pub(crate) connection: RemoteServerConnectionRequest,
+    pub(crate) server_directory: String,
+    pub(crate) server_launch_path: String,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct RemoteZomboidServerInstallRequest {
     pub(crate) connection: RemoteServerConnectionRequest,
     pub(crate) steamcmd_path: String,
     pub(crate) install_directory: String,
+    pub(crate) branch: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]

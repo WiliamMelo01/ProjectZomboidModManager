@@ -7,10 +7,10 @@ use std::{
     collections::HashSet,
     env, fs,
     fs::OpenOptions,
-    io::{Read, Write},
+    io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::OnceLock,
+    sync::{mpsc, OnceLock},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -226,9 +226,25 @@ fn run() -> Result<(), String> {
             }
             print_json(&start_server(request.server_id)?)
         }
+        "start-server-streaming" => {
+            let request = read_request::<ServerControlRequest>()?;
+            if let Some(server_launch_path) = request
+                .server_launch_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+            {
+                let _ = HELPER_SERVER_LAUNCH_PATH.set(server_launch_path.to_string());
+            }
+            run_server_start_streaming(request.server_id)
+        }
         "send-server-command" => {
             let request = read_request::<SendServerCommandRequest>()?;
             print_json(&send_server_command(request.server_id, request.command)?)
+        }
+        "server-status" => {
+            let request = read_request::<ServerIdRequest>()?;
+            print_json(&server_status(request.server_id)?)
         }
         "create-server" => {
             let request = read_request::<CreateServerRequest>()?;
@@ -548,6 +564,201 @@ fn configure_server_firewall(
     })
 }
 
+fn emit_server_start_event(
+    event: &str,
+    line: Option<String>,
+    result: Option<models::ServerTestResult>,
+    error: Option<String>,
+) -> Result<(), String> {
+    print_json(&HelperServerTestEvent {
+        event: event.to_string(),
+        timeout_seconds: None,
+        line,
+        result,
+        error,
+    })
+}
+
+fn emit_server_start_line(line: impl Into<String>) -> Result<(), String> {
+    emit_server_start_event("line", Some(line.into()), None, None)
+}
+
+fn run_server_start_streaming(server_id: String) -> Result<(), String> {
+    let server_id = server_id.trim().to_string();
+    let launch_path = configured_server_launch_path()?;
+
+    if !launch_path.is_file() {
+        return Err(format!(
+            "Remote server launcher not found: {}.",
+            launch_path.display()
+        ));
+    }
+
+    emit_server_start_event("started", None, None, None)?;
+    run_streaming_server_controller(&server_id, &launch_path)
+}
+
+fn run_streaming_server_controller(server_id: &str, launch_path: &Path) -> Result<(), String> {
+    let working_dir = launch_path
+        .parent()
+        .ok_or_else(|| "Remote server launcher has no parent folder.".to_string())?;
+    let log_path = next_server_start_log_path(server_id)?;
+    if let Some(parent) = log_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Could not create server log folder: {error}"))?;
+    }
+
+    clean_bom_from_bat_files(working_dir, &log_path);
+
+    let command_dir = server_command_queue_dir(server_id)?;
+    fs::create_dir_all(&command_dir)
+        .map_err(|error| format!("Could not create server command queue: {error}"))?;
+    clear_server_command_queue(&command_dir)?;
+
+    let test_bat_path = server_test::create_server_test_batch(working_dir, launch_path, server_id)?;
+    let server_ports =
+        server_test::server_ports_for_id(server_id).unwrap_or_else(|_| vec![16261, 16262]);
+    let primary_port = server_ports.first().copied().unwrap_or(16261);
+    let watched_ports = server_ports
+        .iter()
+        .map(u16::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let startup_lines = vec![
+        format!("Launcher: {}", launch_path.display()),
+        format!("Startup log: {}", log_path.display()),
+        format!("Command queue: {}", command_dir.display()),
+        format!(
+            "Launch command: cmd.exe /C call \"{}\"",
+            test_bat_path.display()
+        ),
+        format!("Watching startup output and ports {watched_ports}."),
+    ];
+
+    for line in startup_lines {
+        append_controller_log(&log_path, &format!("[PZMM] {line}"));
+        emit_server_start_line(format!("[PZMM] {line}"))?;
+    }
+
+    let mut command = Command::new("cmd.exe");
+    let mut child = util::hide_command_window(&mut command)
+        .args(["/C", "call"])
+        .arg(&test_bat_path)
+        .current_dir(working_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("Could not start remote server process: {error}"))?;
+
+    let child_pid = child.id();
+    write_server_controller_state(server_id, std::process::id(), child_pid, &log_path)?;
+    append_controller_log(
+        &log_path,
+        &format!("[PZMM] Server process PID {child_pid}."),
+    );
+    emit_server_start_line(format!("[PZMM] Server process PID {child_pid}."))?;
+
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| "Could not open remote server stdin.".to_string())?;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let (sender, receiver) = mpsc::channel::<String>();
+
+    server_test::spawn_output_reader(stdout, "OUT", sender.clone());
+    server_test::spawn_output_reader(stderr, "ERR", sender);
+
+    let mut server_started = false;
+    let mut last_port_probe = Instant::now();
+
+    loop {
+        process_server_command_queue(&command_dir, &log_path, &mut stdin)?;
+
+        while let Ok(line) = receiver.try_recv() {
+            append_controller_log(&log_path, &line);
+            if is_remote_server_started_line(&line) {
+                server_started = true;
+            }
+            emit_server_start_line(line)?;
+        }
+
+        if !server_started && last_port_probe.elapsed() >= Duration::from_secs(2) {
+            last_port_probe = Instant::now();
+            if let Ok(usages) = server_test::ports::find_port_usages(&server_ports) {
+                if !usages.is_empty() {
+                    server_started = true;
+                    let line = format!(
+                        "[INFO] Detected Project Zomboid server port activity: {}.",
+                        format_port_usages(&usages)
+                    );
+                    append_controller_log(&log_path, &line);
+                    emit_server_start_line(line)?;
+                }
+            }
+        }
+
+        if server_started {
+            let line = format!(
+                "[INFO] Remote server is running on port {primary_port}. Console command channel is ready."
+            );
+            append_controller_log(&log_path, &line);
+            emit_server_start_line(line)?;
+            emit_server_start_event("ready", None, None, None)?;
+            break;
+        }
+
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("Could not inspect remote server process: {error}"))?
+        {
+            while let Ok(line) = receiver.try_recv() {
+                append_controller_log(&log_path, &line);
+                emit_server_start_line(line)?;
+            }
+            let line =
+                format!("[PZMM] Server process exited before startup confirmation: {status}.");
+            append_controller_log(&log_path, &line);
+            emit_server_start_line(line.clone())?;
+            let _ = remove_server_controller_state(server_id);
+            let _ = fs::remove_file(&test_bat_path);
+            emit_server_start_event("error", None, None, Some(line))?;
+            return Ok(());
+        }
+
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    loop {
+        process_server_command_queue(&command_dir, &log_path, &mut stdin)?;
+
+        while let Ok(line) = receiver.try_recv() {
+            append_controller_log(&log_path, &line);
+            emit_server_start_line(line)?;
+        }
+
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("Could not inspect remote server process: {error}"))?
+        {
+            while let Ok(line) = receiver.try_recv() {
+                append_controller_log(&log_path, &line);
+                emit_server_start_line(line)?;
+            }
+            let line = format!("[PZMM] Server process exited: {status}.");
+            append_controller_log(&log_path, &line);
+            emit_server_start_line(line)?;
+            let _ = remove_server_controller_state(server_id);
+            let _ = fs::remove_file(&test_bat_path);
+            emit_server_start_event("finished", None, None, None)?;
+            return Ok(());
+        }
+
+        thread::sleep(Duration::from_millis(250));
+    }
+}
 fn start_server(server_id: String) -> Result<models::RemoteServerActionResult, String> {
     let server_id = server_id.trim().to_string();
     let launch_path = configured_server_launch_path()?;
@@ -583,11 +794,19 @@ fn start_server(server_id: String) -> Result<models::RemoteServerActionResult, S
         .map_err(|error| format!("Could not start remote server controller: {error}"))?;
 
     let controller_pid = controller.id();
+    let server_ports =
+        server_test::server_ports_for_id(&server_id).unwrap_or_else(|_| vec![16261, 16262]);
+    let primary_port = server_ports.first().copied().unwrap_or(16261);
+    let watched_ports = server_ports
+        .iter()
+        .map(u16::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
     let mut logs = vec![
         format!("Launcher: {}", launch_path.display()),
         format!("Controller PID: {}.", controller_pid),
         format!("Startup log: {}", log_path.display()),
-        "Watching startup output for up to 45 seconds...".to_string(),
+        format!("Watching startup output and ports {watched_ports} for up to 45 seconds..."),
     ];
     let started_at = Instant::now();
     let watch_timeout = Duration::from_secs(45);
@@ -606,7 +825,32 @@ fn start_server(server_id: String) -> Result<models::RemoteServerActionResult, S
         seen_lines = current_lines.len();
 
         if server_started {
-            logs.push("Server startup signal detected. Console command channel is ready.".to_string());
+            logs.push(format!(
+                "Server startup signal detected. Remote server appears to be running on port {primary_port}. Console command channel is ready."
+            ));
+            break;
+        }
+
+        if let Ok(usages) = server_test::ports::find_port_usages(&server_ports) {
+            if !usages.is_empty() {
+                let usage_summary = usages
+                    .iter()
+                    .map(|usage| {
+                        format!(
+                            "{} {} PID {} ({})",
+                            usage.protocol, usage.port, usage.pid, usage.process_name
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                server_started = true;
+                logs.push(format!(
+                    "Remote server appears to be running on port {primary_port}. Detected: {usage_summary}. Console command channel is ready."
+                ));
+            }
+        }
+
+        if server_started {
             break;
         }
 
@@ -628,7 +872,10 @@ fn start_server(server_id: String) -> Result<models::RemoteServerActionResult, S
     }
 
     let message = if server_started {
-        format!("Remote server started with controller PID {}.", controller_pid)
+        format!(
+            "Remote server is running on port {} with controller PID {}.",
+            primary_port, controller_pid
+        )
     } else if controller_exited {
         format!(
             "Remote server controller exited during startup. See {}.",
@@ -653,7 +900,7 @@ fn run_server_controller_from_args() -> Result<(), String> {
         .ok_or_else(|| "Missing server id for server controller.".to_string())?;
     let launch_path = args
         .next()
-        .map(PathBuf::from)
+        .map(|value| PathBuf::from(clean_windows_path_argument(&value)))
         .ok_or_else(|| "Missing launch path for server controller.".to_string())?;
     let log_path = args
         .next()
@@ -663,7 +910,47 @@ fn run_server_controller_from_args() -> Result<(), String> {
     run_server_controller(&server_id, &launch_path, &log_path)
 }
 
-fn run_server_controller(server_id: &str, launch_path: &Path, log_path: &Path) -> Result<(), String> {
+fn clean_bom_from_bat_files(dir: &Path, log_path: &Path) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.is_file()
+                && path
+                    .extension()
+                    .map_or(false, |ext| ext.eq_ignore_ascii_case("bat"))
+            {
+                if let Ok(content_bytes) = fs::read(&path) {
+                    if content_bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+                        let clean_content = &content_bytes[3..];
+                        if let Err(err) = fs::write(&path, clean_content) {
+                            append_controller_log(
+                                log_path,
+                                &format!(
+                                    "[PZMM] [WARNING] Failed to remove UTF-8 BOM from {}: {err}",
+                                    path.display()
+                                ),
+                            );
+                        } else {
+                            append_controller_log(
+                                log_path,
+                                &format!(
+                                    "[PZMM] Successfully removed UTF-8 BOM from bat file: {}",
+                                    path.display()
+                                ),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn run_server_controller(
+    server_id: &str,
+    launch_path: &Path,
+    log_path: &Path,
+) -> Result<(), String> {
     let working_dir = launch_path
         .parent()
         .ok_or_else(|| "Remote server launcher has no parent folder.".to_string())?;
@@ -672,14 +959,35 @@ fn run_server_controller(server_id: &str, launch_path: &Path, log_path: &Path) -
             .map_err(|error| format!("Could not create server log folder: {error}"))?;
     }
 
+    // Clean BOM from any .bat files in the launcher folder
+    clean_bom_from_bat_files(working_dir, log_path);
+
     let command_dir = server_command_queue_dir(server_id)?;
     fs::create_dir_all(&command_dir)
         .map_err(|error| format!("Could not create server command queue: {error}"))?;
     clear_server_command_queue(&command_dir)?;
 
-    append_controller_log(log_path, &format!("[PZMM] Controller started for {server_id}."));
-    append_controller_log(log_path, &format!("[PZMM] Launcher: {}", launch_path.display()));
-    append_controller_log(log_path, &format!("[PZMM] Command queue: {}", command_dir.display()));
+    append_controller_log(
+        log_path,
+        &format!("[PZMM] Controller started for {server_id}."),
+    );
+    append_controller_log(
+        log_path,
+        &format!("[PZMM] Launcher: {}", launch_path.display()),
+    );
+    append_controller_log(
+        log_path,
+        &format!("[PZMM] Command queue: {}", command_dir.display()),
+    );
+    let test_bat_path = server_test::create_server_test_batch(working_dir, launch_path, server_id)?;
+
+    append_controller_log(
+        log_path,
+        &format!(
+            "[PZMM] Launch command: cmd.exe /C call \"{}\"",
+            test_bat_path.display()
+        ),
+    );
 
     let stdout_log = OpenOptions::new()
         .create(true)
@@ -692,8 +1000,8 @@ fn run_server_controller(server_id: &str, launch_path: &Path, log_path: &Path) -
 
     let mut command = Command::new("cmd.exe");
     let mut child = util::hide_command_window(&mut command)
-        .arg("/C")
-        .arg(&format!("call \"{}\" -servername {}", launch_path.display(), server_id))
+        .args(["/C", "call"])
+        .arg(&test_bat_path)
         .current_dir(working_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::from(stdout_log))
@@ -702,7 +1010,7 @@ fn run_server_controller(server_id: &str, launch_path: &Path, log_path: &Path) -
         .map_err(|error| format!("Could not start remote server process: {error}"))?;
 
     let child_pid = child.id();
-    write_server_controller_state(server_id, child_pid, log_path)?;
+    write_server_controller_state(server_id, std::process::id(), child_pid, log_path)?;
     append_controller_log(log_path, &format!("[PZMM] Server process PID {child_pid}."));
 
     let mut stdin = child
@@ -717,7 +1025,10 @@ fn run_server_controller(server_id: &str, launch_path: &Path, log_path: &Path) -
             .try_wait()
             .map_err(|error| format!("Could not inspect remote server process: {error}"))?
         {
-            append_controller_log(log_path, &format!("[PZMM] Server process exited: {status}."));
+            append_controller_log(
+                log_path,
+                &format!("[PZMM] Server process exited: {status}."),
+            );
             let _ = remove_server_controller_state(server_id);
             return Ok(());
         }
@@ -726,7 +1037,127 @@ fn run_server_controller(server_id: &str, launch_path: &Path, log_path: &Path) -
     }
 }
 
-fn send_server_command(server_id: String, command: String) -> Result<models::RemoteServerActionResult, String> {
+fn server_status(server_id: String) -> Result<models::RemoteServerActionResult, String> {
+    let server_id = server_id.trim().to_string();
+
+    if server_id.is_empty() {
+        return Err("Server ID cannot be empty.".to_string());
+    }
+
+    let server_ports =
+        server_test::server_ports_for_id(&server_id).unwrap_or_else(|_| vec![16261, 16262]);
+    let primary_port = server_ports.first().copied().unwrap_or(16261);
+    let port_usages = server_test::ports::find_port_usages(&server_ports).unwrap_or_default();
+    let state_path = server_controller_state_path(&server_id)?;
+    let mut logs = Vec::new();
+
+    if !state_path.exists() {
+        if port_usages.is_empty() {
+            return Ok(models::RemoteServerActionResult {
+                success: false,
+                message: format!("No running controller was found for {server_id}."),
+                command: "server-status".to_string(),
+                logs: vec![format!(
+                    "Controller state not found: {}",
+                    state_path.display()
+                )],
+            });
+        }
+
+        let usage_summary = format_port_usages(&port_usages);
+        return Ok(models::RemoteServerActionResult {
+            success: true,
+            message: format!("Remote server appears to be running on port {primary_port}."),
+            command: "server-status".to_string(),
+            logs: vec![format!(
+                "Detected port usage without controller state: {usage_summary}."
+            )],
+        });
+    }
+
+    let state_content = fs::read_to_string(&state_path)
+        .map_err(|error| format!("Could not read server controller state: {error}"))?;
+    let controller_pid =
+        state_value(&state_content, "controllerPid").and_then(|value| value.parse::<u32>().ok());
+    let process_pid =
+        state_value(&state_content, "processPid").and_then(|value| value.parse::<u32>().ok());
+    let log_path = state_value(&state_content, "logPath").map(PathBuf::from);
+
+    if let Some(log_path) = log_path.as_deref() {
+        logs = read_start_log_lines(log_path);
+        const MAX_STATUS_LOG_LINES: usize = 400;
+        if logs.len() > MAX_STATUS_LOG_LINES {
+            let skipped = logs.len() - MAX_STATUS_LOG_LINES;
+            logs = logs.into_iter().skip(skipped).collect();
+            logs.insert(0, format!("Showing last {MAX_STATUS_LOG_LINES} startup log lines; skipped {skipped} older line(s)."));
+        }
+    }
+
+    let controller_is_running = controller_pid.map(process_is_alive).unwrap_or(false);
+    let process_is_running = process_pid.map(process_is_alive).unwrap_or(false);
+    let saw_startup_signal = logs.iter().any(|line| is_remote_server_started_line(line));
+
+    if saw_startup_signal || !port_usages.is_empty() {
+        if !port_usages.is_empty() {
+            logs.push(format!(
+                "Detected port usage: {}.",
+                format_port_usages(&port_usages)
+            ));
+        }
+        return Ok(models::RemoteServerActionResult {
+            success: true,
+            message: format!("Remote server appears to be running on port {primary_port}."),
+            command: "server-status".to_string(),
+            logs,
+        });
+    }
+
+    if process_is_running {
+        logs.push(format!(
+            "Status: server process PID {} is still running; no listening port was detected on {} yet.",
+            process_pid.unwrap_or_default(),
+            server_ports.iter().map(u16::to_string).collect::<Vec<_>>().join(", ")
+        ));
+        return Ok(models::RemoteServerActionResult {
+            success: true,
+            message: format!(
+                "Remote server is still starting. Port {primary_port} is not open yet."
+            ),
+            command: "server-status".to_string(),
+            logs,
+        });
+    }
+
+    if controller_is_running {
+        logs.push(format!(
+            "Status: server launcher process PID {} was not found, but controller PID {} is still active; waiting for final exit status.",
+            process_pid.unwrap_or_default(),
+            controller_pid.unwrap_or_default()
+        ));
+        return Ok(models::RemoteServerActionResult {
+            success: true,
+            message: format!(
+                "Remote server controller is still finalizing startup status. Port {primary_port} is not open yet."
+            ),
+            command: "server-status".to_string(),
+            logs,
+        });
+    }
+
+    logs.push(
+        "Status: server process is no longer running and no listening port was detected. This usually means the server crashed or the launcher exited before networking started. Check the last startup log lines for ERROR, Exception, or OutOfMemory.".to_string(),
+    );
+    Ok(models::RemoteServerActionResult {
+        success: false,
+        message: format!("Remote server is not running on port {primary_port}."),
+        command: "server-status".to_string(),
+        logs,
+    })
+}
+fn send_server_command(
+    server_id: String,
+    command: String,
+) -> Result<models::RemoteServerActionResult, String> {
     let server_id = server_id.trim().to_string();
     let command = command.trim().to_string();
 
@@ -768,7 +1199,12 @@ fn server_controller_state_path(server_id: &str) -> Result<PathBuf, String> {
         .join(format!("{}.state", safe_server_test_id(server_id))))
 }
 
-fn write_server_controller_state(server_id: &str, child_pid: u32, log_path: &Path) -> Result<(), String> {
+fn write_server_controller_state(
+    server_id: &str,
+    controller_pid: u32,
+    child_pid: u32,
+    log_path: &Path,
+) -> Result<(), String> {
     let state_path = server_controller_state_path(server_id)?;
     if let Some(parent) = state_path.parent() {
         fs::create_dir_all(parent)
@@ -776,7 +1212,10 @@ fn write_server_controller_state(server_id: &str, child_pid: u32, log_path: &Pat
     }
     fs::write(
         &state_path,
-        format!("serverId={server_id}\nprocessPid={child_pid}\nlogPath={}\n", log_path.display()),
+        format!(
+            "serverId={server_id}\ncontrollerPid={controller_pid}\nprocessPid={child_pid}\nlogPath={}\n",
+            log_path.display()
+        ),
     )
     .map_err(|error| format!("Could not write server controller state: {error}"))
 }
@@ -794,8 +1233,11 @@ fn clear_server_command_queue(command_dir: &Path) -> Result<(), String> {
     if !command_dir.exists() {
         return Ok(());
     }
-    for entry in fs::read_dir(command_dir).map_err(|error| format!("Could not read command queue: {error}"))? {
-        let entry = entry.map_err(|error| format!("Could not read command queue entry: {error}"))?;
+    for entry in fs::read_dir(command_dir)
+        .map_err(|error| format!("Could not read command queue: {error}"))?
+    {
+        let entry =
+            entry.map_err(|error| format!("Could not read command queue entry: {error}"))?;
         let path = entry.path();
         if path.extension().and_then(|value| value.to_str()) == Some("cmd") {
             let _ = fs::remove_file(path);
@@ -804,10 +1246,17 @@ fn clear_server_command_queue(command_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn process_server_command_queue(command_dir: &Path, log_path: &Path, stdin: &mut impl Write) -> Result<(), String> {
+fn process_server_command_queue(
+    command_dir: &Path,
+    log_path: &Path,
+    stdin: &mut impl Write,
+) -> Result<(), String> {
     let mut commands = Vec::new();
-    for entry in fs::read_dir(command_dir).map_err(|error| format!("Could not read command queue: {error}"))? {
-        let entry = entry.map_err(|error| format!("Could not read command queue entry: {error}"))?;
+    for entry in fs::read_dir(command_dir)
+        .map_err(|error| format!("Could not read command queue: {error}"))?
+    {
+        let entry =
+            entry.map_err(|error| format!("Could not read command queue entry: {error}"))?;
         let path = entry.path();
         if path.extension().and_then(|value| value.to_str()) == Some("cmd") {
             commands.push(path);
@@ -833,6 +1282,55 @@ fn process_server_command_queue(command_dir: &Path, log_path: &Path, stdin: &mut
     Ok(())
 }
 
+fn state_value(content: &str, key: &str) -> Option<String> {
+    content.lines().find_map(|line| {
+        let (current_key, value) = line.split_once('=')?;
+        if current_key.trim().eq_ignore_ascii_case(key) {
+            Some(value.trim().to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn process_is_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+
+    let mut command = Command::new("tasklist");
+    let Ok(output) = util::hide_command_window(&mut command)
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .output()
+    else {
+        return false;
+    };
+
+    if !output.status.success() {
+        return false;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout.lines().any(|line| {
+        let normalized = line.trim().to_ascii_lowercase();
+        !normalized.is_empty()
+            && !normalized.contains("no tasks are running")
+            && normalized.contains(&format!("\"{pid}\""))
+    })
+}
+
+fn format_port_usages(usages: &[models::PortUsage]) -> String {
+    usages
+        .iter()
+        .map(|usage| {
+            format!(
+                "{} {} PID {} ({})",
+                usage.protocol, usage.port, usage.pid, usage.process_name
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 fn append_controller_log(log_path: &Path, line: &str) {
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
         let _ = writeln!(file, "{line}");
@@ -876,10 +1374,31 @@ fn is_remote_server_started_line(line: &str) -> bool {
         || normalized_line.contains("raknet.startup() return code: 0")
         || normalized_line.contains("luanet: initialization [done]")
 }
+fn clean_windows_path_argument(value: &str) -> String {
+    let mut cleaned = value.trim().to_string();
+
+    loop {
+        let next = cleaned.trim().trim_matches('\'').trim().to_string();
+        let unquoted = if next.len() >= 2 && next.starts_with("\\\"") && next.ends_with("\\\"") {
+            next[2..next.len() - 2].to_string()
+        } else if next.len() >= 2 && next.starts_with('"') && next.ends_with('"') {
+            next[1..next.len() - 1].to_string()
+        } else {
+            next
+        };
+
+        if unquoted == cleaned {
+            break;
+        }
+        cleaned = unquoted;
+    }
+
+    cleaned
+}
 fn configured_server_launch_path() -> Result<PathBuf, String> {
     HELPER_SERVER_LAUNCH_PATH
         .get()
-        .map(|path| PathBuf::from(path.trim()))
+        .map(|path| PathBuf::from(clean_windows_path_argument(path)))
         .filter(|path| !path.as_os_str().is_empty())
         .ok_or_else(|| "Remote server launch path is not configured.".to_string())
 }

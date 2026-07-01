@@ -11,6 +11,7 @@ use util::hide_command_window;
 
 rust_i18n::i18n!("locales", fallback = "en");
 
+mod command_runner;
 mod game;
 mod i18n;
 mod models;
@@ -37,18 +38,20 @@ use mods::{
 use remote::{
     add_remote_mod_location, cancel_remote_steam_workshop_download,
     cancel_remote_zomboid_server_test, check_remote_zomboid_server_firewall,
-    clear_remote_zomboid_mods_and_images_cache, clear_remote_zomboid_mods_cache,
-    configure_remote_zomboid_server_firewall, create_remote_zomboid_server,
-    delete_remote_zomboid_server, deploy_local_zomboid_server_to_remote,
-    download_remote_steam_workshop_collection, download_remote_steam_workshop_item,
-    download_remote_steam_workshop_items, get_remote_app_settings, get_remote_mod_locations,
+    check_remote_zomboid_server_status, clear_remote_zomboid_mods_and_images_cache,
+    clear_remote_zomboid_mods_cache, configure_remote_zomboid_server_firewall,
+    create_remote_zomboid_server, delete_remote_zomboid_server,
+    deploy_local_zomboid_server_to_remote, download_remote_steam_workshop_collection,
+    download_remote_steam_workshop_item, download_remote_steam_workshop_items,
+    generate_ssh_public_key, get_remote_app_settings, get_remote_mod_locations,
     get_remote_system_ram, get_remote_workspace_config, get_remote_zomboid_server_lua_settings,
     get_remote_zomboid_server_settings, install_remote_zomboid_mod,
     install_remote_zomboid_server_map, install_zomboid_server_on_remote, list_remote_zomboid_mods,
     list_remote_zomboid_servers, open_remote_mod_location, run_terminal_command,
-    save_remote_app_settings, save_remote_workspace_config, select_ssh_key_file,
-    send_remote_zomboid_server_command, setup_remote_helper, start_remote_zomboid_server, start_remote_zomboid_server_test,
-    test_remote_server_connection, test_remote_server_latency, update_remote_zomboid_server_build,
+    save_remote_app_settings, save_remote_workspace_config, save_remote_zomboid_server_path,
+    select_ssh_key_file, send_remote_zomboid_server_command, setup_remote_helper,
+    start_remote_zomboid_server, start_remote_zomboid_server_test, test_remote_server_connection,
+    test_remote_server_latency, update_remote_zomboid_server_build,
     update_remote_zomboid_server_lua_settings, update_remote_zomboid_server_mods,
     update_remote_zomboid_server_settings, upload_steamcmd_to_remote,
 };
@@ -185,6 +188,13 @@ fn ensure_managed_steamcmd_pool(
     app: &tauri::AppHandle,
     instance_count: usize,
 ) -> Result<Vec<PathBuf>, String> {
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        let _ = instance_count;
+        return Ok(Vec::new());
+    }
+
     let instance_count = instance_count.clamp(1, MAX_MANAGED_STEAMCMD_POOL_INSTANCES);
     let mut steamcmd_paths = Vec::new();
 
@@ -199,6 +209,15 @@ fn ensure_managed_steamcmd_pool_instance(
     app: &tauri::AppHandle,
     instance_id: usize,
 ) -> Result<PathBuf, String> {
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        let _ = instance_id;
+        return Err(
+            "Pool de SteamCMD gerenciado pelo app esta disponivel apenas no Windows.".to_string(),
+        );
+    }
+
     let steamcmd_path = managed_steamcmd_pool_instance_path(instance_id)?;
 
     if steamcmd_path.exists() && steamcmd_path.is_file() {
@@ -364,20 +383,40 @@ pub(crate) fn steamcmd_zip_resource_path(app: &tauri::AppHandle) -> Result<PathB
 }
 
 fn extract_zip_with_powershell(zip_path: &Path, target_dir: &Path) -> Result<(), String> {
-    let mut command = Command::new("powershell.exe");
-    let output = hide_command_window(&mut command)
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            "& { param($zipPath, $targetDir) Expand-Archive -LiteralPath $zipPath -DestinationPath $targetDir -Force }",
-        ])
-        .arg(zip_path)
-        .arg(target_dir)
-        .output()
-        .map_err(|error| format!("Nao foi possivel extrair steamcmd.zip: {error}"))?;
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("powershell.exe");
+        let output = hide_command_window(&mut command)
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "& { param($zipPath, $targetDir) Expand-Archive -LiteralPath $zipPath -DestinationPath $targetDir -Force }",
+            ])
+            .arg(zip_path)
+            .arg(target_dir)
+            .output()
+            .map_err(|error| format!("Nao foi possivel extrair steamcmd.zip: {error}"))?;
 
+        return finish_zip_extraction(output);
+    }
+
+    #[cfg(not(windows))]
+    {
+        let output = Command::new("unzip")
+            .arg("-o")
+            .arg(zip_path)
+            .arg("-d")
+            .arg(target_dir)
+            .output()
+            .map_err(|error| format!("Nao foi possivel extrair steamcmd.zip: {error}"))?;
+
+        finish_zip_extraction(output)
+    }
+}
+
+fn finish_zip_extraction(output: std::process::Output) -> Result<(), String> {
     if output.status.success() {
         return Ok(());
     }
@@ -536,12 +575,15 @@ fn main() {
             run_terminal_command,
             save_remote_app_settings,
             save_remote_workspace_config,
+            save_remote_zomboid_server_path,
             select_ssh_key_file,
+            generate_ssh_public_key,
             test_remote_server_connection,
             test_remote_server_latency,
             start_remote_zomboid_server_test,
             cancel_remote_zomboid_server_test,
             check_remote_zomboid_server_firewall,
+            check_remote_zomboid_server_status,
             configure_remote_zomboid_server_firewall,
             send_remote_zomboid_server_command,
             start_remote_zomboid_server,

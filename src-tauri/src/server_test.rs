@@ -18,6 +18,10 @@ mod preflight;
 mod process;
 mod runner;
 
+#[allow(unused_imports)]
+pub(crate) use batch::create_server_test_batch;
+#[allow(unused_imports)]
+pub(crate) use batch::default_server_launcher_name;
 use ports::check_zomboid_server_ports_impl;
 #[allow(unused_imports)]
 pub(crate) use ports::server_ports_for_id;

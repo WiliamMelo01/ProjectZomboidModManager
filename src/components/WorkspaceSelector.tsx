@@ -1,5 +1,5 @@
-import { ArrowLeft, CheckCircle2, Clipboard, FileKey2, Folder, HelpCircle, KeyRound, Lock, MonitorCog, Network, Server, ShieldAlert, Trash2, Wifi, Search, Plus, Play, X, RefreshCw } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { ArrowLeft, CheckCircle2, Clipboard, FileKey2, Folder, HelpCircle, KeyRound, Lock, MonitorCog, Network, Server, ShieldAlert, Trash2, Wifi, Search, Plus, Play, X, RefreshCw, Save } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { RemoteConnectionDraft, RemoteWorkspaceConfig } from "@/lib/commandRunner"
@@ -18,6 +18,7 @@ type RemoteServerConnectionResult = {
   serverPath: string
   message: string
   latencyMs: number
+  diagnosticLog: string
 }
 
 type RemoteServerLatencyResult = {
@@ -41,15 +42,14 @@ const initialRemoteConnection: RemoteConnectionDraft = {
   host: "",
   port: "22",
   username: "",
-  authMethod: "password",
+  authMethod: "key",
   password: "",
   sshKeyPath: "",
-  serverPath: "C:\\Users\\Administrator\\Zomboid\\Server",
+  serverPath: "/var/lib/pzmm/Zomboid/Server",
 }
 
-function remoteAppDataBase(username: string) {
-  const account = username.trim() || "Administrator"
-  return `C:\\Users\\${account}\\AppData\\Local\\ZomboidServerModManager`
+function remoteAppDataBase(_username: string) {
+  return "/var/lib/pzmm"
 }
 
 function isLegacyPzManagerPath(path?: string) {
@@ -75,10 +75,10 @@ function remoteConfigToDraft(config: Partial<RemoteWorkspaceConfig>): RemoteConn
     host: config.host ?? "",
     port: config.port || "22",
     username: config.username ?? "",
-    authMethod: config.authMethod === "password" ? "password" : "key",
+    authMethod: "key",
     password: "",
     sshKeyPath: config.sshKeyPath ?? "",
-    serverPath: config.serverPath || "C:\\Users\\Administrator\\Zomboid\\Server",
+    serverPath: config.serverPath || "/var/lib/pzmm/Zomboid/Server",
   }
 }
 
@@ -87,9 +87,9 @@ function defaultRemoteConfig(connection: RemoteConnectionDraft, existing?: Parti
     ...connection,
     password: "",
     sshKeyPath: connection.authMethod === "key" ? connection.sshKeyPath : "",
-    remoteSteamcmdDir: cleanLegacyPath(existing?.remoteSteamcmdDir) || `${remoteAppDataBase(connection.username)}\\steamcmd-pool\\instance-1`,
+    remoteSteamcmdDir: cleanLegacyPath(existing?.remoteSteamcmdDir) || `${remoteAppDataBase(connection.username)}/steamcmd`,
     remoteSteamcmdPath: cleanLegacyPath(existing?.remoteSteamcmdPath),
-    remoteZomboidServerDir: cleanLegacyPath(existing?.remoteZomboidServerDir) || `${remoteAppDataBase(connection.username)}\\zomboid-server`,
+    remoteZomboidServerDir: cleanLegacyPath(existing?.remoteZomboidServerDir) || `${remoteAppDataBase(connection.username)}/zomboid-server`,
     remoteZomboidServerPath: cleanLegacyPath(existing?.remoteZomboidServerPath),
     remoteClientRam: existing?.remoteClientRam || "4.00",
     remoteServerRam: existing?.remoteServerRam || "4.00",
@@ -208,7 +208,7 @@ export function WorkspaceSelector({ onSelectLocal, onSelectRemote }: WorkspaceSe
             <p className="text-xs font-black uppercase tracking-[0.24em] text-orange-300">PZ Manager 0.4.0</p>
             <h1 className="mt-3 text-4xl font-black tracking-tight text-white sm:text-5xl">Choose your workspace</h1>
             <p className="mt-4 max-w-xl text-base leading-7 text-gray-400">
-              Work with server profiles on this PC, or start a remote Windows server connection for hosted Project Zomboid setups.
+              Work with server profiles on this PC, or connect to a Linux server over SSH for hosted Project Zomboid setups. Windows cloud VMs should use RDP and run this app inside the VM as a local workspace.
             </p>
           </div>
 
@@ -246,12 +246,12 @@ export function WorkspaceSelector({ onSelectLocal, onSelectRemote }: WorkspaceSe
                   <Network size={24} />
                 </div>
                 <span className="rounded-full border border-cyan-300/20 bg-cyan-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-cyan-200">
-                  Windows
+                  Linux SSH
                 </span>
               </div>
               <h2 className="mt-8 text-2xl font-black tracking-tight">Remote workspace</h2>
               <p className="mt-3 text-sm leading-6 text-gray-400">
-              Prepare an SSH connection to a remote Windows host so PZ Manager can manage server profiles outside this machine.
+              Connect to an Ubuntu/Debian server over SSH. The app installs a Linux helper, SteamCMD, and systemd units for remote server control.
               </p>
               <div className="mt-7 flex items-center gap-2 text-sm font-bold text-cyan-200">
                 <Wifi size={17} />
@@ -278,13 +278,25 @@ function RemoteWorkspaceSetup({
   const [status, setStatus] = useState<"idle" | "connecting" | "connected" | "error">("idle")
   const [feedback, setFeedback] = useState<string | null>(null)
   const [isSshHelpOpen, setIsSshHelpOpen] = useState(false)
-  const isWindows = useMemo(() => navigator.platform.toLowerCase().includes("win"), [])
+  const [publicKeyContent, setPublicKeyContent] = useState("")
+  const [publicKeyError, setPublicKeyError] = useState<string | null>(null)
+  const [isPublicKeyModalOpen, setIsPublicKeyModalOpen] = useState(false)
+  const [isGeneratingPublicKey, setIsGeneratingPublicKey] = useState(false)
+  const hasUserEditedConnection = useRef(false)
+  const hasSshClient = useMemo(() => navigator.platform.toLowerCase().includes("win"), [])
   const hasAuthentication = hasConnectionAuthentication(connection)
   const canConnect =
-    isWindows && hasRequiredConnectionFields(connection) && hasAuthentication
+    hasSshClient && hasRequiredConnectionFields(connection) && hasAuthentication
+  const canSaveConnection =
+    hasSshClient && hasRequiredConnectionFields(connection) && hasAuthentication
 
   const [searchQuery, setSearchQuery] = useState("")
-  const [connectionStatuses, setConnectionStatuses] = useState<Record<string, { status: "checking" | "online" | "offline", latency?: number, error?: string }>>({})
+  const [connectionStatuses, setConnectionStatuses] = useState<Record<string, { status: "idle" | "checking" | "online" | "offline", latency?: number, error?: string }>>({})
+
+  const displayFeedback = useMemo(() => {
+    if (!feedback) return ""
+    return feedback.split("\n\n")[0].trim()
+  }, [feedback])
 
   useEffect(() => {
     let isMounted = true
@@ -296,7 +308,9 @@ function RemoteWorkspaceSetup({
         const configConnection = remoteConfigToDraft(config)
         const savedConfig = defaultRemoteConfig(configConnection, config)
 
-        setConnection(configConnection)
+        if (!hasUserEditedConnection.current) {
+          setConnection(configConnection)
+        }
         setSavedConnections((currentConnections) =>
           currentConnections.some((current) => current.id === remoteConnectionId(configConnection))
             ? currentConnections
@@ -306,7 +320,7 @@ function RemoteWorkspaceSetup({
       .catch((error) => {
         if (!isMounted) return
         setStatus("error")
-        setFeedback(getErrorMessage(error))
+        setFeedback(formatConnectionError(getErrorMessage(error)))
       })
 
     return () => {
@@ -315,40 +329,12 @@ function RemoteWorkspaceSetup({
   }, [])
 
   useEffect(() => {
-    const initialStatuses: typeof connectionStatuses = {}
-    savedConnections.forEach((conn) => {
-      initialStatuses[conn.id] = { status: "checking" }
+    setConnectionStatuses((currentStatuses) => {
+      const savedIds = new Set(savedConnections.map((connection) => connection.id))
+      return Object.fromEntries(
+        Object.entries(currentStatuses).filter(([connectionId]) => savedIds.has(connectionId)),
+      )
     })
-    setConnectionStatuses(initialStatuses)
-
-    let isMounted = true
-    savedConnections.forEach((conn) => {
-      void invokeTauri<RemoteServerLatencyResult>("test_remote_server_latency", {
-        connection: remoteConfigToDraft(conn),
-      })
-        .then((result) => {
-          if (!isMounted) return
-
-          setConnectionStatuses((prev) => ({
-            ...prev,
-            [conn.id]: result.success
-              ? { status: "online", latency: result.latencyMs }
-              : { status: "offline", error: result.error ?? "Offline" },
-          }))
-        })
-        .catch((error) => {
-          if (!isMounted) return
-
-          setConnectionStatuses((prev) => ({
-            ...prev,
-            [conn.id]: { status: "offline", error: getErrorMessage(error) },
-          }))
-        })
-    })
-
-    return () => {
-      isMounted = false
-    }
   }, [savedConnections])
 
   const filteredConnections = useMemo(() => {
@@ -362,12 +348,17 @@ function RemoteWorkspaceSetup({
   }, [savedConnections, searchQuery])
 
   function updateField<K extends keyof RemoteConnectionDraft>(field: K, value: RemoteConnectionDraft[K]) {
+    hasUserEditedConnection.current = true
     setConnection((current) => ({ ...current, [field]: value }))
     setStatus("idle")
     setFeedback(null)
+    setPublicKeyContent("")
+    setPublicKeyError(null)
+    setIsPublicKeyModalOpen(false)
   }
 
   function useSavedConnection(savedConnection: SavedRemoteConnection) {
+    hasUserEditedConnection.current = false
     const nextConnection = remoteConfigToDraft(savedConnection)
 
     setConnection(nextConnection)
@@ -383,16 +374,46 @@ function RemoteWorkspaceSetup({
   }
 
   function loadSavedConnectionForEdit(savedConnection: SavedRemoteConnection) {
+    hasUserEditedConnection.current = false
     const nextConnection = remoteConfigToDraft(savedConnection)
     setConnection(nextConnection)
     setStatus("idle")
     setFeedback(null)
   }
 
+  async function testSavedConnectionLatency(savedConnection: SavedRemoteConnection) {
+    setConnectionStatuses((currentStatuses) => ({
+      ...currentStatuses,
+      [savedConnection.id]: { status: "checking" },
+    }))
+
+    try {
+      const result = await invokeTauri<RemoteServerLatencyResult>("test_remote_server_latency", {
+        connection: remoteConfigToDraft(savedConnection),
+      })
+
+      setConnectionStatuses((currentStatuses) => ({
+        ...currentStatuses,
+        [savedConnection.id]: result.success
+          ? { status: "online", latency: result.latencyMs }
+          : { status: "offline", error: result.error ?? "Offline" },
+      }))
+    } catch (error) {
+      setConnectionStatuses((currentStatuses) => ({
+        ...currentStatuses,
+        [savedConnection.id]: { status: "offline", error: getErrorMessage(error) },
+      }))
+    }
+  }
+
   function startNewConnection() {
+    hasUserEditedConnection.current = true
     setConnection(initialRemoteConnection)
     setStatus("idle")
     setFeedback(null)
+    setPublicKeyContent("")
+    setPublicKeyError(null)
+    setIsPublicKeyModalOpen(false)
   }
 
   function removeSavedConnection(connectionId: string) {
@@ -406,6 +427,9 @@ function RemoteWorkspaceSetup({
 
   async function selectSshKeyFile() {
     setFeedback(null)
+    setPublicKeyError(null)
+    setPublicKeyContent("")
+    setIsPublicKeyModalOpen(false)
 
     try {
       const selectedPath = await invokeTauri<string | null>("select_ssh_key_file")
@@ -415,7 +439,63 @@ function RemoteWorkspaceSetup({
       }
     } catch (error) {
       setStatus("error")
-      setFeedback(getErrorMessage(error))
+      setFeedback(formatConnectionError(getErrorMessage(error)))
+    }
+  }
+
+  async function saveCurrentConnection() {
+    if (!canSaveConnection) return
+
+    setStatus("idle")
+    setFeedback(null)
+
+    try {
+      const savedConfig = await invokeTauri<RemoteWorkspaceConfig | null>("get_remote_workspace_config")
+      const configToSave = defaultRemoteConfig(connection, savedConfig ?? undefined)
+      const persistedConfig = await invokeTauri<RemoteWorkspaceConfig>("save_remote_workspace_config", {
+        config: {
+          ...configToSave,
+          name: connection.name,
+          host: connection.host,
+          port: connection.port,
+          username: connection.username,
+          authMethod: connection.authMethod,
+          sshKeyPath: connection.authMethod === "key" ? connection.sshKeyPath : "",
+          serverPath: connection.serverPath,
+        },
+      })
+
+      setSavedConnections((currentConnections) => upsertSavedRemoteConnection(currentConnections, persistedConfig))
+      setConnection(remoteConfigToDraft(persistedConfig))
+      hasUserEditedConnection.current = false
+      setFeedback("Connection profile saved.")
+    } catch (saveError) {
+      setStatus("error")
+      setFeedback(getErrorMessage(saveError))
+    }
+  }
+  async function generatePublicKey() {
+    const keyPath = connection.sshKeyPath.trim()
+    if (!keyPath) {
+      setPublicKeyError("Select a private key file first.")
+      return
+    }
+
+    setPublicKeyError(null)
+    setPublicKeyContent("")
+    setIsPublicKeyModalOpen(false)
+    setIsGeneratingPublicKey(true)
+
+    try {
+      const publicKey = await invokeTauri<string>("generate_ssh_public_key", {
+        sshKeyPath: keyPath,
+      })
+      setPublicKeyContent(publicKey)
+      setIsPublicKeyModalOpen(true)
+    } catch (error) {
+      setPublicKeyError(getErrorMessage(error))
+    } finally {
+      setIsGeneratingPublicKey(false)
     }
   }
 
@@ -423,10 +503,10 @@ function RemoteWorkspaceSetup({
     connectionToUse: RemoteConnectionDraft = connection,
     savedConfigToUse?: SavedRemoteConnection,
   ) {
-    if (!isWindows || !hasRequiredConnectionFields(connectionToUse) || !hasConnectionAuthentication(connectionToUse)) return
+    if (!hasSshClient || !hasRequiredConnectionFields(connectionToUse) || !hasConnectionAuthentication(connectionToUse)) return
 
     setStatus("connecting")
-    setFeedback(null)
+    setFeedback(`Testing SSH connection to ${connectionToUse.username}@${connectionToUse.host}:${connectionToUse.port}...`)
 
     try {
       const result = await invokeTauri<RemoteServerConnectionResult>("test_remote_server_connection", {
@@ -462,9 +542,10 @@ function RemoteWorkspaceSetup({
       onConnected(connectedConnection)
     } catch (error) {
       setStatus("error")
-      setFeedback(getErrorMessage(error))
+      setFeedback(formatConnectionError(getErrorMessage(error)))
     }
   }
+
 
   return (
     <main className="flex min-h-screen flex-col bg-[#1c2024] text-white">
@@ -484,18 +565,18 @@ function RemoteWorkspaceSetup({
                 <span className="text-[10px] font-black uppercase tracking-[0.2em] text-cyan-400">Remote Workspace</span>
                 <span className="h-1 w-1 rounded-full bg-cyan-400 animate-pulse"></span>
               </div>
-              <h1 className="text-xl font-black tracking-tight text-white sm:text-2xl">Connect to Windows Server</h1>
+              <h1 className="text-xl font-black tracking-tight text-white sm:text-2xl">Connect to Linux Server</h1>
             </div>
           </div>
 
           <div className="hidden sm:flex items-center gap-3">
             <span className={`flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-black uppercase tracking-wider ${
-              isWindows
+              hasSshClient
                 ? "border-green-500/20 bg-green-500/10 text-green-400"
                 : "border-red-500/20 bg-red-500/10 text-red-400"
             }`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${isWindows ? "bg-green-400" : "bg-red-400 animate-ping"}`}></span>
-              {isWindows ? "Windows Client Active" : "OS Unsupported"}
+              <span className={`h-1.5 w-1.5 rounded-full ${hasSshClient ? "bg-green-400" : "bg-red-400 animate-ping"}`}></span>
+              {hasSshClient ? "SSH Client Active" : "SSH Client Required"}
             </span>
           </div>
         </div>
@@ -564,7 +645,7 @@ function RemoteWorkspaceSetup({
               ) : (
                 filteredConnections.map((savedConnection) => {
                   const isSelected = remoteConnectionId(connection) === savedConnection.id
-                  const statusInfo = connectionStatuses[savedConnection.id] || { status: "checking" }
+                  const statusInfo = connectionStatuses[savedConnection.id] || { status: "idle" }
                   const canQuickConnect = savedConnection.authMethod === "key" && savedConnection.sshKeyPath.trim().length > 0
 
                   return (
@@ -602,7 +683,11 @@ function RemoteWorkspaceSetup({
                           className="flex items-center gap-1.5 shrink-0 bg-[#161a1d] px-2 py-1 rounded-md border border-white/5"
                           title={statusInfo.status === "offline" ? statusInfo.error : undefined}
                         >
-                          {statusInfo.status === "checking" ? (
+                          {statusInfo.status === "idle" ? (
+                            <>
+                              <span className="text-[10px] text-gray-500 font-medium font-mono">test</span>
+                            </>
+                          ) : statusInfo.status === "checking" ? (
                             <>
                               <RefreshCw size={10} className="text-cyan-400 animate-spin" />
                               <span className="text-[10px] text-gray-500 font-medium font-mono">test</span>
@@ -636,6 +721,17 @@ function RemoteWorkspaceSetup({
 
                       {/* Floating actions on card hover */}
                       <div className="absolute right-3 bottom-3 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity bg-inherit pl-2 rounded-md">
+                        <button
+                          type="button"
+                          title="Test Latency"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void testSavedConnectionLatency(savedConnection)
+                          }}
+                          className="flex h-7 w-7 items-center justify-center rounded-md bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 hover:bg-cyan-500 hover:text-white transition-all shadow-sm"
+                        >
+                          <RefreshCw size={12} />
+                        </button>
                         <button
                           type="button"
                           title="Quick Connect"
@@ -712,14 +808,14 @@ function RemoteWorkspaceSetup({
                 <RemoteInput
                   label="SSH Username"
                   value={connection.username}
-                  placeholder="e.g. Administrator"
+                  placeholder="e.g. ubuntu"
                   onChange={(value) => updateField("username", value)}
                 />
                 <div className="md:col-span-2">
                   <RemoteInput
                     label="Project Zomboid Server Data Directory"
                     value={connection.serverPath}
-                    placeholder="C:\\Users\\Administrator\\Zomboid\\Server"
+                    placeholder="/var/lib/pzmm/Zomboid/Server"
                     onChange={(value) => updateField("serverPath", value)}
                   />
                 </div>
@@ -780,7 +876,7 @@ function RemoteWorkspaceSetup({
                     />
                   </div>
                 ) : (
-                  <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                  <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-end">
                     <div className="flex-1">
                       <RemoteInput
                         label="SSH Private Key File Path"
@@ -797,22 +893,43 @@ function RemoteWorkspaceSetup({
                       <Folder size={14} />
                       Choose File
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => void generatePublicKey()}
+                      disabled={!connection.sshKeyPath.trim() || isGeneratingPublicKey}
+                      className="flex h-[44px] items-center justify-center gap-2 rounded-lg border border-cyan-400/25 bg-cyan-400/10 px-4 text-xs font-bold text-cyan-200 transition-colors hover:bg-cyan-400 hover:text-[#071014] disabled:cursor-not-allowed disabled:opacity-50 shrink-0 mb-0.5"
+                    >
+                      {isGeneratingPublicKey ? <RefreshCw size={14} className="animate-spin" /> : <KeyRound size={14} />}
+                      Public Key
+                    </button>
+                    {publicKeyError && (
+                      <p className="sm:col-span-3 break-words rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 font-mono text-xs text-red-300">
+                        {publicKeyError}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
 
               {/* Feedback Messages */}
-              {status === "error" && feedback && (
+              {status === "error" && displayFeedback && (
                 <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-xs font-medium text-red-400 flex items-start gap-2.5">
                   <ShieldAlert size={16} className="shrink-0 mt-0.5" />
-                  <p>{feedback}</p>
+                  <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">{displayFeedback}</pre>
                 </div>
               )}
 
-              {!isWindows && (
+              {status === "connected" && feedback && (
+                <div className="rounded-lg border border-green-500/20 bg-green-500/10 px-4 py-3 text-xs font-medium text-green-400 flex items-start gap-2.5">
+                  <CheckCircle2 size={16} className="shrink-0 mt-0.5" />
+                  <p className="leading-relaxed">{feedback}</p>
+                </div>
+              )}
+
+              {!hasSshClient && (
                 <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/10 px-4 py-3 text-xs font-medium text-yellow-300 flex items-start gap-2.5">
                   <ShieldAlert size={16} className="shrink-0 mt-0.5" />
-                  <p>Tauri remote connections are only supported on Windows hosts in 0.4.0.</p>
+                  <p>This build expects a local OpenSSH client and a Linux remote host with sudo/systemd.</p>
                 </div>
               )}
 
@@ -824,6 +941,15 @@ function RemoteWorkspaceSetup({
                   className="rounded-lg border border-white/10 px-5 py-2.5 text-xs font-bold text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
                 >
                   Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={!canSaveConnection || status === "connecting"}
+                  onClick={() => void saveCurrentConnection()}
+                  className="flex items-center justify-center gap-2 rounded-lg border border-white/10 px-5 py-2.5 text-xs font-bold text-gray-300 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Save size={14} />
+                  Save Profile
                 </button>
                 <button
                   type="submit"
@@ -852,7 +978,84 @@ function RemoteWorkspaceSetup({
       {isSshHelpOpen && (
         <SshHelpModal onClose={() => setIsSshHelpOpen(false)} />
       )}
+
+      {isPublicKeyModalOpen && publicKeyContent && (
+        <PublicKeyModal publicKey={publicKeyContent} onClose={() => setIsPublicKeyModalOpen(false)} />
+      )}
     </main>
+  )
+}
+
+function formatConnectionError(message: string) {
+  return message
+    .split("\n\n[COMMAND]")[0]
+    .split("\n[COMMAND]")[0]
+    .trim()
+}
+function PublicKeyModal({ publicKey, onClose }: { publicKey: string; onClose: () => void }) {
+  const [copied, setCopied] = useState(false)
+
+  async function copyPublicKey() {
+    await navigator.clipboard.writeText(publicKey)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Generated public key"
+        className="w-full max-w-2xl rounded-3xl border border-white/10 bg-[#22272b] p-6 shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-white/5 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-2 text-cyan-300">
+              <KeyRound size={22} />
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-white">Generated public key</h3>
+              <p className="mt-1 text-xs text-gray-400">Copy this value to the remote server authorized_keys file.</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-white/5 hover:text-white"
+            aria-label="Close public key modal"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <pre className="mt-4 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-xl border border-white/5 bg-[#161a1d] p-4 font-mono text-xs leading-relaxed text-cyan-100 custom-scrollbar">
+          {publicKey}
+        </pre>
+
+        <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl border border-white/10 px-5 py-2.5 text-xs font-bold text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            onClick={() => void copyPublicKey()}
+            className="flex items-center justify-center gap-2 rounded-xl bg-cyan-500 px-5 py-2.5 text-xs font-black text-white transition-all hover:bg-cyan-400 hover:shadow-[0_0_12px_rgba(6,182,212,0.3)]"
+          >
+            <Clipboard size={14} />
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -918,15 +1121,14 @@ function SshHelpModal({ onClose }: { onClose: () => void }) {
         className="w-full max-w-2xl rounded-3xl border border-white/10 bg-[#22272b] p-6 shadow-2xl flex flex-col max-h-[85vh]"
         onClick={(event) => event.stopPropagation()}
       >
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-white/5 pb-4 mb-4">
           <div className="flex items-center gap-3">
             <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-2 text-cyan-300">
               <HelpCircle size={24} />
             </div>
             <div>
-              <h3 className="text-xl font-black text-white">{t("workspaceSelector.sshHelpModalTitle")}</h3>
-              <p className="text-xs text-gray-400">{t("workspaceSelector.sshHelpIntro")}</p>
+              <h3 className="text-xl font-black text-white">Linux SSH server setup</h3>
+              <p className="text-xs text-gray-400">Configure only the Linux server side here. Windows VMs should be accessed by RDP and run this app locally inside the VM.</p>
             </div>
           </div>
           <button
@@ -938,73 +1140,42 @@ function SshHelpModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto space-y-6 pr-1 custom-scrollbar text-sm leading-relaxed text-gray-300">
-          
-          {/* Step 1 */}
           <div>
             <h4 className="font-bold text-white flex items-center gap-2">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-cyan-500/15 text-[11px] font-black text-cyan-300">1</span>
-              {t("workspaceSelector.sshHelpStep1Title")}
+              Install and enable OpenSSH on Ubuntu/Debian
             </h4>
-            <p className="mt-2 text-xs text-gray-400">{t("workspaceSelector.sshHelpStep1Body")}</p>
-            <div className="grid gap-3 mt-3 md:grid-cols-2">
-              <div>
-                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider ml-1">Local Client (PowerShell)</span>
-                <CodeBlock code={t("workspaceSelector.sshHelpStep1LocalCode")} />
-              </div>
-              <div>
-                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider ml-1">Remote Server (PowerShell)</span>
-                <CodeBlock code={t("workspaceSelector.sshHelpStep1RemoteCode")} />
-              </div>
-            </div>
+            <p className="mt-2 text-xs text-gray-400">Run this on the Linux server as a sudo-capable user.</p>
+            <CodeBlock code={'sudo apt-get update\nsudo apt-get install -y openssh-server\nsudo systemctl enable --now ssh'} />
           </div>
 
-          {/* Step 2 */}
           <div>
             <h4 className="font-bold text-white flex items-center gap-2">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-cyan-500/15 text-[11px] font-black text-cyan-300">2</span>
-              {t("workspaceSelector.sshHelpStep2Title")}
+              Make sure the SSH user can use sudo
             </h4>
-            <p className="mt-2 text-xs text-gray-400">{t("workspaceSelector.sshHelpStep2Body")}</p>
-            <div className="grid gap-3 mt-3 md:grid-cols-2">
-              <div>
-                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider ml-1">Local Agent (PowerShell)</span>
-                <CodeBlock code={t("workspaceSelector.sshHelpStep2LocalCode")} />
-              </div>
-              <div>
-                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider ml-1">Remote Service (PowerShell)</span>
-                <CodeBlock code={t("workspaceSelector.sshHelpStep2RemoteCode")} />
-              </div>
-            </div>
+            <p className="mt-2 text-xs text-gray-400">The app uses sudo for /opt/pzmm, /var/lib/pzmm, SteamCMD packages, and systemd service management.</p>
+            <CodeBlock code={'sudo usermod -aG sudo <SSH_USER>\nsudo -n true'} />
           </div>
 
-          {/* Step 3 */}
           <div>
             <h4 className="font-bold text-white flex items-center gap-2">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-cyan-500/15 text-[11px] font-black text-cyan-300">3</span>
-              {t("workspaceSelector.sshHelpStep3Title")}
+              Generate the public key in this app
             </h4>
-            <p className="mt-2 text-xs text-gray-400">{t("workspaceSelector.sshHelpStep3Body")}</p>
-            <CodeBlock code={t("workspaceSelector.sshHelpStep3Code")} />
+            <p className="mt-2 text-xs text-gray-400">Select your private key file in the connection form, then click Public Key and copy the generated public key content.</p>
           </div>
 
-          {/* Step 4 */}
           <div>
             <h4 className="font-bold text-white flex items-center gap-2">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-cyan-500/15 text-[11px] font-black text-cyan-300">4</span>
-              {t("workspaceSelector.sshHelpStep4Title")}
+              Add the public key to authorized_keys
             </h4>
-            <p className="mt-2 text-xs text-gray-400">{t("workspaceSelector.sshHelpStep4Body")}</p>
-            <CodeBlock code={t("workspaceSelector.sshHelpStep4GenCode")} />
-            
-            <p className="mt-4 text-xs text-gray-400">{t("workspaceSelector.sshHelpStep4SetupBody")}</p>
-            <CodeBlock code={t("workspaceSelector.sshHelpStep4SetupCode")} />
+            <p className="mt-2 text-xs text-gray-400">Paste the generated public key into the Linux user's authorized_keys file and lock down permissions.</p>
+            <CodeBlock code={'mkdir -p ~/.ssh\nprintf "%s\\n" "<PASTE_PUBLIC_KEY_HERE>" >> ~/.ssh/authorized_keys\nchmod 700 ~/.ssh\nchmod 600 ~/.ssh/authorized_keys'} />
           </div>
-
         </div>
-
-        {/* Footer */}
         <div className="border-t border-white/5 pt-4 mt-4 flex justify-end">
           <button
             type="button"

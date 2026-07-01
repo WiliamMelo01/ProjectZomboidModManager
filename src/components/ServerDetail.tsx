@@ -1,4 +1,4 @@
-import { ArrowLeft, FilePenLine, Play, RefreshCw, Search, Server, Settings } from "lucide-react"
+import { ArrowLeft, FilePenLine, Play, RefreshCw, Search, Server, Settings, Terminal } from "lucide-react"
 import { useDeferredValue, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -86,6 +86,7 @@ export function ServerDetail({
   isStartingRemoteServer,
   onTestServer,
   onStartRemoteServer,
+  onOpenRemoteConsole,
 }: ServerDetailProps) {
   const { t } = useTranslation()
   const [search, setSearch] = useState("")
@@ -406,15 +407,25 @@ export function ServerDetail({
                 <span>{isCheckingPorts ? t("serverDetail.checkingPorts") : isCurrentServerTesting ? t("serverDetail.testing") : t("serverDetail.test")}</span>
              </button>
              {remoteConnection && (
-               <button
-                  type="button"
-                  onClick={() => void onStartRemoteServer(server)}
-                  disabled={isCheckingRemoteFirewall || isConfiguringRemoteFirewall || isStartingRemoteServer}
-                  className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-sm font-black text-emerald-300 transition-all hover:bg-emerald-500 hover:text-[#071014] disabled:cursor-not-allowed disabled:opacity-60"
-               >
-                  {isCheckingRemoteFirewall || isConfiguringRemoteFirewall || isStartingRemoteServer ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
-                  <span>Iniciar remoto</span>
-               </button>
+               <>
+                 <button
+                    type="button"
+                    onClick={() => void onOpenRemoteConsole?.(server)}
+                    className="flex items-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-sm font-black text-cyan-300 transition-all hover:bg-cyan-500 hover:text-[#071014]"
+                 >
+                    <Terminal size={18} />
+                    <span>Console remoto</span>
+                 </button>
+                 <button
+                    type="button"
+                    onClick={() => void onStartRemoteServer(server)}
+                    disabled={isCheckingRemoteFirewall || isConfiguringRemoteFirewall || isStartingRemoteServer}
+                    className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-sm font-black text-emerald-300 transition-all hover:bg-emerald-500 hover:text-[#071014] disabled:cursor-not-allowed disabled:opacity-60"
+                 >
+                    {isCheckingRemoteFirewall || isConfiguringRemoteFirewall || isStartingRemoteServer ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
+                    <span>Iniciar remoto</span>
+                 </button>
+               </>
              )}
              <div className="bg-[#22272b] px-4 py-2 rounded-xl border border-white/5 text-center">
                 <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest">{t("serverDetail.activeMods")}</p>

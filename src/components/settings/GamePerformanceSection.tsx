@@ -108,7 +108,7 @@ export function GamePerformanceSection({
                   type="text"
                   value={path}
                   onChange={(event) => onPathChange(event.target.value)}
-                  placeholder={isRemoteWorkspace ? "C:\\Users\\Administrator\\AppData\\Local\\ZomboidServerModManager\\zomboid-server\\StartServer64.bat" : "C:\\SteamLibrary\\steamapps\\common\\ProjectZomboid\\ProjectZomboid64.exe"}
+                  placeholder={isRemoteWorkspace ? "/var/lib/pzmm/zomboid-server/start-server.sh" : "C:\\SteamLibrary\\steamapps\\common\\ProjectZomboid\\ProjectZomboid64.exe"}
                   className="w-full bg-[#1e2327] border border-white/5 rounded-2xl py-3.5 pl-12 pr-4 text-sm focus:outline-none focus:border-orange-400/50 focus:ring-1 focus:ring-orange-400/20 transition-all placeholder:text-gray-700"
                 />
               </div>

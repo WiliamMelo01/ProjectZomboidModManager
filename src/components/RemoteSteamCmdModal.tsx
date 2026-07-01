@@ -54,42 +54,52 @@ type RemoteSetupLogEvent = {
 
 type StepStatus = "idle" | "running" | "success" | "error"
 type ZomboidSetupMode = "existing" | "download"
+type ZomboidServerBranch = "default" | "unstable"
 
-function remoteAppDataBase(username: string) {
-  const account = username.trim() || "Administrator"
-  return `C:\\Users\\${account}\\AppData\\Local\\ZomboidServerModManager`
+function remoteAppDataBase(_username: string) {
+  return "/var/lib/pzmm"
 }
 
 function remoteSteamcmdDir(username: string) {
-  return `${remoteAppDataBase(username)}\\steamcmd-pool\\instance-1`
+  return `${remoteAppDataBase(username)}/steamcmd`
 }
 
 function remoteHelperDir(username: string) {
-  return `${remoteAppDataBase(username)}\\helper`
+  return "/opt/pzmm"
 }
 
 function remoteZomboidServerDir(username: string) {
-  return `${remoteAppDataBase(username)}\\zomboid-server`
+  return `${remoteAppDataBase(username)}/zomboid-server`
 }
 
-function joinWindowsPath(directory: string, fileName: string) {
-  return `${directory.replace(/[\\/]+$/, "")}\\${fileName}`
+function joinRemotePath(directory: string, fileName: string) {
+  return `${directory.replace(/[\\/]+$/, "")}/${fileName}`
 }
 
-function parentWindowsPath(path: string) {
-  const normalized = path.replace(/\//g, "\\")
-  const index = normalized.lastIndexOf("\\")
+function parentRemotePath(path: string) {
+  const normalized = path.replace(/\\/g, "/")
+  const index = normalized.lastIndexOf("/")
   return index > 0 ? normalized.slice(0, index) : normalized
+}
+
+function isWindowsPath(path?: string) {
+  const value = path?.trim() ?? ""
+  return /^[a-zA-Z]:[\\/]/.test(value) || value.includes("\\")
+}
+
+function isAbsoluteLinuxPath(path?: string) {
+  const value = path?.trim() ?? ""
+  return value.startsWith("/") && !isWindowsPath(value)
 }
 
 function isLegacyPzManagerPath(path?: string) {
   return Boolean(path?.trim().replace(/\//g, "\\").toLowerCase().startsWith("c:\\pzmanager\\"))
 }
 
-function cleanLegacyPath(path?: string) {
-  return path && !isLegacyPzManagerPath(path) ? path : ""
+function cleanRemoteLinuxPath(path?: string) {
+  const value = path?.trim() ?? ""
+  return value && !isLegacyPzManagerPath(value) && isAbsoluteLinuxPath(value) ? value : ""
 }
-
 export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteamCmdModalProps) {
   const { t } = useTranslation()
   const defaultSteamcmdDir = useMemo(() => remoteSteamcmdDir(connection.username), [connection.username])
@@ -98,6 +108,7 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
   const [config, setConfig] = useState<RemoteWorkspaceConfig | null>(null)
   const [activeStep, setActiveStep] = useState(1)
   const [zomboidMode, setZomboidMode] = useState<ZomboidSetupMode>("existing")
+  const [zomboidBranch, setZomboidBranch] = useState<ZomboidServerBranch>("default")
   const [steamcmdDir, setSteamcmdDir] = useState(defaultSteamcmdDir)
   const [steamcmdPath, setSteamcmdPath] = useState("")
   const [zomboidServerDir, setZomboidServerDir] = useState(defaultZomboidServerDir)
@@ -117,8 +128,14 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
   const [zomboidElapsedSeconds, setZomboidElapsedSeconds] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const isRunning = helperStatus === "running" || steamcmdStatus === "running" || zomboidStatus === "running"
-  const resolvedSteamcmdPath = steamcmdPath || joinWindowsPath(steamcmdDir, "steamcmd.exe")
-  const resolvedZomboidServerPath = zomboidServerPath || joinWindowsPath(zomboidServerDir, "StartServer64.bat")
+  const resolvedSteamcmdPath = steamcmdPath || "/usr/games/steamcmd"
+  const resolvedZomboidServerPath = zomboidServerPath || joinRemotePath(zomboidServerDir, "start-server.sh")
+  const selectedZomboidBranchCommand = zomboidBranch === "unstable"
+    ? "app_update 380870 -beta unstable validate"
+    : "app_update 380870 validate"
+  const isSteamcmdDirValid = isAbsoluteLinuxPath(steamcmdDir)
+  const isZomboidServerDirValid = isAbsoluteLinuxPath(zomboidServerDir)
+  const isZomboidServerPathValid = isAbsoluteLinuxPath(resolvedZomboidServerPath)
   const canSetupHelper =
     connection.authMethod === "key" &&
     connection.sshKeyPath.trim().length > 0 &&
@@ -128,18 +145,21 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
     connection.authMethod === "key" &&
     connection.sshKeyPath.trim().length > 0 &&
     steamcmdDir.trim().length > 0 &&
+    isSteamcmdDirValid &&
     !isRunning
   const canSaveExistingZomboid =
-    steamcmdStatus === "success" &&
     zomboidMode === "existing" &&
     zomboidServerDir.trim().length > 0 &&
     resolvedZomboidServerPath.trim().length > 0 &&
+    isZomboidServerDirValid &&
+    isZomboidServerPathValid &&
     !isRunning
   const canDownloadZomboid =
     steamcmdStatus === "success" &&
     zomboidModeRequiresSteamcmd(zomboidMode) &&
     resolvedSteamcmdPath.trim().length > 0 &&
     zomboidServerDir.trim().length > 0 &&
+    isZomboidServerDirValid &&
     !isRunning
 
   useEffect(() => {
@@ -158,10 +178,10 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
         if (!isMounted) return
 
         const nextConfig = loadedConfig ?? null
-        const loadedSteamcmdDir = cleanLegacyPath(nextConfig?.remoteSteamcmdDir) || defaultSteamcmdDir
-        const loadedSteamcmdPath = cleanLegacyPath(nextConfig?.remoteSteamcmdPath)
-        const loadedZomboidServerDir = cleanLegacyPath(nextConfig?.remoteZomboidServerDir) || defaultZomboidServerDir
-        const loadedZomboidServerPath = cleanLegacyPath(nextConfig?.remoteZomboidServerPath)
+        const loadedSteamcmdDir = cleanRemoteLinuxPath(nextConfig?.remoteSteamcmdDir) || defaultSteamcmdDir
+        const loadedSteamcmdPath = cleanRemoteLinuxPath(nextConfig?.remoteSteamcmdPath)
+        const loadedZomboidServerDir = cleanRemoteLinuxPath(nextConfig?.remoteZomboidServerDir) || defaultZomboidServerDir
+        const loadedZomboidServerPath = cleanRemoteLinuxPath(nextConfig?.remoteZomboidServerPath)
 
         setConfig(nextConfig)
         setSteamcmdDir(loadedSteamcmdDir)
@@ -311,11 +331,16 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
     setError(null)
 
     try {
-      await saveRemoteConfig({
-        remoteZomboidServerDir: zomboidServerDir,
-        remoteZomboidServerPath: resolvedZomboidServerPath,
+      const savedConfig = await invokeTauri<RemoteWorkspaceConfig>("save_remote_zomboid_server_path", {
+        request: {
+          connection,
+          serverDirectory: zomboidServerDir,
+          serverLaunchPath: resolvedZomboidServerPath,
+        },
       })
-      setZomboidServerPath(resolvedZomboidServerPath)
+      setConfig(savedConfig)
+      setZomboidServerDir(savedConfig.remoteZomboidServerDir)
+      setZomboidServerPath(savedConfig.remoteZomboidServerPath)
       setZomboidStatus("success")
       finishZomboidTimer(startedAt)
       setActiveStep(4)
@@ -343,6 +368,7 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
           connection,
           steamcmdPath: resolvedSteamcmdPath,
           installDirectory: zomboidServerDir,
+          branch: zomboidBranch,
         },
       })
 
@@ -500,7 +526,7 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                 <div className="grid gap-4">
                   <RemotePathInput
                     label="Remote setup folder"
-                    value={helperResult?.remotePath ? parentWindowsPath(helperResult.remotePath) : defaultHelperDir}
+                    value={helperResult?.remotePath ? parentRemotePath(helperResult.remotePath) : defaultHelperDir}
                     placeholder={defaultHelperDir}
                     disabled
                     onChange={() => undefined}
@@ -549,10 +575,15 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                   <RemotePathInput
                     label={t("remoteSetup.step2PathLabel")}
                     value={resolvedSteamcmdPath}
-                    placeholder={joinWindowsPath(defaultSteamcmdDir, "steamcmd.exe")}
+                    placeholder="/usr/games/steamcmd"
                     disabled
                     onChange={setSteamcmdPath}
                   />
+                  {steamcmdDir.trim().length > 0 && !isSteamcmdDirValid ? (
+                    <p className="rounded-[8px] border border-yellow-400/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100">
+                      {t("remoteSetup.linuxPathRequired")}
+                    </p>
+                  ) : null}
                 </div>
 
                 <ResultPanel
@@ -620,11 +651,42 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                   <RemotePathInput
                     label={t("remoteSetup.step3PathLabel")}
                     value={resolvedZomboidServerPath}
-                    placeholder={joinWindowsPath(defaultZomboidServerDir, "StartServer64.bat")}
+                    placeholder={joinRemotePath(defaultZomboidServerDir, "start-server.sh")}
                     disabled={isRunning || zomboidMode === "download"}
                     onChange={setZomboidServerPath}
                   />
+                  {(zomboidServerDir.trim().length > 0 && !isZomboidServerDirValid) ||
+                  (zomboidMode === "existing" && resolvedZomboidServerPath.trim().length > 0 && !isZomboidServerPathValid) ? (
+                    <p className="rounded-[8px] border border-yellow-400/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100">
+                      {t("remoteSetup.linuxPathRequired")}
+                    </p>
+                  ) : null}
                 </div>
+
+                {zomboidMode === "download" && (
+                  <div className="space-y-3">
+                    <div>
+                      <p className="ml-1 text-[9px] font-black uppercase tracking-[0.2em] text-gray-500">
+                        {t("remoteSetup.step3BranchLabel")}
+                      </p>
+                      <p className="mt-1 ml-1 font-mono text-xs text-gray-500">{selectedZomboidBranchCommand}</p>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <ModeButton
+                        active={zomboidBranch === "default"}
+                        title={t("remoteSetup.step3BranchDefaultTitle")}
+                        description={t("remoteSetup.step3BranchDefaultDesc")}
+                        onClick={() => setZomboidBranch("default")}
+                      />
+                      <ModeButton
+                        active={zomboidBranch === "unstable"}
+                        title={t("remoteSetup.step3BranchUnstableTitle")}
+                        description={t("remoteSetup.step3BranchUnstableDesc")}
+                        onClick={() => setZomboidBranch("unstable")}
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {zomboidMode === "download" && (
                   <ResultPanel
@@ -679,7 +741,7 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                   </p>
                 </div>
                 <div className="grid gap-3 rounded-[8px] border border-green-400/20 bg-green-500/10 p-4 text-sm text-green-100">
-                  <SavedPath label={t("remoteSetup.step1Title")} value={helperResult?.remotePath ? parentWindowsPath(helperResult.remotePath) : defaultHelperDir} />
+                  <SavedPath label={t("remoteSetup.step1Title")} value={helperResult?.remotePath ? parentRemotePath(helperResult.remotePath) : defaultHelperDir} />
                   <SavedPath label={t("remoteSetup.step2Title")} value={resolvedSteamcmdPath} />
                   <SavedPath label={t("remoteSetup.step3Title")} value={zomboidServerDir} />
                   <SavedPath label={t("remoteSetup.step3PathLabel")} value={resolvedZomboidServerPath} />

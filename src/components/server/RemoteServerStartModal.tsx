@@ -1,4 +1,4 @@
-import { CheckCircle2, Play, RefreshCw, Send, ShieldAlert, ShieldCheck, Terminal, X, XCircle } from "lucide-react"
+import { CheckCircle2, Play, RefreshCw, Send, ShieldAlert, ShieldCheck, Square, Terminal, X, XCircle } from "lucide-react"
 import { useState, type ReactNode } from "react"
 
 import type { ZomboidServer } from "@/types/server"
@@ -40,6 +40,7 @@ type RemoteServerStartModalProps = {
   onConfigureFirewall: () => void
   onStartServer: () => void
   onSendCommand: (command: string) => Promise<void>
+  onStopServer: () => Promise<void>
 }
 
 export function RemoteServerStartModal({
@@ -57,9 +58,11 @@ export function RemoteServerStartModal({
   onConfigureFirewall,
   onStartServer,
   onSendCommand,
+  onStopServer,
 }: RemoteServerStartModalProps) {
   const [commandText, setCommandText] = useState("")
   const [isSendingCommand, setIsSendingCommand] = useState(false)
+  const [isStoppingServer, setIsStoppingServer] = useState(false)
 
   if (!isOpen) {
     return null
@@ -68,12 +71,14 @@ export function RemoteServerStartModal({
   const isBusy = isChecking || isConfiguring || isStarting
   const canConfigureFirewall = Boolean(firewallCheck && !firewallCheck.isConfigured && !isBusy)
   const canStartServer = Boolean(firewallCheck?.isConfigured && !isBusy)
-  const canSendCommand = Boolean(startResult?.success && commandText.trim() && !isSendingCommand)
-  const visibleLogs = logs.length > 0 ? logs : ["Waiting for firewall check..."]
+  const isStartupWatchPending = Boolean(startResult?.success && /not detected|keeps starting|still running/i.test(`${startResult.message} ${logs.join(" ")}`))
+  const canSendCommand = Boolean(startResult?.success && commandText.trim() && !isSendingCommand && !isStoppingServer)
+  const canStopServer = Boolean(startResult?.success && !isSendingCommand && !isStoppingServer)
+  const visibleLogs = logs.length > 0 ? logs : ["Waiting for systemd setup check..."]
 
   async function submitCommand() {
     const command = commandText.trim()
-    if (!command || isSendingCommand) return
+    if (!command || isSendingCommand || isStoppingServer) return
 
     setIsSendingCommand(true)
     try {
@@ -81,6 +86,17 @@ export function RemoteServerStartModal({
       setCommandText("")
     } finally {
       setIsSendingCommand(false)
+    }
+  }
+
+  async function stopServer() {
+    if (!canStopServer) return
+
+    setIsStoppingServer(true)
+    try {
+      await onStopServer()
+    } finally {
+      setIsStoppingServer(false)
     }
   }
 
@@ -95,7 +111,7 @@ export function RemoteServerStartModal({
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-300">Remote server start</p>
               <h3 className="mt-1 text-lg font-black text-white">{server.name}</h3>
-              <p className="mt-1 text-xs text-gray-400">Firewall check runs before starting the remote server.</p>
+              <p className="mt-1 text-xs text-gray-400">Close only hides this window; it does not stop the remote server.</p>
             </div>
           </div>
           <button
@@ -111,13 +127,13 @@ export function RemoteServerStartModal({
         <div className="grid gap-4 p-5 lg:grid-cols-[260px_1fr]">
           <div className="space-y-3">
             <div className="rounded-xl border border-white/10 bg-[#20262b] p-4">
-              <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Firewall</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">systemd</p>
               {isChecking ? (
                 <StatusLine icon={<RefreshCw size={16} className="animate-spin" />} text="Checking rules" tone="muted" />
               ) : firewallCheck?.isConfigured ? (
                 <StatusLine icon={<CheckCircle2 size={16} />} text="Ready" tone="success" />
               ) : firewallCheck ? (
-                <StatusLine icon={<ShieldAlert size={16} />} text={`${firewallCheck.missingRules.length} missing rule(s)`} tone="warning" />
+                <StatusLine icon={<ShieldAlert size={16} />} text={`${firewallCheck.missingRules.length} missing setup item(s)`} tone="warning" />
               ) : (
                 <StatusLine icon={<RefreshCw size={16} />} text="Pending" tone="muted" />
               )}
@@ -139,7 +155,7 @@ export function RemoteServerStartModal({
               ) : error ? (
                 <StatusLine icon={<XCircle size={16} />} text="Needs attention" tone="error" />
               ) : (
-                <StatusLine icon={<Terminal size={16} />} text="Ready after firewall" tone="muted" />
+                <StatusLine icon={<Terminal size={16} />} text="Ready after systemd setup" tone="muted" />
               )}
             </div>
 
@@ -189,7 +205,7 @@ export function RemoteServerStartModal({
                       value={commandText}
                       onChange={(event) => setCommandText(event.target.value)}
                       placeholder="save, servermsg hello, quit..."
-                      disabled={isSendingCommand}
+                      disabled={isSendingCommand || isStoppingServer}
                       className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-gray-600 disabled:opacity-60"
                     />
                   </div>
@@ -213,13 +229,24 @@ export function RemoteServerStartModal({
                   className="flex items-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm font-black text-cyan-200 transition-colors hover:bg-cyan-400 hover:text-[#071014]"
                 >
                   <ShieldCheck size={18} />
-                  <span>Configure firewall</span>
+                  <span>Configure systemd</span>
+                </button>
+              )}
+              {startResult?.success && (
+                <button
+                  type="button"
+                  onClick={() => void stopServer()}
+                  disabled={!canStopServer}
+                  className="flex items-center gap-2 rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-2 text-sm font-black text-red-200 transition-colors hover:bg-red-400 hover:text-[#160b0b] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isStoppingServer ? <RefreshCw size={18} className="animate-spin" /> : <Square size={18} />}
+                  <span>Stop server</span>
                 </button>
               )}
               <button
                 type="button"
                 onClick={onStartServer}
-                disabled={!canStartServer}
+                disabled={!canStartServer || Boolean(startResult?.success)}
                 className="flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 text-sm font-black text-emerald-200 transition-colors hover:bg-emerald-400 hover:text-[#071014] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isStarting ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}

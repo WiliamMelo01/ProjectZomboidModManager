@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { listen } from "@tauri-apps/api/event"
 import { Box, Download, Server, Settings } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -124,6 +124,7 @@ function LocalWorkspaceApp({
   const [isConfiguringRemoteFirewall, setIsConfiguringRemoteFirewall] = useState(false)
   const [isStartingRemoteServer, setIsStartingRemoteServer] = useState(false)
   const [activeStartServer, setActiveStartServer] = useState<ZomboidServer | null>(null)
+  const activeStartServerRef = useRef<ZomboidServer | null>(null)
   const { t } = useTranslation()
   const {
     mods,
@@ -537,7 +538,7 @@ function LocalWorkspaceApp({
     setIsRemoteStartOpen(true)
     setRemoteStartResult(null)
     setRemoteStartError(null)
-    setRemoteStartLogs([`Checking remote firewall for ${server.name}...`])
+    setRemoteStartLogs([`Checking remote systemd setup for ${server.name}...`])
     setIsCheckingRemoteFirewall(true)
 
     try {
@@ -548,7 +549,7 @@ function LocalWorkspaceApp({
       setRemoteFirewallCheck(check)
       setRemoteStartLogs([
         ...check.logs,
-        check.isConfigured ? "Firewall is configured. You can run the server." : "Firewall needs configuration before running the server.",
+        check.isConfigured ? "systemd is configured. You can run the server." : "systemd needs configuration before running the server.",
       ])
     } catch (error) {
       setRemoteStartError(getErrorMessage(error))
@@ -558,6 +559,29 @@ function LocalWorkspaceApp({
     }
   }
 
+  function appendRemoteStartLogs(nextLogs: string[]) {
+    if (nextLogs.length === 0) return
+
+    setRemoteStartLogs((currentLogs) => {
+      const seen = new Set(currentLogs)
+      const merged = [...currentLogs]
+
+      for (const line of nextLogs) {
+        if (!seen.has(line)) {
+          seen.add(line)
+          merged.push(line)
+        }
+      }
+
+      return merged
+    })
+  }
+
+  function isRemoteStartupPending(result: RemoteServerActionResult | null) {
+    if (!result?.success) return false
+
+    return /not detected|keeps starting|still starting|not open yet|finalizing startup status/i.test(result.message)
+  }
   async function configureRemoteServerFirewall(server: ZomboidServer) {
     if (!remoteConnection || !server) {
       return
@@ -565,14 +589,14 @@ function LocalWorkspaceApp({
 
     setRemoteStartError(null)
     setIsConfiguringRemoteFirewall(true)
-    setRemoteStartLogs((currentLogs) => [...currentLogs, "Configuring remote firewall rules..."])
+    setRemoteStartLogs((currentLogs) => [...currentLogs, "Configuring remote systemd service/socket units..."])
 
     try {
       const result = await invokeTauri<RemoteServerActionResult>("configure_remote_zomboid_server_firewall", {
         connection: remoteConnection,
         serverId: server.id,
       })
-      setRemoteStartLogs((currentLogs) => [...currentLogs, ...result.logs, result.message])
+      appendRemoteStartLogs([...result.logs, result.message])
 
       const check = await invokeTauri<RemoteServerFirewallCheck>("check_remote_zomboid_server_firewall", {
         connection: remoteConnection,
@@ -582,7 +606,7 @@ function LocalWorkspaceApp({
       setRemoteStartLogs((currentLogs) => [
         ...currentLogs,
         ...check.logs,
-        check.isConfigured ? "Firewall is configured. You can run the server." : "Firewall still needs attention.",
+        check.isConfigured ? "systemd is configured. You can run the server." : "systemd still needs attention.",
       ])
     } catch (error) {
       setRemoteStartError(getErrorMessage(error))
@@ -599,7 +623,7 @@ function LocalWorkspaceApp({
 
     setRemoteStartError(null)
     setIsStartingRemoteServer(true)
-    setRemoteStartLogs((currentLogs) => [...currentLogs, "Starting remote Project Zomboid server..."])
+    appendRemoteStartLogs(["Starting remote Project Zomboid server...", "Streaming startup output in real time."])
 
     try {
       const result = await invokeTauri<RemoteServerActionResult>("start_remote_zomboid_server", {
@@ -607,12 +631,11 @@ function LocalWorkspaceApp({
         serverId: server.id,
       })
       setRemoteStartResult(result)
-      setRemoteStartLogs((currentLogs) => [...currentLogs, ...result.logs, result.message])
+      appendRemoteStartLogs([...result.logs, result.message])
     } catch (error) {
+      setIsStartingRemoteServer(false)
       setRemoteStartError(getErrorMessage(error))
       setRemoteStartLogs((currentLogs) => [...currentLogs, getErrorMessage(error)])
-    } finally {
-      setIsStartingRemoteServer(false)
     }
   }
 
@@ -622,7 +645,7 @@ function LocalWorkspaceApp({
     }
 
     setRemoteStartError(null)
-    setRemoteStartLogs((currentLogs) => [...currentLogs, `> ${command}`])
+    appendRemoteStartLogs([`> ${command}`])
 
     try {
       const result = await invokeTauri<RemoteServerActionResult>("send_remote_zomboid_server_command", {
@@ -630,7 +653,7 @@ function LocalWorkspaceApp({
         serverId: server.id,
         command,
       })
-      setRemoteStartLogs((currentLogs) => [...currentLogs, ...result.logs, result.message])
+      appendRemoteStartLogs([...result.logs, result.message])
     } catch (error) {
       setRemoteStartError(getErrorMessage(error))
       setRemoteStartLogs((currentLogs) => [...currentLogs, getErrorMessage(error)])
@@ -638,10 +661,41 @@ function LocalWorkspaceApp({
     }
   }
 
+  async function stopRemoteServer(server: ZomboidServer) {
+    await sendRemoteServerCommand(server, "quit")
+    setRemoteStartResult({
+      success: false,
+      message: "Stop command queued. Refreshing server status shortly.",
+      command: "quit",
+      logs: [],
+    })
+    setRemoteStartLogs((currentLogs) => [...currentLogs, "Stop command queued. The server may take a few seconds to shut down."])
+    window.setTimeout(() => {
+      void loadServers()
+    }, 5000)
+  }
+
   async function openRemoteServerStart(server: ZomboidServer) {
     setActiveStartServer(server)
     setIsRemoteStartOpen(true)
     await checkRemoteServerFirewall(server)
+  }
+
+  function openRemoteServerConsole(server: ZomboidServer) {
+    setActiveStartServer(server)
+    setIsRemoteStartOpen(true)
+    setRemoteFirewallCheck(null)
+    setRemoteStartError(null)
+    setRemoteStartResult({
+      success: true,
+      message: "Remote command channel opened. Commands will be queued for the server controller if it is running.",
+      command: "send-server-command",
+      logs: [],
+    })
+    setRemoteStartLogs([
+      `Remote command console opened for ${server.name}.`,
+      "Use this only after the remote server controller is running.",
+    ])
   }
 
   async function killPortConflictsAndContinue(server: ZomboidServer) {
@@ -701,6 +755,9 @@ function LocalWorkspaceApp({
   }
 
   useEffect(() => {
+    activeStartServerRef.current = activeStartServer
+  }, [activeStartServer])
+  useEffect(() => {
     void loadInitialData()
   }, [])
 
@@ -729,6 +786,128 @@ function LocalWorkspaceApp({
     }
   }, [])
 
+  useEffect(() => {
+    let unlisten: (() => void) | null = null
+
+    void listen<ServerTestEvent>("remote-server-start-event", (event) => {
+      const payload = event.payload
+      const currentStartServer = activeStartServerRef.current
+      if (!currentStartServer || payload.serverId !== currentStartServer.id) {
+        return
+      }
+
+      if (payload.event === "started") {
+        setIsStartingRemoteServer(true)
+        appendRemoteStartLogs(["Remote server process started. Streaming logs..."])
+        return
+      }
+
+      if (payload.event === "line" && payload.line) {
+        appendRemoteStartLogs([payload.line])
+        return
+      }
+
+      if (payload.event === "ready") {
+        setIsStartingRemoteServer(false)
+        setRemoteStartError(null)
+        setRemoteStartResult({
+          success: true,
+          message: "Remote server is running. Console command channel is ready.",
+          command: "start-server-streaming",
+          logs: [],
+        })
+        window.setTimeout(() => {
+          void loadServers()
+        }, 1500)
+        return
+      }
+
+      if (payload.event === "finished") {
+        setIsStartingRemoteServer(false)
+        setRemoteStartResult({
+          success: false,
+          message: "Remote server process exited.",
+          command: "start-server-streaming",
+          logs: [],
+        })
+        appendRemoteStartLogs(["Remote server process exited."])
+        window.setTimeout(() => {
+          void loadServers()
+        }, 1500)
+        return
+      }
+
+      if (payload.event === "error") {
+        setIsStartingRemoteServer(false)
+        const message = payload.error ?? "Remote server start failed."
+        setRemoteStartError(message)
+        setRemoteStartResult({
+          success: false,
+          message,
+          command: "start-server-streaming",
+          logs: [],
+        })
+        appendRemoteStartLogs([message])
+      }
+    }).then((unsubscribe) => {
+      unlisten = unsubscribe
+    })
+
+    return () => {
+      unlisten?.()
+    }
+  }, [])
+  useEffect(() => {
+    if (!isRemoteStartOpen || !remoteConnection || !activeStartServer || !isRemoteStartupPending(remoteStartResult)) {
+      return
+    }
+
+    let cancelled = false
+    let timer: number | undefined
+
+    async function pollRemoteServerStatus() {
+      if (!remoteConnection || !activeStartServer) return
+
+      try {
+        const result = await invokeTauri<RemoteServerActionResult>("check_remote_zomboid_server_status", {
+          connection: remoteConnection,
+          serverId: activeStartServer.id,
+        })
+
+        if (cancelled) return
+
+        setRemoteStartResult(result)
+        appendRemoteStartLogs([...result.logs, result.message])
+
+        if (result.success && /appears to be running|is running on port/i.test(result.message)) {
+          window.setTimeout(() => {
+            void loadServers()
+          }, 1500)
+          return
+        }
+
+        if (!result.success) {
+          return
+        }
+      } catch (error) {
+        if (cancelled) return
+        appendRemoteStartLogs([getErrorMessage(error)])
+      }
+
+      if (!cancelled) {
+        timer = window.setTimeout(pollRemoteServerStatus, 5000)
+      }
+    }
+
+    timer = window.setTimeout(pollRemoteServerStatus, 3000)
+
+    return () => {
+      cancelled = true
+      if (timer) {
+        window.clearTimeout(timer)
+      }
+    }
+  }, [isRemoteStartOpen, remoteConnection, activeStartServer, remoteStartResult?.message, remoteStartResult?.success])
   useEffect(() => {
     let unlisten: (() => void) | null = null
 
@@ -841,6 +1020,7 @@ function LocalWorkspaceApp({
                   isStartingRemoteServer={isStartingRemoteServer}
                   onTestServer={testServer}
                   onStartRemoteServer={openRemoteServerStart}
+                  onOpenRemoteConsole={openRemoteServerConsole}
                 />
               )
             ) : (
@@ -864,6 +1044,7 @@ function LocalWorkspaceApp({
                 }}
                 onTestServer={testServer}
                 onStartServer={openRemoteServerStart}
+                onOpenRemoteConsole={openRemoteServerConsole}
                 onDeployLocalServer={() => setIsDeployLocalModalOpen(true)}
               />
             )
@@ -931,6 +1112,7 @@ function LocalWorkspaceApp({
           onConfigureFirewall={() => void configureRemoteServerFirewall(activeStartServer)}
           onStartServer={() => void startRemoteServer(activeStartServer)}
           onSendCommand={(command) => sendRemoteServerCommand(activeStartServer, command)}
+          onStopServer={() => stopRemoteServer(activeStartServer)}
         />
       )}
 

@@ -18,6 +18,7 @@ type DashboardProps = {
   canCreateServer?: boolean
   onTestServer: (server: ZomboidServer) => void
   onStartServer: (server: ZomboidServer) => void
+  onOpenRemoteConsole?: (server: ZomboidServer) => void
   onDeployLocalServer?: () => void
 }
 
@@ -38,6 +39,7 @@ export function Dashboard({
   canCreateServer = !isReadOnly,
   onTestServer,
   onStartServer,
+  onOpenRemoteConsole,
   onDeployLocalServer,
 }: DashboardProps) {
   const { t } = useTranslation()
@@ -320,16 +322,28 @@ export function Dashboard({
             {t("serverDetail.test")}
           </button>
           {isReadOnly && (
-            <button
-              onClick={() => {
-                onStartServer(contextMenu.server)
-                setContextMenu(null)
-              }}
-              className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-emerald-300 transition-colors hover:bg-emerald-500/10 hover:text-emerald-200"
-            >
-              <Play size={16} />
-              {t("serverDetail.start")}
-            </button>
+            <>
+              <button
+                onClick={() => {
+                  onOpenRemoteConsole?.(contextMenu.server)
+                  setContextMenu(null)
+                }}
+                className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-cyan-300 transition-colors hover:bg-cyan-500/10 hover:text-cyan-200"
+              >
+                <Terminal size={16} />
+                Console remoto
+              </button>
+              <button
+                onClick={() => {
+                  onStartServer(contextMenu.server)
+                  setContextMenu(null)
+                }}
+                className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-emerald-300 transition-colors hover:bg-emerald-500/10 hover:text-emerald-200"
+              >
+                <Play size={16} />
+                {t("serverDetail.start")}
+              </button>
+            </>
           )}
           <button
             onClick={() => configureServer(contextMenu.server)}

@@ -38,8 +38,12 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path release-assets | Out-Null
           Copy-Item src-tauri/target/release/zomboid_server_mod_manager.exe release-assets/pz-manager-windows-x86_64.exe
-          Get-ChildItem src-tauri/target/release/bundle -Recurse -File -Include *.msi,*.exe |
-            ForEach-Object { Copy-Item $_.FullName (Join-Path release-assets $_.Name) -Force }
+          $bundlePath = "src-tauri/target/release/bundle"
+          if (Test-Path -LiteralPath $bundlePath) {
+            Get-ChildItem -LiteralPath $bundlePath -Recurse -File |
+              Where-Object { $_.Extension -in ".msi", ".exe" } |
+              ForEach-Object { Copy-Item $_.FullName (Join-Path release-assets $_.Name) -Force }
+          }
 
       - name: Upload Windows workflow artifacts
         uses: actions/upload-artifact@v4

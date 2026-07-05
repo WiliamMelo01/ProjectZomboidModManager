@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process"
+import { existsSync } from "node:fs"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 
 const command = process.argv[2]
 
@@ -25,10 +28,21 @@ if (process.platform === "linux") {
   }
 }
 
-const child = spawn("tauri", [command], {
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
+const localTauri = path.join(repoRoot, "node_modules", ".bin", process.platform === "win32" ? "tauri.cmd" : "tauri")
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm"
+const commandPath = existsSync(localTauri) ? localTauri : npmCommand
+const commandArgs = existsSync(localTauri) ? [command] : ["exec", "--", "tauri", command]
+
+const child = spawn(commandPath, commandArgs, {
   stdio: "inherit",
   env,
-  shell: false,
+  shell: process.platform === "win32",
+})
+
+child.on("error", (error) => {
+  console.error(`Could not start Tauri CLI: ${error.message}`)
+  process.exit(1)
 })
 
 child.on("exit", (code, signal) => {

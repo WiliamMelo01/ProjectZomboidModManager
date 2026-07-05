@@ -563,14 +563,14 @@ fn check_server_firewall(server_id: String) -> Result<models::RemoteServerFirewa
         }
         logs.push("Cloud security groups must also allow these ports.".to_string());
 
-        return Ok(models::RemoteServerFirewallCheck {
+        Ok(models::RemoteServerFirewallCheck {
             server_id,
             ports,
             rules,
             missing_rules,
             is_configured,
             logs,
-        });
+        })
     }
 
     #[cfg(windows)]
@@ -663,7 +663,7 @@ fn configure_server_firewall(
         let updated = check_server_firewall(server_id)?;
         logs.extend(updated.logs);
 
-        return Ok(models::RemoteServerActionResult {
+        Ok(models::RemoteServerActionResult {
             success: updated.is_configured,
             message: if updated.is_configured {
                 "Linux firewall configured successfully.".to_string()
@@ -672,7 +672,7 @@ fn configure_server_firewall(
             },
             command: "ufw allow".to_string(),
             logs,
-        });
+        })
     }
 
     #[cfg(windows)]
@@ -1059,7 +1059,7 @@ fn clean_bom_from_bat_files(dir: &Path, log_path: &Path) {
             if path.is_file()
                 && path
                     .extension()
-                    .map_or(false, |ext| ext.eq_ignore_ascii_case("bat"))
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("bat"))
             {
                 if let Ok(content_bytes) = fs::read(&path) {
                     if content_bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
@@ -1442,7 +1442,7 @@ fn process_is_alive(pid: u32) -> bool {
 
     #[cfg(not(windows))]
     {
-        return PathBuf::from(format!("/proc/{pid}")).exists();
+        PathBuf::from(format!("/proc/{pid}")).exists()
     }
 
     #[cfg(windows)]

@@ -165,10 +165,10 @@ fn app_config_dir() -> Result<PathBuf, String> {
             "Nao foi possivel encontrar a pasta de configuracoes do usuario.".to_string()
         })?;
 
-        return Ok(PathBuf::from(home)
+        Ok(PathBuf::from(home)
             .join(".local")
             .join("share")
-            .join("ZomboidServerModManager"));
+            .join("ZomboidServerModManager"))
     }
 
     #[cfg(windows)]

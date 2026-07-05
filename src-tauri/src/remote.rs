@@ -1360,23 +1360,21 @@ with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as archive
         .ok_or("Could not capture compression stderr.")?;
 
     let reader = BufReader::new(stdout);
-    for line_result in reader.lines() {
-        if let Ok(line) = line_result {
-            let line = line.trim();
-            if line.starts_with("COMPRESS_PROGRESS|") {
-                let parts: Vec<&str> = line.split('|').collect();
-                if parts.len() >= 4 {
-                    let relative = parts[1];
-                    let current = parts[2];
-                    let total = parts[3];
-                    let _ = app.emit(
-                        "deploy-progress",
-                        DeployProgressPayload {
-                            status: "compressing".to_string(),
-                            detail: Some(format!("{} ({} / {})", relative, current, total)),
-                        },
-                    );
-                }
+    for line in reader.lines().map_while(Result::ok) {
+        let line = line.trim();
+        if line.starts_with("COMPRESS_PROGRESS|") {
+            let parts: Vec<&str> = line.split('|').collect();
+            if parts.len() >= 4 {
+                let relative = parts[1];
+                let current = parts[2];
+                let total = parts[3];
+                let _ = app.emit(
+                    "deploy-progress",
+                    DeployProgressPayload {
+                        status: "compressing".to_string(),
+                        detail: Some(format!("{} ({} / {})", relative, current, total)),
+                    },
+                );
             }
         }
     }
@@ -2411,7 +2409,7 @@ fn resolve_remote_zomboid_server_launch_path(
     } else {
         server_launch_path.trim()
     };
-    let candidates = vec![
+    let candidates = [
         launch_path.to_string(),
         join_remote_unix_path(directory, "start-server.sh"),
         join_remote_unix_path(directory, "ProjectZomboid64"),
@@ -2796,9 +2794,8 @@ where
         linux_shell_quote(&helper_path),
         linux_shell_quote(helper_command),
     );
-    let output = run_ssh_capture(connection, &command).map_err(|error| {
+    let output = run_ssh_capture(connection, &command).inspect_err(|_| {
         invalidate_remote_helper_cache(connection);
-        error
     })?;
     let stdout = output.stdout.trim();
 
@@ -2931,9 +2928,8 @@ fn run_remote_zomboid_server_start_streaming(
         "remote-server-start-event",
         "remote Linux server start",
     )
-    .map_err(|error| {
+    .inspect_err(|_| {
         invalidate_remote_helper_cache(connection);
-        error
     })
 }
 fn run_remote_zomboid_server_test_streaming(
@@ -2966,9 +2962,8 @@ fn run_remote_zomboid_server_test_streaming(
         "server-test-event",
         "remote Linux server test",
     )
-    .map_err(|error| {
+    .inspect_err(|_| {
         invalidate_remote_helper_cache(connection);
-        error
     })
 }
 fn stream_remote_server_event_command(
@@ -4378,7 +4373,7 @@ fn fix_ssh_key_permissions_impl(ssh_key_path: &str) -> Result<String, String> {
     Err("Automatic SSH key permission fix is not supported on this platform.".to_string())
 }
 
-fn ssh_key_permissions_fix_command(key_path: &PathBuf) -> String {
+fn ssh_key_permissions_fix_command(key_path: &Path) -> String {
     let key_path = key_path.display().to_string();
 
     if cfg!(windows) {
@@ -4488,13 +4483,7 @@ impl TerminalCommandRunner for SshCommandRunner {
         let output = ssh_command
             .args([&remote, command_text])
             .output()
-            .map_err(|error| {
-                if cfg!(windows) {
-                    format!("Could not run ssh: {error}")
-                } else {
-                    format!("Could not run ssh: {error}")
-                }
-            })?;
+            .map_err(|error| format!("Could not run ssh: {error}"))?;
 
         Ok(command_result(self.target(), command_text, output))
     }

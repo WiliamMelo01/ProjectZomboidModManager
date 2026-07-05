@@ -22,7 +22,6 @@ pub(super) fn install_zomboid_mod_impl(
     install_mod(&source, &mod_id, &target_root, Some(&workshop_id))
 }
 
-
 fn resolve_install_source(requested_source: &Path, mod_id: &str) -> Result<PathBuf, String> {
     if requested_source.is_dir() {
         return Ok(requested_source.to_path_buf());
@@ -120,7 +119,11 @@ fn collect_mod_info_id(mod_info: &Path, ids: &mut Vec<String>) {
 }
 
 fn normalize_mod_id(value: &str) -> String {
-    value.trim().trim_start_matches('\\').trim_start_matches('+').to_lowercase()
+    value
+        .trim()
+        .trim_start_matches('\\')
+        .trim_start_matches('+')
+        .to_lowercase()
 }
 
 fn install_mod(
@@ -222,7 +225,8 @@ id=ChuckleberryFinnAlertSystem",
         )
         .unwrap();
 
-        let resolved = resolve_install_source(&requested_source, "ChuckleberryFinnAlertSystem").unwrap();
+        let resolved =
+            resolve_install_source(&requested_source, "ChuckleberryFinnAlertSystem").unwrap();
 
         assert_eq!(resolved, real_source);
         let _ = fs::remove_dir_all(root);

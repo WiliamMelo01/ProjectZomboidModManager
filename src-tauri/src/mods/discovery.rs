@@ -82,7 +82,7 @@ pub(crate) fn steam_workshop_dirs() -> Vec<PathBuf> {
         }
     }
 
-    let mut workshop_dirs = steamapps_dirs
+    let workshop_dirs = steamapps_dirs
         .into_iter()
         .map(|steamapps_dir| {
             steamapps_dir
@@ -101,7 +101,7 @@ pub(crate) fn steam_workshop_dirs() -> Vec<PathBuf> {
     {
         let mut workshop_dirs = workshop_dirs;
         workshop_dirs.extend(steamcmd_workshop_dirs());
-        return dedupe_paths(workshop_dirs);
+        dedupe_paths(workshop_dirs)
     }
 
     #[cfg(not(windows))]

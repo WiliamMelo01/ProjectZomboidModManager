@@ -517,8 +517,11 @@ pub(crate) async fn clear_remote_zomboid_mods_cache(
     connection: RemoteServerConnectionRequest,
 ) -> Result<(), String> {
     run_blocking(move || {
-        let _value: Value =
-            run_remote_helper_json_with_sudo(&connection, "clear-mods-cache", Option::<&Value>::None)?;
+        let _value: Value = run_remote_helper_json_with_sudo(
+            &connection,
+            "clear-mods-cache",
+            Option::<&Value>::None,
+        )?;
         Ok(())
     })
     .await
@@ -529,8 +532,11 @@ pub(crate) async fn clear_remote_zomboid_mods_and_images_cache(
     connection: RemoteServerConnectionRequest,
 ) -> Result<(), String> {
     run_blocking(move || {
-        let _value: Value =
-            run_remote_helper_json_with_sudo(&connection, "clear-mods-cache", Option::<&Value>::None)?;
+        let _value: Value = run_remote_helper_json_with_sudo(
+            &connection,
+            "clear-mods-cache",
+            Option::<&Value>::None,
+        )?;
         clear_remote_image_cache(&connection)?;
         Ok(())
     })
@@ -1575,21 +1581,19 @@ fn stage_remote_mod_install_source(
     workshop_id: &str,
 ) -> Result<String, String> {
     let requested_source = Path::new(package_path);
-    let mods_root = requested_source.parent().ok_or_else(|| {
-        format!("Could not determine workshop mods folder from {package_path}.")
-    })?;
+    let mods_root = requested_source
+        .parent()
+        .ok_or_else(|| format!("Could not determine workshop mods folder from {package_path}."))?;
     let requested_folder = requested_source
         .file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.trim().is_empty())
         .unwrap_or_else(|| mod_id.trim());
-    let cache_workshop_id = safe_remote_cache_segment(
-        if workshop_id.trim().is_empty() {
-            "unknown"
-        } else {
-            workshop_id.trim()
-        },
-    );
+    let cache_workshop_id = safe_remote_cache_segment(if workshop_id.trim().is_empty() {
+        "unknown"
+    } else {
+        workshop_id.trim()
+    });
     let staged_mods_root = join_remote_unix_path(
         &join_remote_unix_path(
             &join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "cache"),
@@ -2085,7 +2089,10 @@ fn get_remote_mod_locations_impl(
 
     let mut remote_paths = Vec::new();
     if !steam_paths.is_empty() {
-        remote_paths.extend(get_remote_path_status_as_ssh_user(&connection, &steam_paths)?);
+        remote_paths.extend(get_remote_path_status_as_ssh_user(
+            &connection,
+            &steam_paths,
+        )?);
     }
     if !managed_paths.is_empty() {
         let managed_statuses: Vec<RemotePathExists> = run_remote_helper_json_with_sudo(
@@ -2528,7 +2535,12 @@ fn matching_active_mod_ids(
     active_mod_ids: &[String],
 ) -> Vec<String> {
     let mut mod_ids = vec![mod_item.id.to_lowercase()];
-    mod_ids.extend(mod_item.variants.iter().map(|variant| variant.id.to_lowercase()));
+    mod_ids.extend(
+        mod_item
+            .variants
+            .iter()
+            .map(|variant| variant.id.to_lowercase()),
+    );
 
     active_mod_ids
         .iter()
@@ -2594,7 +2606,10 @@ fn register_remote_mod_identity(
     mod_item: &crate::models::ZomboidMod,
 ) -> bool {
     let identities = remote_mod_identity_keys(mod_item);
-    if identities.iter().any(|identity| seen_keys.contains(identity)) {
+    if identities
+        .iter()
+        .any(|identity| seen_keys.contains(identity))
+    {
         return false;
     }
 
@@ -3583,7 +3598,12 @@ fn download_release_helper_binary() -> Result<PathBuf, String> {
     })?;
 
     let helper_path = helper_dir.join("pzmm-helper");
-    if helper_path.is_file() && fs::metadata(&helper_path).map(|metadata| metadata.len()).unwrap_or(0) > 0 {
+    if helper_path.is_file()
+        && fs::metadata(&helper_path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0)
+            > 0
+    {
         make_helper_executable(&helper_path)?;
         return helper_path
             .canonicalize()
@@ -3602,21 +3622,18 @@ fn download_release_helper_binary() -> Result<PathBuf, String> {
         );
         let temp_path = helper_dir.join(format!("{asset_name}.download"));
         let output = Command::new(curl_command_name())
-            .args([
-                "-fL",
-                "--retry",
-                "2",
-                "--connect-timeout",
-                "15",
-                "-o",
-            ])
+            .args(["-fL", "--retry", "2", "--connect-timeout", "15", "-o"])
             .arg(&temp_path)
             .arg(&url)
             .output();
 
         match output {
             Ok(output) if output.status.success() => {
-                if fs::metadata(&temp_path).map(|metadata| metadata.len()).unwrap_or(0) == 0 {
+                if fs::metadata(&temp_path)
+                    .map(|metadata| metadata.len())
+                    .unwrap_or(0)
+                    == 0
+                {
                     let _ = fs::remove_file(&temp_path);
                     errors.push(format!("{url}: downloaded file was empty"));
                     continue;

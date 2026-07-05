@@ -383,7 +383,10 @@ fn read_server_file(server_id: String) -> Result<ServerFileContent, String> {
     let file_name = format!("{server_id}.ini");
     let path = zomboid_server_dir()?.join(&file_name);
     if !path.is_file() {
-        return Err(format!("Arquivo do servidor nao encontrado: {}", path.display()));
+        return Err(format!(
+            "Arquivo do servidor nao encontrado: {}",
+            path.display()
+        ));
     }
 
     let content = util::read_text_lossy(&path)?;
@@ -554,7 +557,9 @@ fn check_server_firewall(server_id: String) -> Result<models::RemoteServerFirewa
         let is_configured = missing_rules.is_empty();
 
         if is_configured {
-            logs.push("Linux firewall is ready for inbound Project Zomboid connections.".to_string());
+            logs.push(
+                "Linux firewall is ready for inbound Project Zomboid connections.".to_string(),
+            );
         } else {
             logs.push(format!(
                 "ufw needs {} inbound rule(s) before the server is started.",
@@ -1288,7 +1293,8 @@ fn server_status(server_id: String) -> Result<models::RemoteServerActionResult, 
     Ok(models::RemoteServerActionResult {
         success: false,
         message: if failure_message.contains("out-of-memory") {
-            "Remote server was killed, likely due to insufficient memory while loading mods.".to_string()
+            "Remote server was killed, likely due to insufficient memory while loading mods."
+                .to_string()
         } else {
             format!("Remote server is not running on port {primary_port}.")
         },
@@ -1576,7 +1582,7 @@ fn spawn_server_script(
     #[cfg(windows)]
     {
         let mut command = Command::new("cmd.exe");
-        return util::hide_command_window(&mut command)
+        util::hide_command_window(&mut command)
             .args(["/C", "call"])
             .arg(script_path)
             .current_dir(working_dir)
@@ -1584,7 +1590,7 @@ fn spawn_server_script(
             .stdout(stdout)
             .stderr(stderr)
             .spawn()
-            .map_err(|error| format!("Could not start remote server process: {error}"));
+            .map_err(|error| format!("Could not start remote server process: {error}"))
     }
 
     #[cfg(not(windows))]
@@ -1642,7 +1648,9 @@ fn inspect_linux_ufw_state() -> Result<LinuxUfwState, String> {
         .unwrap_or(false);
 
     if !available {
-        logs.push("ufw is not installed; no local ufw rules are required on this host.".to_string());
+        logs.push(
+            "ufw is not installed; no local ufw rules are required on this host.".to_string(),
+        );
         return Ok(LinuxUfwState {
             is_active: false,
             status: String::new(),
@@ -1656,7 +1664,10 @@ fn inspect_linux_ufw_state() -> Result<LinuxUfwState, String> {
         .map_err(|error| format!("Could not inspect ufw status: {error}"))?;
 
     if !output.status.success() {
-        return Err(command_output_error("Could not inspect ufw status", &output));
+        return Err(command_output_error(
+            "Could not inspect ufw status",
+            &output,
+        ));
     }
 
     let status = String::from_utf8_lossy(&output.stdout).to_string();
@@ -1814,11 +1825,11 @@ fn get_system_ram() -> Result<u32, String> {
             });
         }
 
-        return String::from_utf8_lossy(&output.stdout)
+        String::from_utf8_lossy(&output.stdout)
             .trim()
             .parse::<u32>()
             .map(|ram| ram.max(1))
-            .map_err(|_| "Could not parse remote system RAM.".to_string());
+            .map_err(|_| "Could not parse remote system RAM.".to_string())
     }
 
     #[cfg(not(windows))]

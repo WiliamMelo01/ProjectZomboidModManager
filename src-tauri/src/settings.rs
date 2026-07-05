@@ -8,7 +8,7 @@ use crate::models::{AppSettings, ModLocation};
 use crate::util::hide_command_window;
 use crate::workshop::open_path_external;
 use crate::{
-    app_config_dir, app_settings_path, ensure_managed_steamcmd_pool, read_config_value,
+    app_settings_path, ensure_managed_steamcmd_pool, read_config_value,
     read_saved_custom_mod_locations, run_blocking, zomboid_mods_dir,
 };
 #[cfg(windows)]

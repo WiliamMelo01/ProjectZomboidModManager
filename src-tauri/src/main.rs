@@ -52,11 +52,12 @@ use remote::{
     install_zomboid_server_on_remote, list_remote_zomboid_mods, list_remote_zomboid_servers,
     open_remote_mod_location, read_remote_zomboid_server_file, run_terminal_command,
     save_remote_app_settings, save_remote_workspace_config, save_remote_zomboid_server_path,
-    select_ssh_key_file, send_remote_zomboid_server_command, setup_remote_helper, start_remote_zomboid_server,
-    start_remote_zomboid_server_test, test_remote_server_connection, test_remote_server_latency,
-    update_remote_zomboid_server_build, update_remote_zomboid_server_lua_settings,
-    update_remote_zomboid_server_mods, update_remote_zomboid_server_settings,
-    upload_steamcmd_to_remote, verify_remote_steamcmd_available,
+    select_ssh_key_file, send_remote_zomboid_server_command, setup_remote_helper,
+    start_remote_zomboid_server, start_remote_zomboid_server_test, test_remote_server_connection,
+    test_remote_server_latency, update_remote_zomboid_server_build,
+    update_remote_zomboid_server_lua_settings, update_remote_zomboid_server_mods,
+    update_remote_zomboid_server_settings, upload_steamcmd_to_remote,
+    verify_remote_steamcmd_available,
 };
 use server_test::{
     cancel_zomboid_server_test, check_zomboid_server_ports, kill_processes_by_pid,
@@ -506,7 +507,7 @@ fn extract_zip_with_powershell(zip_path: &Path, target_dir: &Path) -> Result<(),
             .output()
             .map_err(|error| format!("Nao foi possivel extrair steamcmd.zip: {error}"))?;
 
-        return finish_zip_extraction(output);
+        finish_zip_extraction(output)
     }
 
     #[cfg(not(windows))]

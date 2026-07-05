@@ -159,7 +159,7 @@ fn collect_port_listing_windows() -> Result<String, String> {
             .to_string());
         }
 
-        return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
     #[cfg(not(windows))]
@@ -248,12 +248,11 @@ fn process_name_for_pid(pid: u32) -> String {
             return format!("PID {pid}");
         }
 
-        return line
-            .split(',')
+        line.split(',')
             .next()
             .map(|value| value.trim_matches('"').to_string())
             .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| format!("PID {pid}"));
+            .unwrap_or_else(|| format!("PID {pid}"))
     }
 
     #[cfg(not(windows))]

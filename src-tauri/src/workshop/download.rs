@@ -6,7 +6,9 @@ use crate::models::{
 };
 use crate::mods::{normalize_server_values, steam_workshop_dirs};
 use crate::server_test::{kill_process_tree, spawn_output_reader};
-use crate::settings::{default_steam_workshop_dir, read_max_concurrent_downloads};
+#[cfg(not(windows))]
+use crate::settings::default_steam_workshop_dir;
+use crate::settings::read_max_concurrent_downloads;
 use crate::util::hide_command_window;
 use crate::{ensure_managed_steamcmd_pool, zomboid_mods_dir};
 use std::{
@@ -648,7 +650,7 @@ fn steamcmd_runtime_dir(
 ) -> Result<PathBuf, String> {
     #[cfg(windows)]
     {
-        return steamcmd_path
+        steamcmd_path
             .parent()
             .map(Path::to_path_buf)
             .ok_or_else(|| {
@@ -656,7 +658,7 @@ fn steamcmd_runtime_dir(
                     "Nao foi possivel resolver a pasta do SteamCMD em {}.",
                     steamcmd_path.display()
                 )
-            });
+            })
     }
 
     #[cfg(not(windows))]

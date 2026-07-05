@@ -1,14 +1,16 @@
 {
   "name": "zomboid-server-mod-manager",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "appChannel": "beta",
   "type": "module",
   "private": true,
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "build:helper": "cd src-tauri && cargo build --bin pzmm-helper-linux-x86_64",
+    "build:helper:release": "cd src-tauri && cargo build --release --bin pzmm-helper-linux-x86_64",
+    "tauri:dev": "npm run build:helper && node ./scripts/run-tauri-command.mjs dev",
+    "tauri:build": "npm run build:helper:release && node ./scripts/run-tauri-command.mjs build"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.0",

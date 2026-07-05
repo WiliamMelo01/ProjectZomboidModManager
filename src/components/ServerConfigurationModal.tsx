@@ -4,12 +4,14 @@ import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
 import { i18n } from "@/i18n"
+import type { RemoteConnectionDraft } from "@/lib/commandRunner"
 import { invokeTauri } from "@/lib/tauri"
 import type { ServerIniSettings, ServerLuaSetting, ServerLuaSettings, ZomboidServer } from "@/types/server"
 
 type ServerConfigurationModalProps = {
   isOpen: boolean
   server: ZomboidServer | null
+  remoteConnection?: RemoteConnectionDraft | null
   onClose: () => void
   onSave: (settings: ServerIniSettings) => Promise<void> | void
 }
@@ -48,7 +50,7 @@ const VANILLA_SECTIONS = [
   "WaterAndElectricity", "Fire"
 ]
 
-export function ServerConfigurationModal({ isOpen, server, onClose, onSave }: ServerConfigurationModalProps) {
+export function ServerConfigurationModal({ isOpen, server, remoteConnection = null, onClose, onSave }: ServerConfigurationModalProps) {
   const { t } = useTranslation()
   const [activeConfigTab, setActiveConfigTab] = useState<"server" | "sandbox">("server")
   const [settings, setSettings] = useState<ServerIniSettings>(FALLBACK_SETTINGS)
@@ -73,8 +75,14 @@ export function ServerConfigurationModal({ isOpen, server, onClose, onSave }: Se
     setSettings({ ...FALLBACK_SETTINGS, publicName: server.name, maxPlayers: server.maxPlayers || 32, defaultPort: server.port || "16261" })
 
     Promise.allSettled([
-      invokeTauri<ServerIniSettings>("get_zomboid_server_settings", { serverId: server.id }),
-      invokeTauri<ServerLuaSettings>("get_zomboid_server_lua_settings", { serverId: server.id }),
+      invokeTauri<ServerIniSettings>(remoteConnection ? "get_remote_zomboid_server_settings" : "get_zomboid_server_settings", {
+        ...(remoteConnection ? { connection: remoteConnection } : {}),
+        serverId: server.id,
+      }),
+      invokeTauri<ServerLuaSettings>(remoteConnection ? "get_remote_zomboid_server_lua_settings" : "get_zomboid_server_lua_settings", {
+        ...(remoteConnection ? { connection: remoteConnection } : {}),
+        serverId: server.id,
+      }),
     ])
       .then(([iniResult, sandboxResult]) => {
         if (iniResult.status === "fulfilled") {
@@ -92,7 +100,7 @@ export function ServerConfigurationModal({ isOpen, server, onClose, onSave }: Se
         }
       })
       .finally(() => setIsLoading(false))
-  }, [isOpen, server])
+  }, [isOpen, server, remoteConnection])
 
   const filteredLuaSettings = useMemo(() => {
     return luaSettings.filter((setting) => {
@@ -171,7 +179,8 @@ export function ServerConfigurationModal({ isOpen, server, onClose, onSave }: Se
       if (activeConfigTab === "server") {
         await onSave(settings)
       } else {
-        const saved = await invokeTauri<ServerLuaSettings>("update_zomboid_server_lua_settings", {
+        const saved = await invokeTauri<ServerLuaSettings>(remoteConnection ? "update_remote_zomboid_server_lua_settings" : "update_zomboid_server_lua_settings", {
+          ...(remoteConnection ? { connection: remoteConnection } : {}),
           serverId: server.id,
           settings: luaSettings,
         })
@@ -531,10 +540,10 @@ function CustomSelect({
           className={`flex w-full items-center justify-between rounded-xl border bg-[#161a1d] px-4 py-3.5 text-sm font-bold transition-all hover:border-white/10 focus:border-orange-500/50 focus:outline-none focus:ring-1 focus:ring-orange-500/20 shadow-inner ${isOpen ? "border-orange-500/50 ring-1 ring-orange-500/20 text-white" : "border-white/5 text-gray-100"}`}
         >
           <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate">{selectedOption.label}</span>
+            <span className="whitespace-normal text-left">{selectedOption.label}</span>
             {isSelectedDefault && <DefaultBadge tone="muted" />}
           </div>
-          <ChevronRight size={18} className={`text-orange-500 transition-transform duration-200 ${isOpen ? "-rotate-90" : "rotate-90"}`} strokeWidth={3} />
+          <ChevronRight size={18} className={`text-orange-500 transition-transform duration-200 shrink-0 ${isOpen ? "-rotate-90" : "rotate-90"}`} strokeWidth={3} />
         </button>
 
         {isOpen && (
@@ -559,7 +568,7 @@ function CustomSelect({
                           : "text-gray-300 font-medium"
                     }`}
                   >
-                    <span className="truncate">{option.label}</span>
+                    <span className="whitespace-normal text-left">{option.label}</span>
                     {isDefault && <DefaultBadge tone="strong" />}
                   </button>
                 );
@@ -571,7 +580,7 @@ function CustomSelect({
 
       {defaultOption && (
         <div className="ml-1 flex items-center gap-1.5 text-[10px] font-medium text-gray-500">
-          <span className="text-[9px] font-black uppercase tracking-wider text-gray-600">Opção padrão:</span>
+          <span className="text-[9px] font-black uppercase tracking-wider text-gray-600">{i18n.t("serverConfig.defaultOption")}</span>
           <span className="rounded bg-orange-500/10 px-1.5 py-0.5 text-[9px] font-black text-orange-300 ring-1 ring-orange-500/20">
             {defaultOption.label}
           </span>
@@ -590,7 +599,7 @@ function DefaultBadge({ tone }: { tone: "muted" | "strong" }) {
           : "bg-white/5 text-gray-500 ring-white/10"
       }`}
     >
-      Padrão
+      {i18n.t("serverConfig.defaultLabel")}
     </span>
   )
 }
@@ -608,7 +617,7 @@ function LuaSettingField({ setting, onChange }: { setting: ServerLuaSetting; onC
     <div className="flex flex-col gap-3 rounded-xl border border-white/5 bg-[#1c2126] p-4 transition-all hover:border-white/10 hover:bg-[#1f252a]">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-[10px] font-black uppercase tracking-wider truncate text-gray-400" title={setting.key}>
+          <span className="text-[10px] font-black uppercase tracking-wider whitespace-normal break-all text-gray-400" title={setting.key}>
             {setting.key}
           </span>
         </div>
@@ -628,11 +637,11 @@ function LuaSettingField({ setting, onChange }: { setting: ServerLuaSetting; onC
           <div className="flex items-center justify-between gap-4 py-1">
              <div className="flex flex-col">
                <span className="text-sm font-black uppercase italic text-gray-200">
-                 {setting.value === "true" ? "Ativado" : "Desativado"}
+                 {setting.value === "true" ? i18n.t("serverConfig.enabled") : i18n.t("serverConfig.disabled")}
                </span>
                {setting.defaultValue && (
                  <span className="text-[10px] font-medium text-gray-600">
-                   Padrão: {setting.defaultValue === "true" ? "Ativado" : "Desativado"}
+                   {i18n.t("serverConfig.defaultValue")} {setting.defaultValue === "true" ? i18n.t("serverConfig.enabled") : i18n.t("serverConfig.disabled")}
                  </span>
                )}
              </div>
@@ -672,7 +681,7 @@ function LuaSettingField({ setting, onChange }: { setting: ServerLuaSetting; onC
             </div>
             {setting.defaultValue && (
               <div className="ml-1 flex items-center gap-1.5">
-                <span className="text-[9px] font-black uppercase tracking-wider text-gray-600">Padrão:</span>
+                <span className="text-[9px] font-black uppercase tracking-wider text-gray-600">{i18n.t("serverConfig.defaultValue")}</span>
                 <span className="rounded bg-white/5 px-1.5 py-0.5 text-[9px] font-bold text-gray-500 ring-1 ring-white/5">
                   {setting.defaultValue}
                 </span>
@@ -817,8 +826,8 @@ function Toggle({ label, checked, onChange, icon }: { label: string; checked: bo
       className="flex w-full items-center justify-between gap-4 rounded-xl border border-white/5 bg-[#1c2126] px-4 py-3 text-left text-sm transition-all hover:border-orange-500/30 hover:bg-[#1f252a] group"
     >
       <span className="flex min-w-0 items-center gap-2.5 text-xs font-bold uppercase italic text-gray-400 group-hover:text-gray-200">
-        {icon && <span className="text-gray-600 transition-colors group-hover:text-orange-500">{icon}</span>}
-        <span className="truncate">{label}</span>
+        {icon && <span className="text-gray-600 transition-colors group-hover:text-orange-500 shrink-0">{icon}</span>}
+        <span className="whitespace-normal leading-tight text-left">{label}</span>
       </span>
       <span className={`h-6 w-11 shrink-0 rounded-full p-1 transition-all ${checked ? "bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.3)]" : "bg-gray-700"}`}>
         <span className={`block h-4 w-4 rounded-full bg-white transition-transform ${checked ? "translate-x-5" : ""}`} />

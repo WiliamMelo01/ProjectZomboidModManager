@@ -19,6 +19,7 @@ type ModsListProps = {
   onOpenSettings?: () => void
   searchQuery: string
   onSearchChange: (value: string) => void
+  isReadOnly?: boolean
 }
 
 const MODS_PER_PAGE = 30
@@ -34,6 +35,7 @@ export function ModsList({
   onOpenSettings,
   searchQuery,
   onSearchChange,
+  isReadOnly = false,
 }: ModsListProps) {
   const { t } = useTranslation()
   const [filterStatus, setFilterStatus] = useState<"all" | "local" | "steam">("all")
@@ -180,19 +182,21 @@ export function ModsList({
             <span className="hidden md:inline">{t("common.refresh")}</span>
           </button>
 
-          <button
-            disabled={isLoading || isInstallingAll || steamCount === 0}
-            className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl transition-all font-bold text-sm ${
-              isLoading || isInstallingAll || steamCount === 0
-                ? "bg-white/5 text-gray-500 border border-white/5 cursor-not-allowed"
-                : "bg-orange-500 text-white hover:bg-orange-600 shadow-lg shadow-orange-500/20"
-            }`}
-            onClick={() => void onInstallAll()}
-          >
-            {isInstallingAll ? <RefreshCw size={18} className="animate-spin" /> : <Download size={18} />}
-            <span>{t("library.bringLocal")}</span>
-            {steamCount > 0 && <span className="text-xs opacity-80">({steamCount})</span>}
-          </button>
+          {!isReadOnly && (
+            <button
+              disabled={isLoading || isInstallingAll || steamCount === 0}
+              className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl transition-all font-bold text-sm ${
+                isLoading || isInstallingAll || steamCount === 0
+                  ? "bg-white/5 text-gray-500 border border-white/5 cursor-not-allowed"
+                  : "bg-orange-500 text-white hover:bg-orange-600 shadow-lg shadow-orange-500/20"
+              }`}
+              onClick={() => void onInstallAll()}
+            >
+              {isInstallingAll ? <RefreshCw size={18} className="animate-spin" /> : <Download size={18} />}
+              <span>{t("library.bringLocal")}</span>
+              {steamCount > 0 && <span className="text-xs opacity-80">({steamCount})</span>}
+            </button>
+          )}
         </div>
       </div>
 
@@ -214,7 +218,8 @@ export function ModsList({
             <ModCard
               key={`${mod.source}:${mod.workshopId}:${mod.id}:${mod.path}`}
               mod={mod}
-              onInstall={() => handleInstallClick(mod)}
+              onInstall={isReadOnly ? undefined : () => handleInstallClick(mod)}
+              isReadOnly={isReadOnly}
             />
           ))}
 

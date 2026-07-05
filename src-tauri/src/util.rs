@@ -16,7 +16,12 @@ pub(crate) fn read_text_lossy(path: &Path) -> Result<String, String> {
     let content_bytes = fs::read(path)
         .map_err(|error| format!("Nao foi possivel ler {}: {error}", path.display()))?;
 
-    Ok(String::from_utf8_lossy(&content_bytes).to_string())
+    let content = String::from_utf8_lossy(&content_bytes);
+    if content.starts_with('\u{FEFF}') {
+        Ok(content.chars().skip(1).collect())
+    } else {
+        Ok(content.to_string())
+    }
 }
 
 pub(crate) fn read_ini_value(content: &str, key: &str) -> Option<String> {

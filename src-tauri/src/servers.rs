@@ -7,11 +7,12 @@ use crate::mods::{
     normalize_server_values, parse_server_mod_ids, resolve_server_workshop_ids,
     serialize_server_mod_ids,
 };
+use crate::server_test::ports::find_port_usages;
 use crate::util::*;
 use crate::workshop::open_file_external;
 use crate::{app_config_dir, run_blocking, server_example_dir, zomboid_server_dir};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
@@ -21,7 +22,7 @@ pub(crate) async fn list_zomboid_servers() -> Result<Vec<ZomboidServer>, String>
     run_blocking(list_zomboid_servers_impl).await
 }
 
-fn list_zomboid_servers_impl() -> Result<Vec<ZomboidServer>, String> {
+pub(crate) fn list_zomboid_servers_impl() -> Result<Vec<ZomboidServer>, String> {
     let server_dir = zomboid_server_dir()?;
 
     if !server_dir.exists() {
@@ -49,11 +50,42 @@ fn list_zomboid_servers_impl() -> Result<Vec<ZomboidServer>, String> {
         servers.push(read_zomboid_server_from_path(&path)?);
     }
 
+    hydrate_server_statuses(&mut servers);
     servers.sort_by_key(|server| server.name.to_lowercase());
 
     Ok(servers)
 }
 
+fn hydrate_server_statuses(servers: &mut [ZomboidServer]) {
+    let ports = servers
+        .iter()
+        .filter_map(|server| server.port.parse::<u16>().ok())
+        .collect::<HashSet<_>>();
+
+    if ports.is_empty() {
+        return;
+    }
+
+    let ports = ports.into_iter().collect::<Vec<_>>();
+    let Ok(usages) = find_port_usages(&ports) else {
+        return;
+    };
+    let active_ports = usages
+        .into_iter()
+        .map(|usage| usage.port)
+        .collect::<HashSet<_>>();
+
+    for server in servers {
+        if server
+            .port
+            .parse::<u16>()
+            .ok()
+            .is_some_and(|port| active_ports.contains(&port))
+        {
+            server.status = "online".to_string();
+        }
+    }
+}
 #[tauri::command]
 pub(crate) fn open_zomboid_server_file(server_id: String) -> Result<(), String> {
     open_file_external(&canonical_zomboid_server_path(&server_id)?)
@@ -64,7 +96,7 @@ pub(crate) async fn delete_zomboid_server(server_id: String) -> Result<DeleteSer
     run_blocking(move || delete_zomboid_server_impl(&server_id)).await
 }
 
-fn delete_zomboid_server_impl(server_id: &str) -> Result<DeleteServerResult, String> {
+pub(crate) fn delete_zomboid_server_impl(server_id: &str) -> Result<DeleteServerResult, String> {
     let server_dir = zomboid_server_dir()?;
     let server_path = server_dir.join(format!("{server_id}.ini"));
 
@@ -97,7 +129,7 @@ fn delete_zomboid_server_impl(server_id: &str) -> Result<DeleteServerResult, Str
             text("Invalid server file.", "Arquivo de servidor invalido.").to_string()
         })?;
         let target = backup_dir.join(file_name);
-        fs::rename(&source, &target).map_err(|error| {
+        move_file_with_copy_fallback(&source, &target).map_err(|error| {
             format!(
                 "{} {}: {error}",
                 text("Could not move", "Nao foi possivel mover"),
@@ -166,6 +198,22 @@ fn server_profile_files(server_dir: &Path, server_id: &str) -> Result<Vec<PathBu
 
     files.sort();
     Ok(files)
+}
+
+fn move_file_with_copy_fallback(source: &Path, target: &Path) -> Result<(), String> {
+    match fs::rename(source, target) {
+        Ok(()) => Ok(()),
+        Err(rename_error) => {
+            fs::copy(source, target).map_err(|copy_error| {
+                format!("{rename_error}; fallback copy failed: {copy_error}")
+            })?;
+            fs::remove_file(source).map_err(|remove_error| {
+                let _ = fs::remove_file(target);
+                format!("{rename_error}; fallback cleanup failed: {remove_error}")
+            })?;
+            Ok(())
+        }
+    }
 }
 
 fn unique_server_backup_dir(server_id: &str) -> Result<PathBuf, String> {
@@ -256,7 +304,9 @@ pub(crate) async fn get_zomboid_server_settings(
     run_blocking(move || get_zomboid_server_settings_impl(&server_id)).await
 }
 
-fn get_zomboid_server_settings_impl(server_id: &str) -> Result<ServerIniSettings, String> {
+pub(crate) fn get_zomboid_server_settings_impl(
+    server_id: &str,
+) -> Result<ServerIniSettings, String> {
     let server_path = canonical_zomboid_server_path(server_id)?;
     let content = read_text_lossy(&server_path)?;
 
@@ -270,7 +320,9 @@ pub(crate) async fn get_zomboid_server_lua_settings(
     run_blocking(move || get_zomboid_server_lua_settings_impl(&server_id)).await
 }
 
-fn get_zomboid_server_lua_settings_impl(server_id: &str) -> Result<ServerLuaSettings, String> {
+pub(crate) fn get_zomboid_server_lua_settings_impl(
+    server_id: &str,
+) -> Result<ServerLuaSettings, String> {
     let sandbox_path = canonical_zomboid_server_sandbox_path(server_id)?;
     let file_name = sandbox_path
         .file_name()
@@ -331,7 +383,7 @@ pub(crate) async fn update_zomboid_server_mods(
     run_blocking(move || update_zomboid_server_mods_impl(&server_id, &mod_ids, &workshop_ids)).await
 }
 
-fn update_zomboid_server_mods_impl(
+pub(crate) fn update_zomboid_server_mods_impl(
     server_id: &str,
     mod_ids: &[String],
     workshop_ids: &[String],
@@ -442,8 +494,9 @@ pub(crate) async fn create_zomboid_server(
     max_players: u32,
 ) -> Result<ZomboidServer, String> {
     run_blocking(move || {
-        create_zomboid_server_impl(
-            &app,
+        let example_dir = server_example_dir(&app)?;
+        create_zomboid_server_from_template_impl(
+            &example_dir,
             &name,
             &mod_ids,
             &workshop_ids,
@@ -454,8 +507,8 @@ pub(crate) async fn create_zomboid_server(
     .await
 }
 
-fn create_zomboid_server_impl(
-    app: &tauri::AppHandle,
+pub(crate) fn create_zomboid_server_from_template_impl(
+    example_dir: &Path,
     name: &str,
     mod_ids: &[String],
     workshop_ids: &[String],
@@ -495,7 +548,6 @@ fn create_zomboid_server_impl(
         ));
     }
 
-    let example_dir = server_example_dir(app)?;
     let template_ini = example_dir.join("servertest.ini");
     let template_sandbox = example_dir.join("servertest_SandboxVars.lua");
     let template_spawnregions = example_dir.join("servertest_spawnregions.lua");
@@ -548,7 +600,7 @@ pub(crate) async fn update_zomboid_server_settings(
     run_blocking(move || update_zomboid_server_settings_impl(&server_id, &settings)).await
 }
 
-fn update_zomboid_server_settings_impl(
+pub(crate) fn update_zomboid_server_settings_impl(
     server_id: &str,
     settings: &ServerIniSettings,
 ) -> Result<ZomboidServer, String> {
@@ -581,7 +633,7 @@ pub(crate) async fn update_zomboid_server_lua_settings(
     run_blocking(move || update_zomboid_server_lua_settings_impl(&server_id, &settings)).await
 }
 
-fn update_zomboid_server_lua_settings_impl(
+pub(crate) fn update_zomboid_server_lua_settings_impl(
     server_id: &str,
     settings: &[ServerLuaSetting],
 ) -> Result<ServerLuaSettings, String> {
@@ -1079,7 +1131,10 @@ fn format_lua_setting_value(setting: &ServerLuaSetting) -> Result<String, String
                 .map(|_| value.to_string())
                 .map_err(|_| format!("Valor numerico invalido para {}.", setting.path))
         }
-        "string" => Ok(format!("\"{}\"", setting.value.replace('\\', "\\\\").replace('"', "\\\""))),
+        "string" => Ok(format!(
+            "\"{}\"",
+            setting.value.replace('\\', "\\\\").replace('"', "\\\"")
+        )),
         _ => Err(format!("Tipo de valor invalido para {}.", setting.path)),
     }
 }

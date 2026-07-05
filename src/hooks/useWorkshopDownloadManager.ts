@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import { i18n } from "@/i18n"
+import type { RemoteConnectionDraft } from "@/lib/commandRunner"
 import { formatDuration } from "@/lib/serverTest"
 import { invokeTauri } from "@/lib/tauri"
 import type {
@@ -26,6 +27,7 @@ type DownloadNotification = {
 
 type UseWorkshopDownloadManagerOptions = {
   isDownloadScreenActive: boolean
+  remoteConnection?: RemoteConnectionDraft | null
   onDownloadFinished?: () => Promise<unknown>
   onNotification?: (notification: DownloadNotification) => void
 }
@@ -38,6 +40,7 @@ type StartDownloadOptions = {
 
 export function useWorkshopDownloadManager({
   isDownloadScreenActive,
+  remoteConnection = null,
   onDownloadFinished,
   onNotification,
 }: UseWorkshopDownloadManagerOptions) {
@@ -51,12 +54,17 @@ export function useWorkshopDownloadManager({
   const [downloadStartedAt, setDownloadStartedAt] = useState<number | null>(null)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const isDownloadScreenActiveRef = useRef(isDownloadScreenActive)
+  const remoteConnectionRef = useRef(remoteConnection)
   const onDownloadFinishedRef = useRef(onDownloadFinished)
   const onNotificationRef = useRef(onNotification)
 
   useEffect(() => {
     isDownloadScreenActiveRef.current = isDownloadScreenActive
   }, [isDownloadScreenActive])
+
+  useEffect(() => {
+    remoteConnectionRef.current = remoteConnection
+  }, [remoteConnection])
 
   useEffect(() => {
     onDownloadFinishedRef.current = onDownloadFinished
@@ -200,12 +208,15 @@ export function useWorkshopDownloadManager({
     })
 
     try {
+      const connection = remoteConnectionRef.current
       const downloadResult = downloadType === "collection"
-        ? await invokeTauri<WorkshopDownloadResult>("download_steam_workshop_collection", {
+        ? await invokeTauri<WorkshopDownloadResult>(connection ? "download_remote_steam_workshop_collection" : "download_steam_workshop_collection", {
+            ...(connection ? { connection } : {}),
             collectionId: workshopId,
             forceValidate: shouldValidate,
           })
-        : await invokeTauri<WorkshopDownloadResult>("download_steam_workshop_item", {
+        : await invokeTauri<WorkshopDownloadResult>(connection ? "download_remote_steam_workshop_item" : "download_steam_workshop_item", {
+            ...(connection ? { connection } : {}),
             workshopId,
             forceValidate: shouldValidate,
           })
@@ -235,7 +246,9 @@ export function useWorkshopDownloadManager({
     setStatus({ type: "info", message: i18n.t("downloads.retrying", { count: workshopIds.length }) })
 
     try {
-      const downloadResult = await invokeTauri<WorkshopDownloadResult>("download_steam_workshop_items", {
+      const connection = remoteConnectionRef.current
+      const downloadResult = await invokeTauri<WorkshopDownloadResult>(connection ? "download_remote_steam_workshop_items" : "download_steam_workshop_items", {
+        ...(connection ? { connection } : {}),
         workshopIds,
         forceValidate,
       })
@@ -252,7 +265,8 @@ export function useWorkshopDownloadManager({
     setStatus({ type: "info", message: i18n.t("downloads.cancelling") })
 
     try {
-      await invokeTauri<void>("cancel_steam_workshop_download")
+      const connection = remoteConnectionRef.current
+      await invokeTauri<void>(connection ? "cancel_remote_steam_workshop_download" : "cancel_steam_workshop_download", connection ? { connection } : undefined)
     } catch (error) {
       setStatus({ type: "error", message: getErrorMessage(error) })
     }

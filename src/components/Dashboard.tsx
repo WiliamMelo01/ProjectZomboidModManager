@@ -1,4 +1,4 @@
-import { Activity, ChevronRight, Eye, EyeOff, FolderOpen, Plus, RefreshCw, Server, Settings, Star, Trash2, Users, Wifi } from "lucide-react"
+import { Activity, ChevronRight, Eye, EyeOff, FolderOpen, Play, Plus, RefreshCw, Server, Settings, Square, Star, Terminal, Trash2, Users, Wifi } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -14,6 +14,13 @@ type DashboardProps = {
   onServerClick: (server: ZomboidServer) => void
   onConfigureServer: (server: ZomboidServer) => void
   onDeleteServer: (server: ZomboidServer) => Promise<void>
+  isReadOnly?: boolean
+  canCreateServer?: boolean
+  onTestServer: (server: ZomboidServer) => void
+  onStartServer: (server: ZomboidServer) => void
+  onOpenRemoteConsole?: (server: ZomboidServer) => void
+  onStopRemoteServer?: (server: ZomboidServer) => void
+  onDeployLocalServer?: () => void
 }
 
 const HIDDEN_SERVERS_KEY = "pzmm_hidden_servers"
@@ -29,6 +36,13 @@ export function Dashboard({
   onServerClick,
   onConfigureServer,
   onDeleteServer,
+  isReadOnly = false,
+  canCreateServer = !isReadOnly,
+  onTestServer,
+  onStartServer,
+  onOpenRemoteConsole,
+  onStopRemoteServer,
+  onDeployLocalServer,
 }: DashboardProps) {
   const { t } = useTranslation()
   const [hiddenServerIds, setHiddenServerIds] = useState<Set<string>>(new Set())
@@ -57,6 +71,26 @@ export function Dashboard({
         console.error("Failed to parse favorite servers", e)
       }
     }
+  }, [])
+
+  useEffect(() => {
+    const handleRevealServer = (event: Event) => {
+      const serverId = (event as CustomEvent<{ serverId?: string }>).detail?.serverId
+      if (!serverId) return
+
+      setHiddenServerIds((current) => {
+        if (!current.has(serverId)) return current
+
+        const next = new Set(current)
+        next.delete(serverId)
+        window.localStorage.setItem(HIDDEN_SERVERS_KEY, JSON.stringify(Array.from(next)))
+        return next
+      })
+      setShowHidden(false)
+    }
+
+    window.addEventListener("pzmm-reveal-server", handleRevealServer)
+    return () => window.removeEventListener("pzmm-reveal-server", handleRevealServer)
   }, [])
 
   const toggleHideServer = (serverId: string) => {
@@ -162,6 +196,16 @@ export function Dashboard({
             ))}
           </div>
 
+          {isReadOnly && onDeployLocalServer && (
+            <button
+              className="flex items-center justify-center gap-2 bg-orange-600/90 hover:bg-orange-500 text-white font-bold px-4 py-2 rounded-xl transition-all border border-orange-500/20 shadow-lg shadow-orange-950/20 text-xs uppercase tracking-wider"
+              onClick={onDeployLocalServer}
+            >
+              <Server size={16} />
+              {t("dashboard.deployLocalServer", "Deploy servidor local")}
+            </button>
+          )}
+
           <button
             className="flex items-center justify-center gap-2 bg-[#2b3238] border border-white/5 text-gray-300 hover:text-white hover:border-orange-400/30 px-4 py-2 rounded-xl transition-all"
             onClick={onRefresh}
@@ -196,10 +240,12 @@ export function Dashboard({
             onClick={() => onServerClick(server)}
             onContextMenu={(e) => handleContextMenu(e, server)}
             isFavorite={favoriteServerIds.has(server.id)}
+            onOpenRemoteConsole={isReadOnly ? onOpenRemoteConsole : undefined}
+            onStopRemoteServer={isReadOnly ? onStopRemoteServer : undefined}
           />
         ))}
 
-        <AddServerCard onClick={onCreateServer} />
+        {canCreateServer && <AddServerCard onClick={onCreateServer} />}
       </div>
 
       {/* Hidden Servers Section */}
@@ -230,6 +276,8 @@ export function Dashboard({
                 onContextMenu={(e) => handleContextMenu(e, server)}
                 isHidden
                 isFavorite={favoriteServerIds.has(server.id)}
+                onOpenRemoteConsole={isReadOnly ? onOpenRemoteConsole : undefined}
+                onStopRemoteServer={isReadOnly ? onStopRemoteServer : undefined}
               />
             ))}
           </div>
@@ -269,6 +317,55 @@ export function Dashboard({
               </>
             )}
           </button>
+          <button
+            onClick={() => {
+              onTestServer(contextMenu.server)
+              setContextMenu(null)
+            }}
+            className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-orange-500/10 hover:text-orange-300"
+          >
+            <Terminal size={16} />
+            {t("serverDetail.test")}
+          </button>
+          {isReadOnly && (
+            <>
+              <button
+                onClick={() => {
+                  if (contextMenu.server.status === "online") {
+                    onOpenRemoteConsole?.(contextMenu.server)
+                    setContextMenu(null)
+                  }
+                }}
+                disabled={contextMenu.server.status !== "online"}
+                className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-cyan-300 transition-colors hover:bg-cyan-500/10 hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Terminal size={16} />
+                Console
+              </button>
+              {contextMenu.server.status === "online" && (
+                <button
+                  onClick={() => {
+                    onStopRemoteServer?.(contextMenu.server)
+                    setContextMenu(null)
+                  }}
+                  className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200"
+                >
+                  <Square size={16} />
+                  Parar servidor
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  onStartServer(contextMenu.server)
+                  setContextMenu(null)
+                }}
+                className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-emerald-300 transition-colors hover:bg-emerald-500/10 hover:text-emerald-200"
+              >
+                <Play size={16} />
+                {t("serverDetail.start")}
+              </button>
+            </>
+          )}
           <button
             onClick={() => configureServer(contextMenu.server)}
             className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-orange-500/10 hover:text-orange-300"
@@ -370,16 +467,21 @@ function ServerCard({
   onClick,
   onContextMenu,
   isHidden,
-  isFavorite
+  isFavorite,
+  onOpenRemoteConsole,
+  onStopRemoteServer,
 }: {
   server: ZomboidServer;
   onClick: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
   isHidden?: boolean
   isFavorite?: boolean
+  onOpenRemoteConsole?: (server: ZomboidServer) => void
+  onStopRemoteServer?: (server: ZomboidServer) => void
 }) {
   const { t } = useTranslation()
   const isOnline = server.status === "online"
+  const hasRemoteActions = Boolean(onOpenRemoteConsole || onStopRemoteServer)
 
   return (
     <div
@@ -445,6 +547,36 @@ function ServerCard({
           <span className="font-medium">{server.modsCount}</span>
         </div>
       </div>
+
+      {hasRemoteActions && (
+        <div className="mt-5 flex flex-wrap gap-2 border-t border-white/5 pt-4">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              if (isOnline) onOpenRemoteConsole?.(server)
+            }}
+            disabled={!isOnline}
+            className="flex items-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs font-black text-cyan-300 transition-colors hover:bg-cyan-500 hover:text-[#071014] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Terminal size={15} />
+            Console
+          </button>
+          {isOnline && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                onStopRemoteServer?.(server)
+              }}
+              className="flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-black text-red-300 transition-colors hover:bg-red-500 hover:text-white"
+            >
+              <Square size={15} />
+              Parar
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

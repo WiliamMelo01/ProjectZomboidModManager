@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) const BUILD_41: &str = "b41";
 pub(crate) const BUILD_42: &str = "b42";
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ZomboidServer {
     pub(crate) id: String,
@@ -18,7 +18,7 @@ pub(crate) struct ZomboidServer {
     pub(crate) game_build: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DeleteServerResult {
     pub(crate) backup_path: String,
@@ -110,6 +110,15 @@ pub(crate) struct ZomboidModVariant {
     pub(crate) map_names: Vec<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ZomboidModInstallResult {
+    pub(crate) mod_id: String,
+    pub(crate) workshop_id: String,
+    pub(crate) target_path: String,
+    pub(crate) was_copied: bool,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AppSettings {
@@ -180,7 +189,7 @@ pub(crate) struct ZomboidInstallationStatus {
     pub(crate) is_server_config_found: bool,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ServerTestResult {
     pub(crate) status: String,
@@ -208,11 +217,222 @@ pub(crate) struct PortUsage {
     pub(crate) process_name: String,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteServerConnectionRequest {
+    pub(crate) name: String,
+    pub(crate) host: String,
+    pub(crate) port: String,
+    pub(crate) username: String,
+    pub(crate) auth_method: String,
+    pub(crate) password: String,
+    pub(crate) ssh_key_path: String,
+    pub(crate) server_path: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteServerConnectionResult {
+    pub(crate) name: String,
+    pub(crate) host: String,
+    pub(crate) port: u16,
+    pub(crate) server_path: String,
+    pub(crate) message: String,
+    pub(crate) latency_ms: u128,
+    pub(crate) diagnostic_log: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteServerLatencyResult {
+    pub(crate) host: String,
+    pub(crate) port: u16,
+    pub(crate) success: bool,
+    pub(crate) latency_ms: Option<u128>,
+    pub(crate) error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteWorkspaceConfig {
+    pub(crate) name: String,
+    pub(crate) host: String,
+    pub(crate) port: String,
+    pub(crate) username: String,
+    pub(crate) auth_method: String,
+    pub(crate) ssh_key_path: String,
+    pub(crate) server_path: String,
+    pub(crate) remote_steamcmd_dir: String,
+    pub(crate) remote_steamcmd_path: String,
+    pub(crate) remote_zomboid_server_dir: String,
+    pub(crate) remote_zomboid_server_path: String,
+    pub(crate) remote_client_ram: String,
+    pub(crate) remote_server_ram: String,
+    pub(crate) remote_setup_completed_step: u8,
+    pub(crate) remote_mod_locations: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TerminalCommandRequest {
+    pub(crate) target: String,
+    pub(crate) command: String,
+    pub(crate) working_directory: String,
+    pub(crate) connection: Option<RemoteServerConnectionRequest>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TerminalCommandResult {
+    pub(crate) target: String,
+    pub(crate) command: String,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) success: bool,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteSteamCmdUploadRequest {
+    pub(crate) connection: RemoteServerConnectionRequest,
+    pub(crate) remote_directory: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteSteamCmdUploadResult {
+    pub(crate) local_path: String,
+    pub(crate) remote_path: String,
+    pub(crate) steamcmd_executable_path: String,
+    pub(crate) command: String,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) success: bool,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteHelperSetupResult {
+    pub(crate) local_path: String,
+    pub(crate) remote_path: String,
+    pub(crate) command: String,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) success: bool,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteZomboidServerPathRequest {
+    pub(crate) connection: RemoteServerConnectionRequest,
+    pub(crate) server_directory: String,
+    pub(crate) server_launch_path: String,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteZomboidServerInstallRequest {
+    pub(crate) connection: RemoteServerConnectionRequest,
+    pub(crate) steamcmd_path: String,
+    pub(crate) install_directory: String,
+    pub(crate) branch: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteZomboidServerInstallResult {
+    pub(crate) install_directory: String,
+    pub(crate) server_executable_path: String,
+    pub(crate) command: String,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) success: bool,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteSetupLogEvent {
+    pub(crate) phase: String,
+    pub(crate) stream: String,
+    pub(crate) line: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteAppSettingsRequest {
+    pub(crate) connection: RemoteServerConnectionRequest,
+    pub(crate) game_executable_path: String,
+    pub(crate) client_ram: String,
+    pub(crate) server_ram: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteModLocationRequest {
+    pub(crate) connection: RemoteServerConnectionRequest,
+    pub(crate) path: String,
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ServerPortCheck {
     pub(crate) ports: Vec<u16>,
     pub(crate) usages: Vec<PortUsage>,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteFirewallRuleStatus {
+    pub(crate) protocol: String,
+    pub(crate) port: u16,
+    pub(crate) allowed: bool,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteServerFirewallCheck {
+    pub(crate) server_id: String,
+    pub(crate) ports: Vec<u16>,
+    pub(crate) rules: Vec<RemoteFirewallRuleStatus>,
+    pub(crate) missing_rules: Vec<RemoteFirewallRuleStatus>,
+    pub(crate) is_configured: bool,
+    pub(crate) logs: Vec<String>,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteServerActionResult {
+    pub(crate) success: bool,
+    pub(crate) message: String,
+    pub(crate) command: String,
+    pub(crate) logs: Vec<String>,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteServerDeployRequest {
+    pub(crate) connection: RemoteServerConnectionRequest,
+    pub(crate) server_id: String,
+    pub(crate) include_mods: bool,
+    pub(crate) overwrite_existing_mods: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteServerDeployResult {
+    pub(crate) success: bool,
+    pub(crate) server_id: String,
+    pub(crate) deployed_server_files: usize,
+    pub(crate) deployed_mods: usize,
+    pub(crate) skipped_mods: Vec<String>,
+    pub(crate) local_bundle_path: String,
+    pub(crate) remote_bundle_path: String,
+    pub(crate) command: String,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+    pub(crate) logs: Vec<String>,
 }
 
 #[derive(Serialize, Clone)]

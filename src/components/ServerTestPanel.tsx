@@ -11,9 +11,10 @@ import type { ServerTestEvent, ServerTestResult } from "@/types/serverTest"
 type ServerTestPanelProps = {
   hasDownloadProgressCard?: boolean
   onNotification?: (notification: Omit<AppNotification, "id" | "createdAt" | "isRead">) => void
+  onCancelTest?: (serverId: string) => Promise<void> | void
 }
 
-export function ServerTestPanel({ hasDownloadProgressCard = false, onNotification }: ServerTestPanelProps) {
+export function ServerTestPanel({ hasDownloadProgressCard = false, onNotification, onCancelTest }: ServerTestPanelProps) {
   const { t } = useTranslation()
   const [serverId, setServerId] = useState<string | null>(null)
   const [isOpen, setIsOpen] = useState(false)
@@ -26,15 +27,20 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
   const [isLogCopied, setIsLogCopied] = useState(false)
   const [startedAt, setStartedAt] = useState<number | null>(null)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
-  const [timeoutSeconds, setTimeoutSeconds] = useState(180)
   const onNotificationRef = useRef(onNotification)
+  const onCancelTestRef = useRef(onCancelTest)
   const serverIdRef = useRef(serverId)
+  const cancelledServerRef = useRef<string | null>(null)
   const tRef = useRef(t)
   const logEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     onNotificationRef.current = onNotification
   }, [onNotification])
+
+  useEffect(() => {
+    onCancelTestRef.current = onCancelTest
+  }, [onCancelTest])
 
   useEffect(() => {
     serverIdRef.current = serverId
@@ -62,8 +68,15 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
         setIsMinimized(false)
         setStartedAt(Date.now())
         setElapsedSeconds(0)
-        setTimeoutSeconds(payload.timeoutSeconds ?? 180)
+        cancelledServerRef.current = null
         setIsLogCopied(false)
+        return
+      }
+
+      if (cancelledServerRef.current === payload.serverId) {
+        if (payload.event === "finished" || payload.event === "error") {
+          cancelledServerRef.current = null
+        }
         return
       }
 
@@ -173,14 +186,17 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
   const widthClass = panelSize === "wide" ? "w-[min(94vw,1040px)]" : "w-[min(92vw,720px)]"
 
   const closePanel = () => {
-    if (isTesting) {
-      setIsMinimized(true)
-      return
+    if (isTesting && serverId) {
+      cancelledServerRef.current = serverId
+      void onCancelTestRef.current?.(serverId)
+      setIsTesting(false)
+      setStartedAt(null)
     }
 
     setResult(null)
     setError(null)
     setLogLines([])
+    setIsMinimized(false)
     setIsOpen(false)
   }
 
@@ -262,7 +278,7 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
             <button
               onClick={closePanel}
               className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-white/5 hover:text-white"
-              title={isTesting ? t("serverTest.minimizeRunning") : t("common.close")}
+              title={isTesting ? t("common.cancel") : t("common.close")}
             >
               <X size={18} />
             </button>
@@ -370,13 +386,13 @@ export function ServerTestPanel({ hasDownloadProgressCard = false, onNotificatio
 
             <div className="flex items-center justify-between gap-3 border-t border-white/5 p-5">
               <div className="font-mono text-xs text-gray-500">
-                {isTesting ? t("serverTest.time", { elapsed: formatDuration(elapsedSeconds), timeout: formatDuration(timeoutSeconds) }) : result ? t("serverTest.finishedIn", { duration: formatDuration(result.durationSeconds) }) : t("serverTest.ready")}
+                {isTesting ? formatDuration(elapsedSeconds) : result ? t("serverTest.finishedIn", { duration: formatDuration(result.durationSeconds) }) : t("serverTest.ready")}
               </div>
               <button
                 onClick={closePanel}
                 className="rounded-xl border border-white/10 px-5 py-3 text-sm font-bold text-gray-400 transition-colors hover:bg-white/5 hover:text-white"
               >
-                {isTesting ? t("serverTest.minimize") : t("common.close")}
+                {isTesting ? t("common.cancel") : t("common.close")}
               </button>
             </div>
           </>

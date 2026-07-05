@@ -11,6 +11,7 @@ export const resources = {
         cancel: "Cancel",
         close: "Close",
         confirm: "Confirm",
+        error: "Error",
         detect: "Detect",
         download: "Download",
         loading: "Loading...",
@@ -37,10 +38,12 @@ export const resources = {
         notifications: "Notifications",
         markAllRead: "Mark all as read",
         noNotifications: "No notifications.",
+        remoteSetup: "Server Setup",
       },
       language: {
         title: "Language",
-        description: "Choose the interface language. Automatic uses your system language.",
+        description:
+          "Choose the interface language. Automatic uses your system language.",
         auto: "Automatic",
         en: "English",
         ptBR: "Portuguese (Brazil)",
@@ -74,13 +77,14 @@ export const resources = {
         },
         steamcmd: {
           title: "SteamCMD integration",
-          description: "Downloads use app-managed isolated SteamCMD instances.",
-          configured: "SteamCMD pool ready",
-          notConfigured: "SteamCMD pool not prepared",
-          hint: "The app creates isolated SteamCMD folders automatically.",
+          description:
+            "Downloads use SteamCMD with the default Steam Workshop folder.",
+          configured: "SteamCMD ready",
+          notConfigured: "SteamCMD not configured",
+          hint: "On Linux, SteamCMD downloads into the default Steam Workshop folder.",
           notFound: "SteamCMD was not found automatically.",
           concurrentDownloads: "Simultaneous downloads",
-          concurrentDownloadsHint: "The stable mode uses 1 isolated SteamCMD instance.",
+          concurrentDownloadsHint: "The stable mode uses 1 SteamCMD process.",
         },
         performanceSection: {
           title: "Game configuration",
@@ -93,19 +97,22 @@ export const resources = {
           openFolder: "Open folder",
           clientRam: "Client RAM (Game)",
           serverRam: "Server RAM",
-          autoDetectHint: "The app tries to use the default Steam folder and locate ProjectZomboid64.exe automatically.",
+          autoDetectHint:
+            "The app tries to use the default Steam folder and locate ProjectZomboid64.exe automatically.",
           steamFolder: "Steam folder",
           found: "found",
           notFound: "not found",
           pending: "pending",
           server: "Server",
           defaultFolder: "Default folder",
-          details: "The app uses the selected executable to locate the configuration file and adjust the memory flags (-Xms and -Xmx). Select the correct executable for the version you use, usually 64-bit.",
+          details:
+            "The app uses the selected executable to locate the configuration file and adjust the memory flags (-Xms and -Xmx). Select the correct executable for the version you use, usually 64-bit.",
         },
         openedFolder: "Opened folder: {{path}}",
         selectedExecutable: "Executable selected. Save to confirm.",
         clearedGamePath: "Game path cleared. Save to confirm.",
-        clearedSteamcmdPath: "Path cleared. Save to return to automatic detection.",
+        clearedSteamcmdPath:
+          "Path cleared. Save to return to automatic detection.",
       },
       mods: {
         title: "Mod library",
@@ -125,7 +132,8 @@ export const resources = {
         map: "Map",
         missing: "Not found",
         unknownAuthor: "Unknown",
-        activeMissingDescription: "This mod is active in the profile but was not found in the library.",
+        activeMissingDescription:
+          "This mod is active in the profile but was not found in the library.",
         installMap: "Install as map",
         activate: "Activate mod",
         deactivate: "Deactivate mod",
@@ -139,6 +147,7 @@ export const resources = {
         title: "Servers",
         description: "Manage and monitor your Project Zomboid servers.",
         create: "Create server",
+        deployLocalServer: "Deploy local server",
         versions: "Versions",
         noServers: "No server found.",
         emptySearch: "Try searching for another name or port.",
@@ -154,16 +163,19 @@ export const resources = {
         show: "Show server",
         delete: "Delete server",
         deleteTitle: "Delete server?",
-        deleteBody: "{{name}} will be removed from the server list. Its profile files will be moved to a safety backup.",
+        deleteBody:
+          "{{name}} will be removed from the server list. Its profile files will be moved to a safety backup.",
         deleteConfirm: "Delete with backup",
         deleting: "Deleting...",
         deleteSuccessTitle: "Server backed up",
-        deleteSuccessBody: "{{name}} was removed. Backup saved at: {{backupPath}}",
+        deleteSuccessBody:
+          "{{name}} was removed. Backup saved at: {{backupPath}}",
         deleteErrorTitle: "Could not delete server",
         deleteErrorBody: "{{name}} could not be deleted: {{error}}",
         page: "Page {{current}} of {{total}}",
         dependencies: "Dependencies",
-        dependenciesBody: "The mod {{name}} requires the following additional mods to work correctly:",
+        dependenciesBody:
+          "The mod {{name}} requires the following additional mods to work correctly:",
         bringAllLocal: "Bring everything locally",
       },
       errors: {
@@ -197,7 +209,8 @@ export const resources = {
         loadError: "Could not read the server configuration.",
         serverTab: "Server",
         sandboxTab: "Sandbox",
-        sandboxHint: "Advanced world values saved in the server SandboxVars.lua file.",
+        sandboxHint:
+          "Advanced world values saved in the server SandboxVars.lua file.",
         searchSandbox: "Search sandbox values...",
         noSandboxSettings: "No editable SandboxVars values found.",
         identity: "Identity and access",
@@ -234,6 +247,12 @@ export const resources = {
         saving: "Saving",
         save: "Save setup",
         saveError: "Could not save the server setup.",
+        resetToDefault: "Reset",
+        defaultOption: "Default option:",
+        defaultLabel: "Default",
+        defaultValue: "Default:",
+        enabled: "Enabled",
+        disabled: "Disabled",
       },
       serverDetail: {
         back: "Back to servers",
@@ -243,11 +262,13 @@ export const resources = {
         checkingPorts: "Checking ports",
         testing: "Testing",
         test: "Test server",
+        start: "Start server",
         configure: "Configure",
         activeMods: "Active mods",
         maxPlayers: "Max players",
         filter: "Filter server mods...",
-        incompatibleWarning: "{{count}} active mod(s) are not compatible with {{build}}. Disable them manually before testing the server.",
+        incompatibleWarning:
+          "{{count}} active mod(s) are not compatible with {{build}}. Disable them manually before testing the server.",
         viewMods: "View mods",
         activated: "Activated mods",
         available: "Available mods",
@@ -262,28 +283,39 @@ export const resources = {
         reviewImpact: "Review the impact before continuing.",
         cancel: "Cancel",
         compatibleOnly: "Compatible only with: {{builds}}",
-        missingLibrary: "Not found in the local library. Remove this ID from the profile or install the mod again.",
-        changeBuildBody: "The active mod list will be preserved. Mods that do not support {{build}} remain visible for manual review.",
-        activeModsReview: "This profile has {{count}} active mod(s). Review compatibility warnings after switching.",
+        missingLibrary:
+          "Not found in the local library. Remove this ID from the profile or install the mod again.",
+        changeBuildBody:
+          "The active mod list will be preserved. Mods that do not support {{build}} remain visible for manual review.",
+        activeModsReview:
+          "This profile has {{count}} active mod(s). Review compatibility warnings after switching.",
         changing: "Changing...",
         useBuild: "Use {{build}}",
         mapTitle: "Add mod as map?",
-        mapBody: "The mod {{name}} will be activated and its maps added to the server profile.",
+        mapBody:
+          "The mod {{name}} will be activated and its maps added to the server profile.",
         mapsFound: "Maps found",
         addMap: "Add map",
         deactivateTitle: "Deactivate mod?",
-        deactivateBody: "Are you sure you want to deactivate {{name}} from this server?",
+        deactivateBody:
+          "Are you sure you want to deactivate {{name}} from this server?",
         yesDeactivate: "Yes, deactivate",
         dependencyWarning: "Dependency warning",
-        dependencyBody: "The mod {{name}} cannot be deactivated alone because it is a direct dependency of:",
-        dependencyHint: "To remove this mod, deactivate the mods listed above first.",
+        dependencyBody:
+          "The mod {{name}} cannot be deactivated alone because it is a direct dependency of:",
+        dependencyHint:
+          "To remove this mod, deactivate the mods listed above first.",
         pendingDependencies: "Pending dependencies",
+        pendingInstallation: "Pending installation",
         pendingBody: "The mod {{name}} needs to be prepared before activation:",
-        bring: "Bring",
+        bring: "Install",
+        install: "Install",
         activate: "Activate",
         prepareAndActivate: "Bring locally and activate",
+        installingAndActivating: "Installing and activating...",
         securityWarning: "Safety warning",
-        moveBody: "Changing the loading order may break some mods. Move {{name}} only if you are sure it should load {{position}} in the list.",
+        moveBody:
+          "Changing the loading order may break some mods. Move {{name}} only if you are sure it should load {{position}} in the list.",
         atStart: "at the start",
         atEnd: "at the end",
         confirmMove: "Confirm move",
@@ -291,30 +323,37 @@ export const resources = {
       },
       dependency: {
         missingTitle: "Mod not found",
-        missingDescription: "The mod {{name}} requires a dependency that is not in your library:",
+        missingDescription:
+          "The mod {{name}} requires a dependency that is not in your library:",
         dependencyId: "Dependency ID",
         steamcmdMissing: "SteamCMD not configured",
-        steamcmdHint: "Configure the steamcmd.exe path before downloading this Workshop dependency.",
+        steamcmdHint:
+          "Configure the Linux SteamCMD path before downloading this Workshop dependency.",
         openSettings: "Open settings",
         openBrowser: "Open in browser",
         download: "Download with SteamCMD",
         downloading: "Downloading with SteamCMD...",
         back: "Back",
-        numericRequired: "Enter the numeric Workshop ID to download with SteamCMD.",
-        steamcmdRequired: "Configure SteamCMD before downloading Workshop dependencies.",
+        numericRequired:
+          "Enter the numeric Workshop ID to download with SteamCMD.",
+        steamcmdRequired:
+          "Configure SteamCMD before downloading Workshop dependencies.",
         completed: "Download complete. Updating the mod library...",
         workshopIdLabel: "Workshop ID for SteamCMD",
         workshopIdPlaceholder: "Paste the numeric item ID",
-        workshopIdHint: "If the dependency came as a Mod ID, open the Workshop search and paste the numeric ID from the item page here.",
+        workshopIdHint:
+          "If the dependency came as a Mod ID, open the Workshop search and paste the numeric ID from the item page here.",
         fallbackError: "Could not download the Steam Workshop item.",
-        downloadedMissing: "Dependency '{{id}}' was downloaded but has not appeared in the library yet. Refresh the mods and try again.",
+        downloadedMissing:
+          "Dependency '{{id}}' was downloaded but has not appeared in the library yet. Refresh the mods and try again.",
       },
       serverTest: {
         title: "Server test",
         profile: "profile",
         lines: "lines",
         portsTitle: "Ports in use",
-        portsDescription: "To test the server, ports {{ports}} must be free. Stop the processes below before continuing.",
+        portsDescription:
+          "To test the server, ports {{ports}} must be free. Stop the processes below before continuing.",
         stopAndTest: "Stop processes and test",
         finishedTitle: "Server test finished",
         failedTitle: "Server test failed",
@@ -343,7 +382,8 @@ export const resources = {
         dependencyFeedbackTitle: "Dependency fixes needed",
       },
       loadingMods: {
-        description: "We are syncing your mods and servers. This may take a few seconds...",
+        description:
+          "We are syncing your mods and servers. This may take a few seconds...",
         processing: "Processing files...",
         waiting: "Waiting for command",
       },
@@ -378,57 +418,159 @@ export const resources = {
         all: "All",
         builds: "Builds",
         bringLocal: "Bring Steam mods to local",
+        dependencies: "Dependencies",
+        dependenciesBody:
+          "The mod {{name}} requires the following additional mods before installation:",
         loading: "Looking for mods in Zomboid/mods and Steam libraries...",
-        noResultsHint: "Try another name, author, Mod ID, dependency or Workshop ID.",
+        noResultsHint:
+          "Try another name, author, Mod ID, dependency or Workshop ID.",
         page: "Page {{current}} of {{total}}",
       },
       backend: {
         unknownAuthor: "Unknown",
         noDescription: "No description available.",
       },
+      deployLocalServer: {
+        title: "Deploy local server",
+        subtitle: "Send a local server with its active mods to this Linux server",
+        failed: "Server deploy failed.",
+        selectServer: "Select local server",
+        noLocalServers: "No local server found.",
+        options: "Deploy options",
+        optIncludeMods: "Copy active mods installed locally",
+        optIncludeModsDesc:
+          "Compresses and sends active local mod folders to the server Zomboid/mods folder.",
+        optOverwrite: "Overwrite existing files",
+        optOverwriteDesc:
+          "Replaces existing configuration and mod files when there is a conflict.",
+        stepPrep: "Preparing files",
+        stepCompress: "Compressing files (zip)",
+        stepUpload: "Uploading to server (SCP)",
+        stepExtract: "Extracting and installing on server",
+        stepCompleted: "Completed",
+        deployingTitle: "Deploying server...",
+        deployingDesc:
+          "Compressing local server files and transferring them with SCP. This can take a few minutes when there are many mods.",
+        successTitle: "Deploy completed",
+        successMessage: "Server {{name}} was deployed successfully to the Linux server.",
+        summaryServerFiles: "Server files",
+        summaryMods: "Mods sent",
+        summarySkipped: "Some mods were not found locally:",
+        btnDeployAnother: "Deploy another server",
+        btnConfirm: "Confirm deploy",
+        progress: {
+          locatingConfigs: "Locating configuration files...",
+          scanningMods: "Identifying active local mods...",
+          staging: "Preparing temporary folder...",
+          copyingConfigs: "Copying configuration files...",
+          copyingMods: "Copying local mods...",
+          compressing: "Compressing files...",
+          uploading: "Uploading file with SCP...",
+          extracting: "Running extraction script...",
+          success: "Deploy completed successfully!",
+        },
+      },
+      linuxSteamcmd: {
+        title: "SteamCMD on Linux",
+        description:
+          "The app uses SteamCMD to download mods into the default Steam Workshop folder.",
+        found: "SteamCMD found",
+        missing: "SteamCMD needs to be installed",
+        missingDescription:
+          "Install the app local SteamCMD runtime to enable downloads from the Downloads tab.",
+        installCommand: "Local install command",
+        copyCommand: "Copy command",
+        copied: "Command copied.",
+        openSettings: "Open settings",
+        installing: "Installing...",
+        runInstall: "Run install",
+        checking: "Checking...",
+        checkAgain: "I installed it, check again",
+        continue: "Continue",
+        close: "Close",
+      },
+      remoteTerminal: {
+        title: "Terminal",
+        command: "SSH command",
+        success: "Success",
+        failed: "Failed",
+        running: "Running...",
+        run: "Run",
+        close: "Close",
+        noOutput: "(no output)",
+      },
+      remoteStart: {
+        checkingSetup: "Checking server setup for {{name}}...",
+        firewallReady: "Firewall is configured. You can run the server.",
+        firewallNeedsConfig: "Firewall needs configuration before running the server.",
+        configuringFirewall: "Configuring firewall rules...",
+        firewallStillNeedsAttention: "Firewall still needs attention.",
+        checkingFirewallBeforeStart: "Checking firewall before start...",
+        firewallMissingConfiguring: "Firewall rules are missing; configuring ufw before start...",
+        firewallStillMissing: "Firewall rules are still missing after configuration.",
+        startingServer: "Starting Project Zomboid server...",
+        streamingStartup: "Streaming startup output in real time.",
+        stopQueued: "Stop command queued. Refreshing server status shortly.",
+        stopQueuedLog: "Stop command queued. The server may take a few seconds to shut down.",
+        runningConsoleReady: "Server is running. Console command channel is ready.",
+        consoleOpened: "Server console opened for {{name}}.",
+        commandsQueued: "Commands will be queued for the running server.",
+        processStarted: "Server process started. Streaming logs...",
+        processExited: "Server process exited.",
+        startFailed: "Server start failed.",
+      },
       downloads: {
         cancelledTitle: "Workshop download cancelled",
         failedTitle: "Download completed with errors",
         finishedTitle: "Workshop download finished",
-        progress: "{{downloaded}} downloaded, {{skipped}} already local; {{failed}} failed.",
+        progress:
+          "{{downloaded}} downloaded, {{skipped}} already local; {{failed}} failed.",
         success: "{{downloaded}} downloaded, {{skipped}} already local.",
-        cancelled: "{{downloaded}} downloaded, {{skipped}} already local and {{cancelled}} cancelled.",
+        cancelled:
+          "{{downloaded}} downloaded, {{skipped}} already local and {{cancelled}} cancelled.",
         retrying: "Trying to download {{count}} items again...",
         fallbackError: "Could not download the mod.",
-        cancelledProgress: "Download cancelled. {{count}} downloaded, {{skipped}} already local.",
+        cancelledProgress:
+          "Download cancelled. {{count}} downloaded, {{skipped}} already local.",
         cancelling: "Cancelling download...",
         checkingCollection: "Checking collection {{id}}...",
         downloadingItem: "Downloading item {{id}}...",
         pageTitle: "Workshop downloads",
-        pageDescription: "Download a mod or collection with controlled SteamCMD sessions.",
+        pageDescription:
+          "Download a mod or collection with controlled SteamCMD sessions.",
         experimentalNoticeTitle: "SteamCMD downloads are still being tested",
-        experimentalNoticeBody: "This flow works, but it is still under development and may be slower or less reliable than Steam. When possible, prefer subscribing and downloading directly through Steam.",
+        experimentalNoticeBody:
+          "This flow works, but it is still under development and may be slower or less reliable than Steam. When possible, prefer subscribing and downloading directly through Steam.",
         item: "Single item",
         collection: "Full collection",
         validate: "Force full validation",
-        validateHint: "Use only to repair corrupted downloads. Normal mode is faster.",
+        validateHint:
+          "Use only to repair corrupted downloads. Normal mode is faster.",
         downloadMod: "Download mod",
         downloadCollection: "Download collection",
         downloading: "Downloading...",
         configured: "SteamCMD ready",
         notConfigured: "SteamCMD not configured",
         checking: "Checking SteamCMD",
-        configureHint: "Configure the steamcmd.exe path to enable downloads.",
+        configureHint: "Configure the Linux SteamCMD path to enable downloads.",
         configure: "Configure",
         progressTitle: "Workshop download",
         preparing: "Preparing collection...",
         duration: "Duration",
         elapsed: "Elapsed {{time}}",
         finishedIn: "Finished in {{time}}",
-        progressSummary: "{{completed}} downloaded · {{skipped}} local · {{failed}} failures",
+        progressSummary:
+          "{{completed}} downloaded · {{skipped}} local · {{failed}} failures",
         collectionId: "Collection ID or URL",
         workshopId: "Workshop ID or URL",
         collectionPlaceholder: "Paste the collection ID or URL",
         modPlaceholder: "Paste the mod ID or URL",
         completedTitle: "Download complete",
-        completedLibrary: "{{downloaded}} items downloaded, {{skipped}} already local, and the library was updated.",
+        completedLibrary:
+          "{{downloaded}} items downloaded, {{skipped}} already local, and the library was updated.",
         itemProgress: "Item progress",
-        itemProgressSummary: "{{completed}} downloaded · {{skipped}} local · {{failed}} failed · {{queued}} waiting",
+        itemProgressSummary:
+          "{{completed}} downloaded · {{skipped}} local · {{failed}} failed · {{queued}} waiting",
         steamcmdLog: "SteamCMD output",
         summary: "Download summary",
         interrupted: "Download interrupted.",
@@ -449,15 +591,116 @@ export const resources = {
       workshopWindow: {
         copied: "Link copied.",
         copyError: "Could not copy the link.",
-        numericRequired: "To download with SteamCMD, open the Workshop page and use the numeric item ID.",
+        numericRequired:
+          "To download with SteamCMD, open the Workshop page and use the numeric item ID.",
         failed: "Download completed with {{count}} failure(s).",
         downloaded: "{{count}} item downloaded with SteamCMD.",
-        description: "Steam did not render correctly inside the WebView. Use the actions below to open the item and download with SteamCMD.",
+        description:
+          "Steam did not render correctly inside the WebView. Use the actions below to open the item and download with SteamCMD.",
         search: "Search",
         empty: "No item provided",
         browser: "Browser",
         copyLink: "Copy link",
         fallbackError: "Could not perform the action.",
+      },
+      remoteSetup: {
+        modalTitle: "Server setup",
+        step1Title: "Configure helper component",
+        step1Description:
+          "Send and configure the helper component so the server can run management logic.",
+        step1Header: "Configure helper",
+        step1Subheader:
+          "This uploads and configures the helper component on the server so scans and commands can be executed.",
+
+        step2Title: "SteamCMD",
+        step2Description:
+          "Install SteamCMD on the Linux server under /var/lib/pzmm.",
+        step2Header: "Install SteamCMD",
+        step2Subheader:
+          "This downloads the app-managed Linux SteamCMD runtime into the server workspace folder.",
+        step2DirLabel: "Managed SteamCMD folder",
+        step2PathLabel: "SteamCMD path",
+        step2PanelTitle: "SteamCMD install",
+        step2InstallBtn: "Install SteamCMD",
+        step2Installing: "Installing...",
+        step2UseExistingBtn: "Use installed SteamCMD",
+        step2Checking: "Checking...",
+        step2ExistingNotFound:
+          "SteamCMD was not found in the app-managed path or in the server PATH.",
+
+        step3Title: "Zomboid server",
+        step3Description:
+          "Use an existing dedicated server folder or download it through SteamCMD.",
+        step3Header: "Configure Project Zomboid server",
+        step3Subheader:
+          "Point to an existing dedicated server installation, or let SteamCMD download app 380870.",
+        step3ModeExistingTitle: "Already installed",
+        step3ModeExistingDesc: "Save the server folder and launch file path.",
+        step3ModeDownloadTitle: "Download with SteamCMD",
+        step3ModeDownloadDesc:
+          "Run app_update 380870 for the selected branch on the Linux host.",
+        step3BranchLabel: "Server branch",
+        step3BranchDefaultTitle: "Default",
+        step3BranchDefaultDesc:
+          "SteamCMD public branch. Recommended for normal servers.",
+        step3BranchUnstableTitle: "Latest unstable",
+        step3BranchUnstableDesc:
+          "Adds -beta unstable. If Steam refuses this branch, choose another branch or configure an existing server install.",
+        linuxPathRequired:
+          "Linux server workspaces require absolute Linux paths like /var/lib/pzmm/zomboid-server.",
+        step3DirLabel: "Detected Zomboid server folder",
+        step3PathLabel: "Server launch path",
+        step3PanelTitle: "Dedicated server install",
+        step3SaveBtn: "Save existing path",
+        step3Saving: "Saving...",
+        step3DownloadBtn: "Download server",
+        step3Downloading: "Downloading...",
+
+        step4Title: "Ready",
+        step4Description: "Server paths are saved for this connection.",
+        step4Header: "Server workspace paths saved",
+        step4Subheader:
+          "These paths are stored separately for this host/user and will be reused by this server workspace.",
+
+        btnBack: "Back",
+        btnSend: "Send setup",
+        btnSending: "Sending...",
+        btnDone: "Done",
+        sshKeyNotice:
+          "Server setup currently requires SSH private key authentication.",
+      },
+      workspaceSelector: {
+        helpSshBtn: "Help configuring OpenSSH",
+        sshHelpModalTitle: "How to configure OpenSSH on Linux",
+        sshHelpIntro:
+          "Configure the Linux server, then use the Public Key button in this app to copy the generated key into authorized_keys.",
+        sshHelpStep1Title: "1. Install OpenSSH (Client & Server)",
+        sshHelpStep1Body:
+          "Run the server-side command on Ubuntu/Debian with sudo:",
+        sshHelpStep1LocalCode:
+          "# On your Local PC (Client):\nAdd-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0",
+        sshHelpStep1RemoteCode:
+          "sudo apt-get update\nsudo apt-get install -y openssh-server\nsudo systemctl enable --now ssh",
+        sshHelpStep2Title: "2. Start and Enable SSH Services",
+        sshHelpStep2Body:
+          "Use systemd on the Linux server to enable sshd and keep it running:",
+        sshHelpStep2LocalCode:
+          "# On your Local PC (SSH Agent for key auth):\nSet-Service -Name ssh-agent -StartupType Automatic\nStart-Service ssh-agent",
+        sshHelpStep2RemoteCode: "sudo systemctl enable --now ssh",
+        sshHelpStep3Title: "3. Confirm SSH port 22 is reachable",
+        sshHelpStep3Body:
+          "Ensure your cloud security group or Linux firewall allows inbound TCP 22.",
+        sshHelpStep3Code:
+          "# Cloud: allow inbound TCP 22 in the instance security group\nsudo ufw allow OpenSSH || true",
+        sshHelpStep4Title: "4. Generate & Setup SSH Keys (Recommended)",
+        sshHelpStep4Body:
+          "Generate or select an SSH key pair on your local PC:",
+        sshHelpStep4GenCode:
+          'ssh-keygen -t ed25519 -f "$HOME\\.ssh\\id_ed25519"',
+        sshHelpStep4SetupBody:
+          "Then, append the contents of your local public key ($HOME\\.ssh\\id_ed25519.pub) to the server's authorized keys file:",
+        sshHelpStep4SetupCode: "~/.ssh/authorized_keys",
+        sshHelpClose: "Close Guide",
       },
     },
   },
@@ -473,6 +716,7 @@ export const resources = {
         cancel: "Cancelar",
         close: "Fechar",
         confirm: "Confirmar",
+        error: "Erro",
         detect: "Detectar",
         download: "Baixar",
         loading: "Carregando...",
@@ -499,10 +743,12 @@ export const resources = {
         notifications: "Notificações",
         markAllRead: "Marcar tudo como lido",
         noNotifications: "Nenhuma notificação.",
+        remoteSetup: "Configurar servidor",
       },
       language: {
         title: "Idioma",
-        description: "Escolha o idioma da interface. Automático usa o idioma do sistema.",
+        description:
+          "Escolha o idioma da interface. Automático usa o idioma do sistema.",
         auto: "Automático",
         en: "English",
         ptBR: "Português (Brasil)",
@@ -536,13 +782,14 @@ export const resources = {
         },
         steamcmd: {
           title: "Integração SteamCMD",
-          description: "Downloads usam instâncias SteamCMD isoladas gerenciadas pelo app.",
-          configured: "Pool SteamCMD pronto",
-          notConfigured: "Pool SteamCMD não preparado",
-          hint: "O app cria as pastas SteamCMD isoladas automaticamente.",
+          description:
+            "Downloads usam o SteamCMD com a pasta padrao da Steam Workshop.",
+          configured: "SteamCMD pronto",
+          notConfigured: "SteamCMD nao configurado",
+          hint: "No Linux, o SteamCMD baixa na pasta padrao da Steam Workshop.",
           notFound: "SteamCMD não foi encontrado automaticamente.",
           concurrentDownloads: "Downloads simultâneos",
-          concurrentDownloadsHint: "O modo estável usa 1 instância SteamCMD isolada.",
+          concurrentDownloadsHint: "O modo estavel usa 1 processo SteamCMD.",
         },
         performanceSection: {
           title: "Configuração do jogo",
@@ -555,19 +802,22 @@ export const resources = {
           openFolder: "Abrir pasta",
           clientRam: "RAM do client (Jogo)",
           serverRam: "RAM do servidor",
-          autoDetectHint: "O app tenta usar a pasta padrão da Steam e localizar ProjectZomboid64.exe automaticamente.",
+          autoDetectHint:
+            "O app tenta usar a pasta padrão da Steam e localizar ProjectZomboid64.exe automaticamente.",
           steamFolder: "Pasta Steam",
           found: "encontrada",
           notFound: "não encontrada",
           pending: "pendente",
           server: "Servidor",
           defaultFolder: "Pasta padrão",
-          details: "O app usa o executável selecionado para localizar o arquivo de configuração e ajustar as flags de memória (-Xms e -Xmx). Selecione o executável correto da versão utilizada, geralmente 64 bits.",
+          details:
+            "O app usa o executável selecionado para localizar o arquivo de configuração e ajustar as flags de memória (-Xms e -Xmx). Selecione o executável correto da versão utilizada, geralmente 64 bits.",
         },
         openedFolder: "Pasta aberta: {{path}}",
         selectedExecutable: "Executável selecionado. Salve para confirmar.",
         clearedGamePath: "Caminho do jogo limpo. Salve para confirmar.",
-        clearedSteamcmdPath: "Caminho limpo. Salve para voltar à detecção automática.",
+        clearedSteamcmdPath:
+          "Caminho limpo. Salve para voltar à detecção automática.",
       },
       mods: {
         title: "Biblioteca de mods",
@@ -587,7 +837,8 @@ export const resources = {
         map: "Mapa",
         missing: "Não encontrado",
         unknownAuthor: "Desconhecido",
-        activeMissingDescription: "Este mod está ativo no perfil, mas não foi encontrado na biblioteca.",
+        activeMissingDescription:
+          "Este mod está ativo no perfil, mas não foi encontrado na biblioteca.",
         installMap: "Instalar como mapa",
         activate: "Ativar mod",
         deactivate: "Desativar mod",
@@ -601,11 +852,13 @@ export const resources = {
         title: "Servidores",
         description: "Gerencie e monitore seus servidores de Project Zomboid.",
         create: "Criar servidor",
+        deployLocalServer: "Enviar servidor local",
         versions: "Versões",
         noServers: "Nenhum servidor encontrado.",
         emptySearch: "Tente buscar por outro nome ou porta.",
         emptyBuild: "Nenhum servidor encontrado para esta versão.",
-        emptyHint: "Crie um servidor ou coloque arquivos .ini em Zomboid/Server.",
+        emptyHint:
+          "Crie um servidor ou coloque arquivos .ini em Zomboid/Server.",
         addServer: "Adicione um novo servidor",
         loading: "Buscando servidores em sua pasta do Project Zomboid...",
         hidden: "Servidores ocultos",
@@ -616,16 +869,19 @@ export const resources = {
         show: "Mostrar servidor",
         delete: "Apagar servidor",
         deleteTitle: "Apagar servidor?",
-        deleteBody: "{{name}} será removido da lista de servidores. Os arquivos do perfil serão movidos para um backup de segurança.",
+        deleteBody:
+          "{{name}} será removido da lista de servidores. Os arquivos do perfil serão movidos para um backup de segurança.",
         deleteConfirm: "Apagar com backup",
         deleting: "Apagando...",
         deleteSuccessTitle: "Servidor salvo em backup",
-        deleteSuccessBody: "{{name}} foi removido. Backup salvo em: {{backupPath}}",
+        deleteSuccessBody:
+          "{{name}} foi removido. Backup salvo em: {{backupPath}}",
         deleteErrorTitle: "Não foi possível apagar o servidor",
         deleteErrorBody: "Não foi possível apagar {{name}}: {{error}}",
         page: "Página {{current}} de {{total}}",
         dependencies: "Dependências",
-        dependenciesBody: "O mod {{name}} requer os seguintes mods adicionais para funcionar corretamente:",
+        dependenciesBody:
+          "O mod {{name}} requer os seguintes mods adicionais para funcionar corretamente:",
         bringAllLocal: "Trazer tudo para local",
       },
       errors: {
@@ -659,7 +915,8 @@ export const resources = {
         loadError: "Não foi possível ler as configurações do servidor.",
         serverTab: "Servidor",
         sandboxTab: "Sandbox",
-        sandboxHint: "Valores avancados do mundo salvos no arquivo SandboxVars.lua do servidor.",
+        sandboxHint:
+          "Valores avancados do mundo salvos no arquivo SandboxVars.lua do servidor.",
         searchSandbox: "Buscar valores do sandbox...",
         noSandboxSettings: "Nenhum valor editavel de SandboxVars encontrado.",
         identity: "Identidade e acesso",
@@ -696,6 +953,12 @@ export const resources = {
         saving: "Salvando",
         save: "Salvar configuração",
         saveError: "Não foi possível salvar a configuração do servidor.",
+        resetToDefault: "Resetar",
+        defaultOption: "Opção padrão:",
+        defaultLabel: "Padrão",
+        defaultValue: "Padrão:",
+        enabled: "Ativado",
+        disabled: "Desativado",
       },
       serverDetail: {
         back: "Voltar para servidores",
@@ -705,11 +968,13 @@ export const resources = {
         checkingPorts: "Verificando portas",
         testing: "Testando",
         test: "Testar servidor",
+        start: "Iniciar servidor",
         configure: "Configurar",
         activeMods: "Mods ativos",
         maxPlayers: "Jogadores máx.",
         filter: "Filtrar mods do servidor...",
-        incompatibleWarning: "{{count}} mod(s) ativo(s) não são compatíveis com {{build}}. Desative-os manualmente antes de testar o servidor.",
+        incompatibleWarning:
+          "{{count}} mod(s) ativo(s) não são compatíveis com {{build}}. Desative-os manualmente antes de testar o servidor.",
         viewMods: "Ver mods",
         activated: "Mods ativados",
         available: "Mods disponíveis",
@@ -724,28 +989,40 @@ export const resources = {
         reviewImpact: "Revise o impacto antes de continuar.",
         cancel: "Cancelar",
         compatibleOnly: "Compatível apenas com: {{builds}}",
-        missingLibrary: "Não encontrado na biblioteca local. Remova este ID do perfil ou instale o mod novamente.",
-        changeBuildBody: "A lista de mods ativos será preservada. Mods que não suportam {{build}} continuarão visíveis para revisão manual.",
-        activeModsReview: "Este perfil possui {{count}} mod(s) ativo(s). Revise os alertas de compatibilidade depois da troca.",
+        missingLibrary:
+          "Não encontrado na biblioteca local. Remova este ID do perfil ou instale o mod novamente.",
+        changeBuildBody:
+          "A lista de mods ativos será preservada. Mods que não suportam {{build}} continuarão visíveis para revisão manual.",
+        activeModsReview:
+          "Este perfil possui {{count}} mod(s) ativo(s). Revise os alertas de compatibilidade depois da troca.",
         changing: "Alterando...",
         useBuild: "Usar {{build}}",
         mapTitle: "Adicionar mod como mapa?",
-        mapBody: "O mod {{name}} será ativado e seus mapas serão adicionados ao perfil do servidor.",
+        mapBody:
+          "O mod {{name}} será ativado e seus mapas serão adicionados ao perfil do servidor.",
         mapsFound: "Mapas encontrados",
         addMap: "Adicionar mapa",
         deactivateTitle: "Desativar mod?",
-        deactivateBody: "Tem certeza que deseja desativar {{name}} deste servidor?",
+        deactivateBody:
+          "Tem certeza que deseja desativar {{name}} deste servidor?",
         yesDeactivate: "Sim, desativar",
         dependencyWarning: "Alerta de dependência",
-        dependencyBody: "O mod {{name}} não pode ser desativado sozinho pois é uma dependência direta de:",
-        dependencyHint: "Para remover este mod, desative primeiro os mods listados acima.",
+        dependencyBody:
+          "O mod {{name}} não pode ser desativado sozinho pois é uma dependência direta de:",
+        dependencyHint:
+          "Para remover este mod, desative primeiro os mods listados acima.",
         pendingDependencies: "Dependências pendentes",
-        pendingBody: "O mod {{name}} precisa ser preparado antes de ser ativado:",
-        bring: "Trazer",
+        pendingInstallation: "Instalação pendente",
+        pendingBody:
+          "O mod {{name}} precisa ser instalado antes de ser ativado:",
+        bring: "Instalar",
+        install: "Instalar",
         activate: "Ativar",
-        prepareAndActivate: "Trazer para local e ativar",
+        prepareAndActivate: "Instalar e ativar",
+        installingAndActivating: "Instalando e ativando...",
         securityWarning: "Aviso de segurança",
-        moveBody: "Alterar a ordem de carregamento pode quebrar alguns mods. Mova {{name}} apenas se tiver certeza de que ele deve carregar {{position}} da lista.",
+        moveBody:
+          "Alterar a ordem de carregamento pode quebrar alguns mods. Mova {{name}} apenas se tiver certeza de que ele deve carregar {{position}} da lista.",
         atStart: "no início",
         atEnd: "no final",
         confirmMove: "Confirmar movimentação",
@@ -753,30 +1030,37 @@ export const resources = {
       },
       dependency: {
         missingTitle: "Mod não encontrado",
-        missingDescription: "O mod {{name}} requer uma dependência que não está em sua biblioteca:",
+        missingDescription:
+          "O mod {{name}} requer uma dependência que não está em sua biblioteca:",
         dependencyId: "ID da dependência",
         steamcmdMissing: "SteamCMD não configurado",
-        steamcmdHint: "Configure o caminho do steamcmd.exe antes de baixar esta dependência da Workshop.",
+        steamcmdHint:
+          "Configure o caminho do SteamCMD Linux antes de baixar esta dependência da Workshop.",
         openSettings: "Ir para configurações",
         openBrowser: "Abrir no navegador",
         download: "Baixar com SteamCMD",
         downloading: "Baixando com SteamCMD...",
         back: "Voltar",
-        numericRequired: "Informe o Workshop ID numérico do item para baixar com SteamCMD.",
-        steamcmdRequired: "Configure o SteamCMD antes de baixar dependências da Steam Workshop.",
+        numericRequired:
+          "Informe o Workshop ID numérico do item para baixar com SteamCMD.",
+        steamcmdRequired:
+          "Configure o SteamCMD antes de baixar dependências da Steam Workshop.",
         completed: "Download concluído. Atualizando a biblioteca de mods...",
         workshopIdLabel: "Workshop ID para SteamCMD",
         workshopIdPlaceholder: "Cole o ID numérico do item",
-        workshopIdHint: "Se a dependência veio como Mod ID, abra a busca na Workshop e cole aqui o ID numérico da página do item.",
+        workshopIdHint:
+          "Se a dependência veio como Mod ID, abra a busca na Workshop e cole aqui o ID numérico da página do item.",
         fallbackError: "Não foi possível baixar o item da Steam Workshop.",
-        downloadedMissing: "A dependência '{{id}}' foi baixada, mas ainda não apareceu na biblioteca. Atualize os mods e tente novamente.",
+        downloadedMissing:
+          "A dependência '{{id}}' foi baixada, mas ainda não apareceu na biblioteca. Atualize os mods e tente novamente.",
       },
       serverTest: {
         title: "Teste do servidor",
         profile: "perfil",
         lines: "linhas",
         portsTitle: "Portas em uso",
-        portsDescription: "Para testar o servidor, as portas {{ports}} precisam estar livres. Encerre os processos abaixo antes de continuar.",
+        portsDescription:
+          "Para testar o servidor, as portas {{ports}} precisam estar livres. Encerre os processos abaixo antes de continuar.",
         stopAndTest: "Encerrar processos e testar",
         finishedTitle: "Teste do servidor finalizado",
         failedTitle: "Falha ao testar servidor",
@@ -805,7 +1089,8 @@ export const resources = {
         dependencyFeedbackTitle: "Correções de dependência necessárias",
       },
       loadingMods: {
-        description: "Estamos sincronizando sua lista de mods e servidores. Isso pode levar alguns segundos...",
+        description:
+          "Estamos sincronizando sua lista de mods e servidores. Isso pode levar alguns segundos...",
         processing: "Processando arquivos...",
         waiting: "Aguardando comando",
       },
@@ -826,13 +1111,15 @@ export const resources = {
         large: "Grandes:",
         largeDescription: "12GB+ para mapas extensos.",
         attention: "Atenção",
-        windowsFree: "Deixe sempre 2-4GB livres para o seu Windows funcionar sem travar.",
+        windowsFree:
+          "Deixe sempre 2-4GB livres para o seu Windows funcionar sem travar.",
       },
       contextMenu: {
         moveStart: "Mover para o início",
         moveEnd: "Mover para o final",
         dependencyTitle: "Este mod é dependência de {{count}} mod(s) ativo(s).",
-        dependencyHint: "Este mod precisa carregar antes de outros mods ativos.",
+        dependencyHint:
+          "Este mod precisa carregar antes de outros mods ativos.",
       },
       library: {
         title: "Workshop de mods",
@@ -840,57 +1127,160 @@ export const resources = {
         all: "Todos",
         builds: "Builds",
         bringLocal: "Trazer Steam para local",
+        dependencies: "Dependências",
+        dependenciesBody:
+          "O mod {{name}} requer os seguintes mods adicionais antes da instalação:",
         loading: "Buscando mods em Zomboid/mods e nas bibliotecas Steam...",
-        noResultsHint: "Tente buscar por outro nome, autor, Mod ID, dependência ou Workshop ID.",
+        noResultsHint:
+          "Tente buscar por outro nome, autor, Mod ID, dependência ou Workshop ID.",
         page: "Página {{current}} de {{total}}",
       },
       backend: {
         unknownAuthor: "Desconhecido",
         noDescription: "Sem descrição disponível.",
       },
+      deployLocalServer: {
+        title: "Enviar servidor local",
+        subtitle: "Envie um servidor local com seus mods ativos para este servidor Linux",
+        failed: "Falha na implantação do servidor.",
+        selectServer: "Selecione o servidor local",
+        noLocalServers: "Nenhum servidor local encontrado.",
+        options: "Opções de implantação",
+        optIncludeMods: "Copiar mods ativos instalados localmente",
+        optIncludeModsDesc:
+          "Compacta e envia as pastas dos mods locais ativos para a pasta Zomboid/mods do servidor.",
+        optOverwrite: "Sobrescrever arquivos existentes",
+        optOverwriteDesc:
+          "Substitui arquivos de configuração e mods existentes se houver conflito.",
+        stepPrep: "Preparando arquivos",
+        stepCompress: "Compactando arquivos (zip)",
+        stepUpload: "Transferindo para servidor (SCP)",
+        stepExtract: "Extraindo e instalando no servidor",
+        stepCompleted: "Concluído",
+        deployingTitle: "Enviando servidor...",
+        deployingDesc:
+          "Compactando os arquivos locais do servidor e transferindo via SCP. Isso pode levar alguns minutos se houver muitos mods.",
+        successTitle: "Envio concluído",
+        successMessage: "Servidor {{name}} implantado com sucesso no servidor Linux.",
+        summaryServerFiles: "Arquivos de servidor",
+        summaryMods: "Mods enviados",
+        summarySkipped: "Alguns mods não foram encontrados localmente:",
+        btnDeployAnother: "Enviar outro servidor",
+        btnConfirm: "Confirmar envio",
+        progress: {
+          locatingConfigs: "Localizando arquivos de configuração...",
+          scanningMods: "Identificando mods locais ativos...",
+          staging: "Preparando pasta temporária...",
+          copyingConfigs: "Copiando arquivos de configuração...",
+          copyingMods: "Copiando mods locais...",
+          compressing: "Compactando arquivos...",
+          uploading: "Enviando arquivo via SCP...",
+          extracting: "Executando script de extração...",
+          success: "Implantação concluída com sucesso!",
+        },
+      },
+      linuxSteamcmd: {
+        title: "SteamCMD no Linux",
+        description:
+          "O app usa o SteamCMD para baixar mods na pasta padrão da Steam Workshop.",
+        found: "SteamCMD encontrado",
+        missing: "SteamCMD precisa ser instalado",
+        missingDescription:
+          "Instale o SteamCMD local do app para liberar downloads pela aba Downloads.",
+        installCommand: "Comando de instalação local",
+        copyCommand: "Copiar comando",
+        copied: "Comando copiado.",
+        openSettings: "Abrir configurações",
+        installing: "Instalando...",
+        runInstall: "Rodar instalação",
+        checking: "Verificando...",
+        checkAgain: "Já instalei, verificar",
+        continue: "Continuar",
+        close: "Fechar",
+      },
+      remoteTerminal: {
+        title: "Terminal",
+        command: "Comando SSH",
+        success: "Sucesso",
+        failed: "Falhou",
+        running: "Rodando...",
+        run: "Rodar",
+        close: "Fechar",
+        noOutput: "(sem saída)",
+      },
+      remoteStart: {
+        checkingSetup: "Verificando configuração do servidor {{name}}...",
+        firewallReady: "Firewall configurado. Você pode iniciar o servidor.",
+        firewallNeedsConfig: "O firewall precisa ser configurado antes de iniciar o servidor.",
+        configuringFirewall: "Configurando regras de firewall...",
+        firewallStillNeedsAttention: "O firewall ainda precisa de atenção.",
+        checkingFirewallBeforeStart: "Verificando firewall antes de iniciar...",
+        firewallMissingConfiguring: "Regras de firewall ausentes; configurando ufw antes de iniciar...",
+        firewallStillMissing: "As regras de firewall ainda estão ausentes após a configuração.",
+        startingServer: "Iniciando servidor Project Zomboid...",
+        streamingStartup: "Transmitindo saída de inicialização em tempo real.",
+        stopQueued: "Comando de parada enviado. Atualizando status em breve.",
+        stopQueuedLog: "Comando de parada enviado. O servidor pode levar alguns segundos para encerrar.",
+        runningConsoleReady: "Servidor rodando. Canal de comandos do console pronto.",
+        consoleOpened: "Console do servidor aberto para {{name}}.",
+        commandsQueued: "Os comandos serão enfileirados para o servidor em execução.",
+        processStarted: "Processo do servidor iniciado. Transmitindo logs...",
+        processExited: "Processo do servidor encerrado.",
+        startFailed: "Falha ao iniciar servidor.",
+      },
       downloads: {
         cancelledTitle: "Download da Workshop cancelado",
         failedTitle: "Download concluído com falhas",
         finishedTitle: "Download da Workshop finalizado",
-        progress: "{{downloaded}} baixados, {{skipped}} já locais; {{failed}} falharam.",
+        progress:
+          "{{downloaded}} baixados, {{skipped}} já locais; {{failed}} falharam.",
         success: "{{downloaded}} baixados, {{skipped}} já locais.",
-        cancelled: "{{downloaded}} baixados, {{skipped}} já locais e {{cancelled}} cancelados.",
+        cancelled:
+          "{{downloaded}} baixados, {{skipped}} já locais e {{cancelled}} cancelados.",
         retrying: "Tentando baixar novamente {{count}} itens...",
         fallbackError: "Não foi possível baixar o mod.",
-        cancelledProgress: "Download cancelado. {{count}} baixados, {{skipped}} já locais.",
+        cancelledProgress:
+          "Download cancelado. {{count}} baixados, {{skipped}} já locais.",
         cancelling: "Cancelando download...",
         checkingCollection: "Consultando a coleção {{id}}...",
         downloadingItem: "Baixando item {{id}}...",
         pageTitle: "Baixar da Oficina",
-        pageDescription: "Baixe um mod ou uma coleção com sessões SteamCMD controladas.",
+        pageDescription:
+          "Baixe um mod ou uma coleção com sessões SteamCMD controladas.",
         experimentalNoticeTitle: "Downloads por SteamCMD ainda estão em testes",
-        experimentalNoticeBody: "Este fluxo funciona, mas ainda está em desenvolvimento e pode ser mais lento ou menos estável que a Steam. Quando possível, prefira assinar e baixar diretamente pela Steam.",
+        experimentalNoticeBody:
+          "Este fluxo funciona, mas ainda está em desenvolvimento e pode ser mais lento ou menos estável que a Steam. Quando possível, prefira assinar e baixar diretamente pela Steam.",
         item: "Item individual",
         collection: "Coleção completa",
         validate: "Forçar validação completa",
-        validateHint: "Use somente para corrigir downloads corrompidos. O modo normal é mais rápido.",
+        validateHint:
+          "Use somente para corrigir downloads corrompidos. O modo normal é mais rápido.",
         downloadMod: "Baixar mod",
         downloadCollection: "Baixar coleção",
         downloading: "Baixando...",
         configured: "SteamCMD pronto",
         notConfigured: "SteamCMD não configurado",
         checking: "Verificando SteamCMD",
-        configureHint: "Configure o caminho do steamcmd.exe para liberar downloads.",
+        configureHint:
+          "Configure o caminho do SteamCMD Linux para liberar downloads.",
         configure: "Configurar",
         progressTitle: "Download da Workshop",
         preparing: "Preparando coleção...",
         duration: "Duração",
         elapsed: "Tempo {{time}}",
         finishedIn: "Finalizado em {{time}}",
-        progressSummary: "{{completed}} baixados · {{skipped}} locais · {{failed}} falhas",
+        progressSummary:
+          "{{completed}} baixados · {{skipped}} locais · {{failed}} falhas",
         collectionId: "Collection ID ou URL",
         workshopId: "Workshop ID ou URL",
         collectionPlaceholder: "Cole o ID ou a URL da coleção",
         modPlaceholder: "Cole o ID ou a URL do mod",
         completedTitle: "Download concluído",
-        completedLibrary: "{{downloaded}} itens baixados, {{skipped}} já locais, e a biblioteca foi atualizada.",
+        completedLibrary:
+          "{{downloaded}} itens baixados, {{skipped}} já locais, e a biblioteca foi atualizada.",
         itemProgress: "Progresso dos itens",
-        itemProgressSummary: "{{completed}} baixados · {{skipped}} locais · {{failed}} falhos · {{queued}} aguardando",
+        itemProgressSummary:
+          "{{completed}} baixados · {{skipped}} locais · {{failed}} falhos · {{queued}} aguardando",
         steamcmdLog: "Saída do SteamCMD",
         summary: "Resumo do download",
         interrupted: "Download interrompido.",
@@ -911,16 +1301,118 @@ export const resources = {
       workshopWindow: {
         copied: "Link copiado.",
         copyError: "Não foi possível copiar o link.",
-        numericRequired: "Para baixar com SteamCMD, abra a página da Workshop e use o ID numérico do item.",
+        numericRequired:
+          "Para baixar com SteamCMD, abra a página da Workshop e use o ID numérico do item.",
         failed: "Download concluído com {{count}} falha(s).",
         downloaded: "{{count}} item baixado com SteamCMD.",
-        description: "A Steam não renderizou corretamente dentro do WebView. Use as ações abaixo para abrir o item e baixar com SteamCMD.",
+        description:
+          "A Steam não renderizou corretamente dentro do WebView. Use as ações abaixo para abrir o item e baixar com SteamCMD.",
         search: "Busca",
         empty: "Sem item informado",
         browser: "Navegador",
         copyLink: "Copiar link",
         fallbackError: "Não foi possível executar a ação.",
       },
+      remoteSetup: {
+        modalTitle: "Configuração do servidor",
+        step1Title: "Configurar componente helper",
+        step1Description:
+          "Envia e configura o componente helper para que o servidor possa executar a lógica de gerenciamento.",
+        step1Header: "Configurar helper",
+        step1Subheader:
+          "Isso envia e configura o componente helper no servidor para que varreduras e comandos possam ser executados.",
+
+        step2Title: "SteamCMD",
+        step2Description:
+          "Instala o SteamCMD no servidor Linux em /var/lib/pzmm.",
+        step2Header: "Instalar SteamCMD",
+        step2Subheader:
+          "Isso baixa o runtime Linux do SteamCMD gerenciado pelo app para a pasta do workspace do servidor.",
+        step2DirLabel: "Pasta gerenciada do SteamCMD",
+        step2PathLabel: "SteamCMD path",
+        step2PanelTitle: "Instalação do SteamCMD",
+        step2InstallBtn: "Instalar SteamCMD",
+        step2Installing: "Instalando...",
+        step2UseExistingBtn: "Usar SteamCMD instalado",
+        step2Checking: "Verificando...",
+        step2ExistingNotFound:
+          "SteamCMD não foi encontrado no caminho gerenciado pelo app nem no PATH do servidor.",
+
+        step3Title: "Servidor Zomboid",
+        step3Description:
+          "Usa uma pasta de servidor dedicado existente ou realiza o download pelo SteamCMD.",
+        step3Header: "Configurar servidor Project Zomboid",
+        step3Subheader:
+          "Aponte para uma instalação de servidor dedicado existente ou deixe o SteamCMD baixar o app 380870.",
+        step3ModeExistingTitle: "Já instalado",
+        step3ModeExistingDesc:
+          "Salva a pasta do servidor e o caminho do arquivo de inicialização.",
+        step3ModeDownloadTitle: "Baixar com SteamCMD",
+        step3ModeDownloadDesc:
+          "Executa app_update 380870 para a branch escolhida no host Linux.",
+        step3BranchLabel: "Branch do servidor",
+        step3BranchDefaultTitle: "Padrão",
+        step3BranchDefaultDesc:
+          "Branch pública do SteamCMD. Recomendada para servidores normais.",
+        step3BranchUnstableTitle: "Latest unstable",
+        step3BranchUnstableDesc:
+          "Adiciona -beta unstable. Se a Steam recusar esta branch, escolha outra branch ou configure uma instalacao existente.",
+        linuxPathRequired:
+          "Workspaces de servidor Linux exigem caminhos absolutos Linux, como /var/lib/pzmm/zomboid-server.",
+        step3DirLabel: "Pasta detectada do servidor Zomboid",
+        step3PathLabel: "Caminho de inicialização do servidor",
+        step3PanelTitle: "Instalação do servidor dedicado",
+        step3SaveBtn: "Salvar caminho existente",
+        step3Saving: "Salvando...",
+        step3DownloadBtn: "Baixar servidor",
+        step3Downloading: "Baixando...",
+
+        step4Title: "Pronto",
+        step4Description: "Caminhos do servidor salvos para esta conexão.",
+        step4Header: "Caminhos do workspace do servidor salvos",
+        step4Subheader:
+          "Estes caminhos ficam separados para este host/usuario e serão reutilizados por este workspace do servidor.",
+
+        btnBack: "Voltar",
+        btnSend: "Enviar configuração",
+        btnSending: "Enviando...",
+        btnDone: "Concluído",
+        sshKeyNotice:
+          "A configuração do servidor atualmente requer autenticação por chave privada SSH.",
+      },
+      workspaceSelector: {
+        helpSshBtn: "Como configurar OpenSSH",
+        sshHelpModalTitle: "Como configurar o OpenSSH no Linux",
+        sshHelpIntro:
+          "Configure o servidor Linux e depois use o botão Public Key no app para copiar a chave gerada para o authorized_keys.",
+        sshHelpStep1Title: "1. Instalar o OpenSSH (Cliente e Servidor)",
+        sshHelpStep1Body:
+          "Execute o comando no servidor Ubuntu/Debian com sudo:",
+        sshHelpStep1LocalCode:
+          "# No seu PC Local (Cliente):\nAdd-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0",
+        sshHelpStep1RemoteCode:
+          "sudo apt-get update\nsudo apt-get install -y openssh-server\nsudo systemctl enable --now ssh",
+        sshHelpStep2Title: "2. Iniciar e Habilitar os Serviços SSH",
+        sshHelpStep2Body:
+          "Use systemd no servidor Linux para habilitar e manter o sshd rodando:",
+        sshHelpStep2LocalCode:
+          "# No seu PC Local (Agente SSH para autenticação por chave):\nSet-Service -Name ssh-agent -StartupType Automatic\nStart-Service ssh-agent",
+        sshHelpStep2RemoteCode: "sudo systemctl enable --now ssh",
+        sshHelpStep3Title: "3. Confirmar acesso à porta SSH 22",
+        sshHelpStep3Body:
+          "Garanta que o security group da nuvem ou firewall Linux permita TCP 22 de entrada.",
+        sshHelpStep3Code:
+          "# Nuvem: libere TCP 22 de entrada no security group da instância\nsudo ufw allow OpenSSH || true",
+        sshHelpStep4Title: "4. Gerar e Configurar Chaves SSH (Recomendado)",
+        sshHelpStep4Body:
+          "Gere ou selecione um par de chaves SSH no seu PC local:",
+        sshHelpStep4GenCode:
+          'ssh-keygen -t ed25519 -f "$HOME\\.ssh\\id_ed25519"',
+        sshHelpStep4SetupBody:
+          "Depois, adicione o conteúdo da sua chave pública local ($HOME\\.ssh\\id_ed25519.pub) ao arquivo de chaves autorizadas no servidor:",
+        sshHelpStep4SetupCode: "~/.ssh/authorized_keys",
+        sshHelpClose: "Fechar Guia",
+      },
     },
   },
-} as const
+} as const;

@@ -7,10 +7,11 @@ import type { ZomboidMod } from "@/types/mod"
 
 type ModCardProps = {
   mod: ZomboidMod
-  onInstall: () => void
+  onInstall?: () => void
+  isReadOnly?: boolean
 }
 
-export function ModCard({ mod, onInstall }: ModCardProps) {
+export function ModCard({ mod, onInstall, isReadOnly = false }: ModCardProps) {
   const { t } = useTranslation()
   const isLocal = isLocalMod(mod)
   const sourceBadge = getSourceBadge(mod)
@@ -105,15 +106,15 @@ export function ModCard({ mod, onInstall }: ModCardProps) {
         </div>
 
         <button
-          disabled={isLocal}
+          disabled={isLocal || isReadOnly}
           onClick={onInstall}
           className={`w-full py-3 rounded-xl font-bold text-sm transition-all duration-300 flex items-center justify-center gap-2 mt-auto ${
-            isLocal
+            isLocal || isReadOnly
               ? "bg-white/5 text-gray-500 cursor-not-allowed border border-white/5"
               : "bg-orange-500 text-white hover:bg-orange-600 hover:shadow-[0_4px_15_rgba(249,115,22,0.3)] active:scale-[0.98]"
           }`}
         >
-          {isLocal ? t("mods.installed") : t("mods.install")}
+          {isLocal ? t("mods.installed") : isReadOnly ? "Remote" : t("mods.install")}
         </button>
       </div>
     </div>

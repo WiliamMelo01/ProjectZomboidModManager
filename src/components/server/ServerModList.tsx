@@ -79,13 +79,14 @@ export function ServerModList({
       <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 transition-all duration-300 origin-top ${
         isExpanded ? "opacity-100 scale-y-100 h-auto" : "opacity-0 scale-y-0 h-0 overflow-hidden"
       }`}>
-        {visibleMods.map((mod) => {
+        {visibleMods.map((mod, index) => {
           const isIncompatible = incompatibleModIds.has(mod.id.toLowerCase())
           const imageSrc = getModImageSrc(mod.imageUrl)
+          const modKey = [mod.id, mod.source, mod.packagePath || mod.path, index].join(":")
 
           return (
           <div
-            key={mod.id}
+            key={modKey}
             onContextMenu={onContextMenu ? (event) => onContextMenu(event, mod) : undefined}
             className={`group rounded-2xl p-4 flex items-center justify-between transition-all ${
               isIncompatible

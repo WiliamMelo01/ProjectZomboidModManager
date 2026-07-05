@@ -39,16 +39,36 @@ pub(crate) fn steam_workshop_dirs() -> Vec<PathBuf> {
     let mut steamapps_dirs = Vec::new();
     let mut candidates = Vec::new();
 
-    if let Some(program_files_x86) = env::var_os("ProgramFiles(x86)") {
-        candidates.push(PathBuf::from(program_files_x86).join("Steam"));
+    #[cfg(windows)]
+    {
+        if let Some(program_files_x86) = env::var_os("ProgramFiles(x86)") {
+            candidates.push(PathBuf::from(program_files_x86).join("Steam"));
+        }
+
+        if let Some(program_files) = env::var_os("ProgramFiles") {
+            candidates.push(PathBuf::from(program_files).join("Steam"));
+        }
+
+        if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
+            candidates.push(PathBuf::from(local_app_data).join("Steam"));
+        }
     }
 
-    if let Some(program_files) = env::var_os("ProgramFiles") {
-        candidates.push(PathBuf::from(program_files).join("Steam"));
-    }
-
-    if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
-        candidates.push(PathBuf::from(local_app_data).join("Steam"));
+    #[cfg(not(windows))]
+    {
+        if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
+            candidates.extend([
+                home.join("Steam"),
+                home.join(".local").join("share").join("Steam"),
+                home.join(".steam").join("steam"),
+                home.join(".steam").join("root"),
+                home.join("snap")
+                    .join("steam")
+                    .join("common")
+                    .join(".steam")
+                    .join("steam"),
+            ]);
+        }
     }
 
     for steam_dir in candidates {
@@ -71,13 +91,42 @@ pub(crate) fn steam_workshop_dirs() -> Vec<PathBuf> {
                 .join("108600")
         })
         .collect::<Vec<_>>();
-    workshop_dirs.extend(steamcmd_workshop_dirs());
 
-    dedupe_paths(workshop_dirs)
+    #[cfg(not(windows))]
+    {
+        workshop_dirs.extend(extra_steam_workshop_dirs_from_env());
+    }
+
+    #[cfg(windows)]
+    {
+        let mut workshop_dirs = workshop_dirs;
+        workshop_dirs.extend(steamcmd_workshop_dirs());
+        return dedupe_paths(workshop_dirs);
+    }
+
+    #[cfg(not(windows))]
+    {
+        dedupe_paths(workshop_dirs)
+    }
 }
 
 pub(crate) fn steamcmd_workshop_dirs() -> Vec<PathBuf> {
     dedupe_paths(managed_steamcmd_pool_workshop_dirs())
+}
+
+#[cfg(not(windows))]
+fn extra_steam_workshop_dirs_from_env() -> Vec<PathBuf> {
+    env::var_os("PZMM_EXTRA_STEAM_WORKSHOP_DIRS")
+        .map(|value| {
+            value
+                .to_string_lossy()
+                .lines()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
@@ -85,7 +134,12 @@ fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
 
     paths
         .into_iter()
-        .filter(|path| seen.insert(path.display().to_string().to_lowercase()))
+        .filter_map(|path| {
+            let resolved_path = fs::canonicalize(&path).unwrap_or(path);
+            let key = resolved_path.display().to_string().to_lowercase();
+
+            seen.insert(key).then_some(resolved_path)
+        })
         .collect()
 }
 

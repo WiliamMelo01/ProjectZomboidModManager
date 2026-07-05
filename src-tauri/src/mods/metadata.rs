@@ -162,7 +162,16 @@ fn find_mod_image_url(content: &str, mod_dir: &Path) -> Option<String> {
 }
 
 fn image_file_to_path(path: &Path) -> Option<String> {
-    path.is_file().then(|| path.display().to_string())
+    if !path.is_file() {
+        return None;
+    }
+
+    Some(
+        fs::canonicalize(path)
+            .unwrap_or_else(|_| path.to_path_buf())
+            .display()
+            .to_string(),
+    )
 }
 
 pub(super) fn variant_ids(mod_item: &ZomboidMod) -> Vec<String> {

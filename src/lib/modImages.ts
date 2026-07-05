@@ -9,5 +9,15 @@ export function getModImageSrc(imageUrl?: string) {
     return imageUrl
   }
 
-  return convertFileSrc(imageUrl)
+  return convertFileSrc(normalizeFileImagePath(imageUrl))
+}
+
+function normalizeFileImagePath(imageUrl: string) {
+  const trimmedUrl = imageUrl.trim()
+  const fileUrlMatch = trimmedUrl.match(/^file:\/\/\/?(.*)$/i)
+  const filePath = fileUrlMatch ? decodeURIComponent(fileUrlMatch[1]) : trimmedUrl
+
+  return filePath
+    .replace(/^\\\\\?\\/, "")
+    .replace(/\\/g, "/")
 }

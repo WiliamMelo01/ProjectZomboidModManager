@@ -1,3 +1,5 @@
+#[cfg(not(windows))]
+use crate::app_config_dir;
 use crate::game::{
     apply_performance_settings, normalize_ram_gb, steam_zomboid_game_dirs,
     validate_game_executable_path,

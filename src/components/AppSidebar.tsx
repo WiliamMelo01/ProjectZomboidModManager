@@ -47,7 +47,7 @@ export function AppSidebar({ activeTab, items, onTabChange, onChangeWorkspace }:
           </span>
           <span className="min-w-0">
             <span className="block text-[9px] font-black uppercase tracking-widest text-gray-500">Workspace</span>
-            <span className="block truncate text-xs font-bold">Trocar local/remoto</span>
+            <span className="block truncate text-xs font-bold">Trocar workspace</span>
           </span>
         </button>
 

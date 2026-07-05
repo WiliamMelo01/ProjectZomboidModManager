@@ -1,9 +1,12 @@
 use crate::i18n::text;
+#[cfg(windows)]
 use crate::util::read_text_lossy;
 use std::{
     env, fs,
     path::{Path, PathBuf},
 };
+
+const SERVER_TEST_ADMIN_PASSWORD: &str = "admin";
 
 pub(crate) fn default_server_launcher_name() -> &'static str {
     if cfg!(windows) {
@@ -50,7 +53,7 @@ pub(crate) fn create_server_test_batch(
             if line.contains("zombie.network.GameServer")
                 && !line.to_lowercase().contains("-adminpassword")
             {
-                line.push_str(" -adminpassword PzmmTestAdmin123!");
+                line.push_str(&format!(" -adminpassword {SERVER_TEST_ADMIN_PASSWORD}"));
             }
 
             line
@@ -108,10 +111,11 @@ pub(crate) fn create_server_test_batch(
 
     let test_script_path = env::temp_dir().join(format!("pzmm-test-{server_id}.sh"));
     let updated_content = format!(
-        "#!/usr/bin/env sh\nset -eu\ncd {}\nexec {} -servername {}\n",
+        "#!/usr/bin/env sh\nset -eu\ncd {}\nexec {} -servername {} -adminpassword {}\n",
         shell_quote(game_dir.display().to_string()),
         shell_quote(launcher_path.display().to_string()),
-        shell_quote(server_id.to_string())
+        shell_quote(server_id.to_string()),
+        shell_quote(SERVER_TEST_ADMIN_PASSWORD.to_string())
     );
 
     fs::write(&test_script_path, updated_content).map_err(|error| {
@@ -153,6 +157,7 @@ pub(crate) fn create_server_test_batch(
     Ok(test_script_path)
 }
 
+#[cfg(windows)]
 fn replace_servername_argument(line: &str, server_id: &str) -> String {
     let lower_line = line.to_lowercase();
     let Some(start) = lower_line.find("-servername") else {

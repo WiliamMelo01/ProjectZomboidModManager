@@ -24,5 +24,5 @@ name = "zomboid_server_mod_manager"
 path = "src/main.rs"
 
 [[bin]]
-name = "pzmm-helper"
+name = "pzmm-helper-linux-x86_64"
 path = "src/helper_main.rs"

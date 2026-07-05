@@ -1,4 +1,4 @@
-import { Activity, ChevronRight, Eye, EyeOff, FolderOpen, Play, Plus, RefreshCw, Server, Settings, Star, Terminal, Trash2, Users, Wifi } from "lucide-react"
+import { Activity, ChevronRight, Eye, EyeOff, FolderOpen, Play, Plus, RefreshCw, Server, Settings, Square, Star, Terminal, Trash2, Users, Wifi } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -19,6 +19,7 @@ type DashboardProps = {
   onTestServer: (server: ZomboidServer) => void
   onStartServer: (server: ZomboidServer) => void
   onOpenRemoteConsole?: (server: ZomboidServer) => void
+  onStopRemoteServer?: (server: ZomboidServer) => void
   onDeployLocalServer?: () => void
 }
 
@@ -40,6 +41,7 @@ export function Dashboard({
   onTestServer,
   onStartServer,
   onOpenRemoteConsole,
+  onStopRemoteServer,
   onDeployLocalServer,
 }: DashboardProps) {
   const { t } = useTranslation()
@@ -238,6 +240,8 @@ export function Dashboard({
             onClick={() => onServerClick(server)}
             onContextMenu={(e) => handleContextMenu(e, server)}
             isFavorite={favoriteServerIds.has(server.id)}
+            onOpenRemoteConsole={isReadOnly ? onOpenRemoteConsole : undefined}
+            onStopRemoteServer={isReadOnly ? onStopRemoteServer : undefined}
           />
         ))}
 
@@ -272,6 +276,8 @@ export function Dashboard({
                 onContextMenu={(e) => handleContextMenu(e, server)}
                 isHidden
                 isFavorite={favoriteServerIds.has(server.id)}
+                onOpenRemoteConsole={isReadOnly ? onOpenRemoteConsole : undefined}
+                onStopRemoteServer={isReadOnly ? onStopRemoteServer : undefined}
               />
             ))}
           </div>
@@ -325,14 +331,29 @@ export function Dashboard({
             <>
               <button
                 onClick={() => {
-                  onOpenRemoteConsole?.(contextMenu.server)
-                  setContextMenu(null)
+                  if (contextMenu.server.status === "online") {
+                    onOpenRemoteConsole?.(contextMenu.server)
+                    setContextMenu(null)
+                  }
                 }}
-                className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-cyan-300 transition-colors hover:bg-cyan-500/10 hover:text-cyan-200"
+                disabled={contextMenu.server.status !== "online"}
+                className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-cyan-300 transition-colors hover:bg-cyan-500/10 hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Terminal size={16} />
-                Console remoto
+                Console
               </button>
+              {contextMenu.server.status === "online" && (
+                <button
+                  onClick={() => {
+                    onStopRemoteServer?.(contextMenu.server)
+                    setContextMenu(null)
+                  }}
+                  className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200"
+                >
+                  <Square size={16} />
+                  Parar servidor
+                </button>
+              )}
               <button
                 onClick={() => {
                   onStartServer(contextMenu.server)
@@ -446,16 +467,21 @@ function ServerCard({
   onClick,
   onContextMenu,
   isHidden,
-  isFavorite
+  isFavorite,
+  onOpenRemoteConsole,
+  onStopRemoteServer,
 }: {
   server: ZomboidServer;
   onClick: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
   isHidden?: boolean
   isFavorite?: boolean
+  onOpenRemoteConsole?: (server: ZomboidServer) => void
+  onStopRemoteServer?: (server: ZomboidServer) => void
 }) {
   const { t } = useTranslation()
   const isOnline = server.status === "online"
+  const hasRemoteActions = Boolean(onOpenRemoteConsole || onStopRemoteServer)
 
   return (
     <div
@@ -521,6 +547,36 @@ function ServerCard({
           <span className="font-medium">{server.modsCount}</span>
         </div>
       </div>
+
+      {hasRemoteActions && (
+        <div className="mt-5 flex flex-wrap gap-2 border-t border-white/5 pt-4">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              if (isOnline) onOpenRemoteConsole?.(server)
+            }}
+            disabled={!isOnline}
+            className="flex items-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs font-black text-cyan-300 transition-colors hover:bg-cyan-500 hover:text-[#071014] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Terminal size={15} />
+            Console
+          </button>
+          {isOnline && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                onStopRemoteServer?.(server)
+              }}
+              className="flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-black text-red-300 transition-colors hover:bg-red-500 hover:text-white"
+            >
+              <Square size={15} />
+              Parar
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

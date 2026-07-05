@@ -39,9 +39,14 @@ export function buildActivationDependencyPlan(
   const dependenciesToActivate: ZomboidMod[] = []
   const installIds = new Set<string>()
   const activateIds = new Set<string>()
+  const currentModId = normalizeModId(mod.id)
   let missingDependencyId: string | null = null
 
   visitModDependencies(mod, modsById, (dependency, dependencyId) => {
+    if (dependencyId === currentModId) {
+      return
+    }
+
     if (!isLocalMod(dependency) && !installIds.has(dependencyId)) {
       dependenciesToInstall.push(dependency)
       installIds.add(dependencyId)

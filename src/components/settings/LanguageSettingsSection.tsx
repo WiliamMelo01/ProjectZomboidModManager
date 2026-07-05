@@ -1,4 +1,4 @@
-import { Languages } from "lucide-react"
+import { ChevronDown, Languages } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import type { LanguagePreference } from "@/types/settings"
@@ -28,13 +28,23 @@ export function LanguageSettingsSection({ preference, onChange }: LanguageSettin
             <p className="text-xs text-gray-500">{t("language.description")}</p>
           </div>
         </div>
-        <select
-          value={preference}
-          onChange={(event) => onChange(event.target.value as LanguagePreference)}
-          className="rounded-xl border border-white/10 bg-[#1e2327] px-4 py-3 text-sm font-bold text-white outline-none transition-colors focus:border-orange-400/50"
-        >
-          {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
+        <div className="relative min-w-48">
+          <select
+            value={preference}
+            onChange={(event) => onChange(event.target.value as LanguagePreference)}
+            className="w-full appearance-none rounded-xl border border-white/10 bg-[#171c20] px-4 py-3 pr-10 text-sm font-bold text-white shadow-inner outline-none transition-colors hover:border-white/20 focus:border-orange-400/60"
+          >
+            {options.map((option) => (
+              <option key={option.value} value={option.value} className="bg-[#171c20] text-white">
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            size={16}
+            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+          />
+        </div>
       </div>
     </section>
   )

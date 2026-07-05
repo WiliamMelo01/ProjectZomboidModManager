@@ -1,5 +1,6 @@
 use crate::i18n::text;
 use crate::models::{PortUsage, ServerPortCheck};
+#[cfg(windows)]
 use crate::util::hide_command_window;
 use crate::util::{read_ini_value, read_text_lossy};
 use crate::zomboid_server_dir;
@@ -220,6 +221,7 @@ fn parse_netstat_port(local_address: &str) -> Option<u16> {
     port.parse::<u16>().ok()
 }
 
+#[cfg(windows)]
 fn process_name_for_pid(pid: u32) -> String {
     #[cfg(windows)]
     {

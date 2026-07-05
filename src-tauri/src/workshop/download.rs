@@ -6,7 +6,7 @@ use crate::models::{
 };
 use crate::mods::{normalize_server_values, steam_workshop_dirs};
 use crate::server_test::{kill_process_tree, spawn_output_reader};
-use crate::settings::read_max_concurrent_downloads;
+use crate::settings::{default_steam_workshop_dir, read_max_concurrent_downloads};
 use crate::util::hide_command_window;
 use crate::{ensure_managed_steamcmd_pool, zomboid_mods_dir};
 use std::{
@@ -469,12 +469,10 @@ fn run_steamcmd_workshop_pass(
     instance_id: usize,
 ) -> Result<WorkshopDownloadPassResult, String> {
     let script_path = create_steamcmd_workshop_script(workshop_ids, force_validate)?;
+    let steamcmd_dir = steamcmd_runtime_dir(steamcmd_path)?;
     let mut command = Command::new(steamcmd_path);
-
-    if let Some(steamcmd_dir) = steamcmd_path.parent() {
-        command.current_dir(steamcmd_dir);
-    }
-    let mut log_tails = steamcmd_log_tails(steamcmd_path);
+    command.current_dir(&steamcmd_dir);
+    let mut log_tails = steamcmd_log_tails(&steamcmd_dir);
 
     emit_steamcmd_log_line(
         app,
@@ -645,10 +643,60 @@ struct SteamCmdLogTail {
     pending_fragment: String,
 }
 
-fn steamcmd_log_tails(steamcmd_path: &Path) -> Vec<SteamCmdLogTail> {
-    let Some(steamcmd_dir) = steamcmd_path.parent() else {
-        return Vec::new();
-    };
+fn steamcmd_runtime_dir(
+    #[cfg_attr(not(windows), allow(unused_variables))] steamcmd_path: &Path,
+) -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    {
+        return steamcmd_path
+            .parent()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| {
+                format!(
+                    "Nao foi possivel resolver a pasta do SteamCMD em {}.",
+                    steamcmd_path.display()
+                )
+            });
+    }
+
+    #[cfg(not(windows))]
+    {
+        let workshop_dir = default_steam_workshop_dir();
+        let runtime_dir = steam_root_from_workshop_dir(&workshop_dir).ok_or_else(|| {
+            format!(
+                "Nao foi possivel resolver a pasta da Steam a partir de {}.",
+                workshop_dir.display()
+            )
+        })?;
+
+        for path in [
+            workshop_dir,
+            runtime_dir.join("downloads"),
+            runtime_dir.join("logs"),
+        ] {
+            fs::create_dir_all(&path).map_err(|error| {
+                format!(
+                    "Nao foi possivel criar a pasta SteamCMD Linux em {}: {error}",
+                    path.display()
+                )
+            })?;
+        }
+
+        Ok(runtime_dir)
+    }
+}
+
+#[cfg(not(windows))]
+fn steam_root_from_workshop_dir(workshop_dir: &Path) -> Option<PathBuf> {
+    workshop_dir
+        .parent()?
+        .parent()?
+        .parent()?
+        .parent()
+        .map(Path::to_path_buf)
+}
+
+fn steamcmd_log_tails(steamcmd_dir: &Path) -> Vec<SteamCmdLogTail> {
     let logs_dir = steamcmd_dir.join("logs");
 
     ["console_log.txt", "content_log.txt"]

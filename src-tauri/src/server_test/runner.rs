@@ -9,6 +9,7 @@ use super::preflight::{resolve_zomboid_game_dir, validate_server_mod_dependencie
 use super::process::{kill_process_tree, spawn_output_reader};
 use crate::i18n::text;
 use crate::models::ServerTestResult;
+#[cfg(windows)]
 use crate::util::hide_command_window;
 use crate::{read_config_value, zomboid_server_dir};
 use std::{

@@ -185,7 +185,7 @@ fn update_launcher_configs(paths: &[PathBuf], ram_mb: u32) -> Result<bool, Strin
         if extension == "json" {
             update_launcher_json(path, ram_mb)?;
             updated_any = true;
-        } else if extension == "bat" {
+        } else if extension == "bat" || extension == "sh" {
             updated_any = update_launcher_batch(path, ram_mb)? || updated_any;
         }
     }

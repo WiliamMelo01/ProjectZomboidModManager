@@ -100,12 +100,22 @@ export function useModsLibrary({
         await invokeTauri<void>(clearCacheCommand, clearCacheArgs)
       }
 
+      const installedModIds = new Set(modsToMove.map((mod) => mod.id.toLowerCase()))
+      const installedMods = modsToInstall.map((mod) => {
+        const installKey = mod.id.toLowerCase()
+        const installResult = installResults.get(installKey)
+
+        if (!installedModIds.has(installKey)) {
+          return mod
+        }
+
+        return markModInstalled(mod, installResult)
+      })
+
       if (reloadAfterInstall) {
         await loadMods()
-        return
+        return installedMods
       }
-
-      const installedModIds = new Set(modsToMove.map((mod) => mod.id.toLowerCase()))
 
       setMods((currentMods) => {
         const updatedMods = currentMods.map((mod) => {
@@ -116,12 +126,7 @@ export function useModsLibrary({
             return mod
           }
 
-          return {
-            ...mod,
-            isInstalled: true,
-            source: mod.source === "steam" || mod.source === "steamcmd" ? "local" : mod.source,
-            path: installResult?.targetPath ?? mod.path,
-          }
+          return markModInstalled(mod, installResult)
         })
 
         void writeModsLibraryCache(updatedMods, cacheKey)
@@ -131,9 +136,24 @@ export function useModsLibrary({
       if (backgroundReloadAfterInstall) {
         void loadMods()
       }
+
+      return installedMods
     } catch (error) {
       setModsError(getErrorMessage(error))
       throw error
+    }
+  }
+
+  function markModInstalled(mod: ZomboidMod, installResult?: ZomboidModInstallResult) {
+    return {
+      ...mod,
+      isInstalled: true,
+      source: mod.source === "steam" || mod.source === "steamcmd" ? "local" : mod.source,
+      path: installResult?.targetPath ?? mod.path,
+      variants: mod.variants.map((variant) => ({
+        ...variant,
+        path: installResult?.targetPath ?? variant.path,
+      })),
     }
   }
 

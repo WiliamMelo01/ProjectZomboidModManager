@@ -1,446 +1,644 @@
-import { listen } from "@tauri-apps/api/event"
-import { CheckCircle2, FileArchive, HardDriveDownload, Loader2, Save, UploadCloud, X } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
-import { useTranslation } from "react-i18next"
+import { listen } from "@tauri-apps/api/event";
+import {
+  CheckCircle2,
+  FileArchive,
+  HardDriveDownload,
+  Loader2,
+  Save,
+  UploadCloud,
+  X,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
-import type { RemoteConnectionDraft, RemoteWorkspaceConfig } from "@/lib/commandRunner"
-import { getErrorMessage } from "@/lib/errors"
-import { invokeTauri } from "@/lib/tauri"
+import type {
+  RemoteConnectionDraft,
+  RemoteWorkspaceConfig,
+} from "@/lib/commandRunner";
+import { getErrorMessage } from "@/lib/errors";
+import { invokeTauri } from "@/lib/tauri";
 
 type RemoteSteamCmdUploadResult = {
-  localPath: string
-  remotePath: string
-  steamcmdExecutablePath: string
-  command: string
-  exitCode: number | null
-  success: boolean
-  stdout: string
-  stderr: string
-}
+  localPath: string;
+  remotePath: string;
+  steamcmdExecutablePath: string;
+  command: string;
+  exitCode: number | null;
+  success: boolean;
+  stdout: string;
+  stderr: string;
+};
 
 type RemoteHelperSetupResult = {
-  localPath: string
-  remotePath: string
-  command: string
-  exitCode: number | null
-  success: boolean
-  stdout: string
-  stderr: string
-}
+  localPath: string;
+  remotePath: string;
+  command: string;
+  exitCode: number | null;
+  success: boolean;
+  stdout: string;
+  stderr: string;
+};
 
 type RemoteZomboidServerInstallResult = {
-  installDirectory: string
-  serverExecutablePath: string
-  command: string
-  exitCode: number | null
-  success: boolean
-  stdout: string
-  stderr: string
-}
+  installDirectory: string;
+  serverExecutablePath: string;
+  command: string;
+  exitCode: number | null;
+  success: boolean;
+  stdout: string;
+  stderr: string;
+};
 
-type RemoteSetupResult = RemoteHelperSetupResult | RemoteSteamCmdUploadResult | RemoteZomboidServerInstallResult
+type RemoteSetupResult =
+  | RemoteHelperSetupResult
+  | RemoteSteamCmdUploadResult
+  | RemoteZomboidServerInstallResult;
 
 type RemoteSteamCmdModalProps = {
-  connection: RemoteConnectionDraft
-  isOpen: boolean
-  onClose: () => void
-}
+  connection: RemoteConnectionDraft;
+  isOpen: boolean;
+  onClose: () => void;
+};
 
 type RemoteSetupLogEvent = {
-  phase: "steamcmd" | "zomboid-server" | string
-  stream: "stdout" | "stderr" | "info" | string
-  line: string
-}
+  phase: "steamcmd" | "zomboid-server" | string;
+  stream: "stdout" | "stderr" | "info" | string;
+  line: string;
+};
 
-type StepStatus = "idle" | "running" | "success" | "error"
-type ZomboidSetupMode = "existing" | "download"
-type ZomboidServerBranch = "default" | "unstable"
+type StepStatus = "idle" | "running" | "success" | "error";
+type ZomboidSetupMode = "existing" | "download";
+type ZomboidServerBranch = "default" | "unstable";
 
 function remoteAppDataBase(_username: string) {
-  return "/var/lib/pzmm"
+  return "/var/lib/pzmm";
 }
 
 function remoteSteamcmdDir(username: string) {
-  return `${remoteAppDataBase(username)}/steamcmd`
+  return `${remoteAppDataBase(username)}/steamcmd`;
+}
+
+function remoteSteamcmdPath(directory: string) {
+  return joinRemotePath(directory || "/var/lib/pzmm/steamcmd", "steamcmd.sh");
 }
 
 function remoteHelperDir(username: string) {
-  return "/opt/pzmm"
+  return "/opt/pzmm";
 }
 
 function remoteZomboidServerDir(username: string) {
-  return `${remoteAppDataBase(username)}/zomboid-server`
+  return `${remoteAppDataBase(username)}/zomboid-server`;
 }
 
 function joinRemotePath(directory: string, fileName: string) {
-  return `${directory.replace(/[\\/]+$/, "")}/${fileName}`
+  return `${directory.replace(/[\\/]+$/, "")}/${fileName}`;
 }
 
 function parentRemotePath(path: string) {
-  const normalized = path.replace(/\\/g, "/")
-  const index = normalized.lastIndexOf("/")
-  return index > 0 ? normalized.slice(0, index) : normalized
+  const normalized = path.replace(/\\/g, "/");
+  const index = normalized.lastIndexOf("/");
+  return index > 0 ? normalized.slice(0, index) : normalized;
 }
 
 function isWindowsPath(path?: string) {
-  const value = path?.trim() ?? ""
-  return /^[a-zA-Z]:[\\/]/.test(value) || value.includes("\\")
+  const value = path?.trim() ?? "";
+  return /^[a-zA-Z]:[\\/]/.test(value) || value.includes("\\");
 }
 
 function isAbsoluteLinuxPath(path?: string) {
-  const value = path?.trim() ?? ""
-  return value.startsWith("/") && !isWindowsPath(value)
+  const value = path?.trim() ?? "";
+  return value.startsWith("/") && !isWindowsPath(value);
 }
 
 function isLegacyPzManagerPath(path?: string) {
-  return Boolean(path?.trim().replace(/\//g, "\\").toLowerCase().startsWith("c:\\pzmanager\\"))
+  return Boolean(
+    path
+      ?.trim()
+      .replace(/\//g, "\\")
+      .toLowerCase()
+      .startsWith("c:\\pzmanager\\"),
+  );
 }
 
 function cleanRemoteLinuxPath(path?: string) {
-  const value = path?.trim() ?? ""
-  return value && !isLegacyPzManagerPath(value) && isAbsoluteLinuxPath(value) ? value : ""
+  const value = path?.trim() ?? "";
+  return value && !isLegacyPzManagerPath(value) && isAbsoluteLinuxPath(value)
+    ? value
+    : "";
 }
-export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteamCmdModalProps) {
-  const { t } = useTranslation()
-  const defaultSteamcmdDir = useMemo(() => remoteSteamcmdDir(connection.username), [connection.username])
-  const defaultHelperDir = useMemo(() => remoteHelperDir(connection.username), [connection.username])
-  const defaultZomboidServerDir = useMemo(() => remoteZomboidServerDir(connection.username), [connection.username])
-  const [config, setConfig] = useState<RemoteWorkspaceConfig | null>(null)
-  const [activeStep, setActiveStep] = useState(1)
-  const [zomboidMode, setZomboidMode] = useState<ZomboidSetupMode>("existing")
-  const [zomboidBranch, setZomboidBranch] = useState<ZomboidServerBranch>("default")
-  const [steamcmdDir, setSteamcmdDir] = useState(defaultSteamcmdDir)
-  const [steamcmdPath, setSteamcmdPath] = useState("")
-  const [zomboidServerDir, setZomboidServerDir] = useState(defaultZomboidServerDir)
-  const [zomboidServerPath, setZomboidServerPath] = useState("")
-  const [steamcmdStatus, setSteamcmdStatus] = useState<StepStatus>("idle")
-  const [helperStatus, setHelperStatus] = useState<StepStatus>("idle")
-  const [zomboidStatus, setZomboidStatus] = useState<StepStatus>("idle")
-  const [uploadResult, setUploadResult] = useState<RemoteSteamCmdUploadResult | null>(null)
-  const [helperResult, setHelperResult] = useState<RemoteHelperSetupResult | null>(null)
-  const [installResult, setInstallResult] = useState<RemoteZomboidServerInstallResult | null>(null)
-  const [liveLogLines, setLiveLogLines] = useState<RemoteSetupLogEvent[]>([])
-  const [helperStartedAt, setHelperStartedAt] = useState<number | null>(null)
-  const [steamcmdStartedAt, setSteamcmdStartedAt] = useState<number | null>(null)
-  const [zomboidStartedAt, setZomboidStartedAt] = useState<number | null>(null)
-  const [helperElapsedSeconds, setHelperElapsedSeconds] = useState(0)
-  const [steamcmdElapsedSeconds, setSteamcmdElapsedSeconds] = useState(0)
-  const [zomboidElapsedSeconds, setZomboidElapsedSeconds] = useState(0)
-  const [error, setError] = useState<string | null>(null)
-  const isRunning = helperStatus === "running" || steamcmdStatus === "running" || zomboidStatus === "running"
-  const resolvedSteamcmdPath = steamcmdPath || "/usr/games/steamcmd"
-  const resolvedZomboidServerPath = zomboidServerPath || joinRemotePath(zomboidServerDir, "start-server.sh")
-  const selectedZomboidBranchCommand = zomboidBranch === "unstable"
-    ? "app_update 380870 -beta unstable validate"
-    : "app_update 380870 validate"
-  const isSteamcmdDirValid = isAbsoluteLinuxPath(steamcmdDir)
-  const isZomboidServerDirValid = isAbsoluteLinuxPath(zomboidServerDir)
-  const isZomboidServerPathValid = isAbsoluteLinuxPath(resolvedZomboidServerPath)
+function getRemoteSetupCompletedStep(config?: RemoteWorkspaceConfig | null) {
+  let completedStep = Math.min(
+    Math.max(config?.remoteSetupCompletedStep ?? 0, 0),
+    4,
+  );
+
+  if (cleanRemoteLinuxPath(config?.remoteSteamcmdPath)) {
+    completedStep = Math.max(completedStep, 2);
+  }
+
+  if (cleanRemoteLinuxPath(config?.remoteZomboidServerPath)) {
+    completedStep = Math.max(completedStep, 4);
+  }
+
+  return completedStep;
+}
+
+function getRemoteSetupStartStep(config?: RemoteWorkspaceConfig | null) {
+  const completedStep = getRemoteSetupCompletedStep(config);
+  return completedStep >= 4 ? 4 : completedStep + 1;
+}
+
+export function RemoteSteamCmdModal({
+  connection,
+  isOpen,
+  onClose,
+}: RemoteSteamCmdModalProps) {
+  const { t } = useTranslation();
+  const defaultSteamcmdDir = useMemo(
+    () => remoteSteamcmdDir(connection.username),
+    [connection.username],
+  );
+  const defaultHelperDir = useMemo(
+    () => remoteHelperDir(connection.username),
+    [connection.username],
+  );
+  const defaultZomboidServerDir = useMemo(
+    () => remoteZomboidServerDir(connection.username),
+    [connection.username],
+  );
+  const [config, setConfig] = useState<RemoteWorkspaceConfig | null>(null);
+  const [activeStep, setActiveStep] = useState(1);
+  const [zomboidMode, setZomboidMode] = useState<ZomboidSetupMode>("existing");
+  const [zomboidBranch, setZomboidBranch] =
+    useState<ZomboidServerBranch>("default");
+  const [steamcmdDir, setSteamcmdDir] = useState(defaultSteamcmdDir);
+  const [steamcmdPath, setSteamcmdPath] = useState("");
+  const [zomboidServerDir, setZomboidServerDir] = useState(
+    defaultZomboidServerDir,
+  );
+  const [zomboidServerPath, setZomboidServerPath] = useState("");
+  const [steamcmdStatus, setSteamcmdStatus] = useState<StepStatus>("idle");
+  const [helperStatus, setHelperStatus] = useState<StepStatus>("idle");
+  const [zomboidStatus, setZomboidStatus] = useState<StepStatus>("idle");
+  const [uploadResult, setUploadResult] =
+    useState<RemoteSteamCmdUploadResult | null>(null);
+  const [helperResult, setHelperResult] =
+    useState<RemoteHelperSetupResult | null>(null);
+  const [installResult, setInstallResult] =
+    useState<RemoteZomboidServerInstallResult | null>(null);
+  const [liveLogLines, setLiveLogLines] = useState<RemoteSetupLogEvent[]>([]);
+  const [helperStartedAt, setHelperStartedAt] = useState<number | null>(null);
+  const [steamcmdStartedAt, setSteamcmdStartedAt] = useState<number | null>(
+    null,
+  );
+  const [zomboidStartedAt, setZomboidStartedAt] = useState<number | null>(null);
+  const [helperElapsedSeconds, setHelperElapsedSeconds] = useState(0);
+  const [steamcmdElapsedSeconds, setSteamcmdElapsedSeconds] = useState(0);
+  const [zomboidElapsedSeconds, setZomboidElapsedSeconds] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const isRunning =
+    helperStatus === "running" ||
+    steamcmdStatus === "running" ||
+    zomboidStatus === "running";
+  const managedSteamcmdDir = defaultSteamcmdDir;
+  const resolvedSteamcmdPath =
+    steamcmdPath || remoteSteamcmdPath(managedSteamcmdDir);
+  const resolvedZomboidServerPath =
+    zomboidServerPath || joinRemotePath(zomboidServerDir, "start-server.sh");
+  const derivedZomboidServerDir =
+    cleanRemoteLinuxPath(parentRemotePath(resolvedZomboidServerPath)) ||
+    defaultZomboidServerDir;
+  const selectedZomboidBranchCommand =
+    zomboidBranch === "unstable"
+      ? "app_update 380870 -beta unstable validate"
+      : "app_update 380870 validate";
+  const isSteamcmdDirValid = isAbsoluteLinuxPath(managedSteamcmdDir);
+  const isZomboidServerDirValid = isAbsoluteLinuxPath(derivedZomboidServerDir);
+  const isZomboidServerPathValid = isAbsoluteLinuxPath(
+    resolvedZomboidServerPath,
+  );
   const canSetupHelper =
     connection.authMethod === "key" &&
     connection.sshKeyPath.trim().length > 0 &&
-    !isRunning
-  const canInstallSteamcmd =
+    !isRunning;
+  const canVerifyExistingSteamcmd =
     helperStatus === "success" &&
     connection.authMethod === "key" &&
     connection.sshKeyPath.trim().length > 0 &&
-    steamcmdDir.trim().length > 0 &&
-    isSteamcmdDirValid &&
-    !isRunning
+    !isRunning;
+  const canInstallSteamcmd = canVerifyExistingSteamcmd && isSteamcmdDirValid;
   const canSaveExistingZomboid =
     zomboidMode === "existing" &&
-    zomboidServerDir.trim().length > 0 &&
+    derivedZomboidServerDir.trim().length > 0 &&
     resolvedZomboidServerPath.trim().length > 0 &&
     isZomboidServerDirValid &&
     isZomboidServerPathValid &&
-    !isRunning
+    !isRunning;
   const canDownloadZomboid =
     steamcmdStatus === "success" &&
     zomboidModeRequiresSteamcmd(zomboidMode) &&
     resolvedSteamcmdPath.trim().length > 0 &&
-    zomboidServerDir.trim().length > 0 &&
+    derivedZomboidServerDir.trim().length > 0 &&
     isZomboidServerDirValid &&
-    !isRunning
+    !isRunning;
 
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) return;
 
-    let isMounted = true
+    let isMounted = true;
 
-    setError(null)
-    setHelperStatus("idle")
-    setHelperResult(null)
-    setHelperStartedAt(null)
-    setHelperElapsedSeconds(0)
-    setLiveLogLines([])
-    void invokeTauri<RemoteWorkspaceConfig | null>("get_remote_workspace_config")
+    setError(null);
+    setHelperStatus("idle");
+    setHelperResult(null);
+    setHelperStartedAt(null);
+    setHelperElapsedSeconds(0);
+    setLiveLogLines([]);
+    void invokeTauri<RemoteWorkspaceConfig | null>(
+      "get_remote_workspace_config",
+      { connection },
+    )
       .then((loadedConfig) => {
-        if (!isMounted) return
+        if (!isMounted) return;
 
-        const nextConfig = loadedConfig ?? null
-        const loadedSteamcmdDir = cleanRemoteLinuxPath(nextConfig?.remoteSteamcmdDir) || defaultSteamcmdDir
-        const loadedSteamcmdPath = cleanRemoteLinuxPath(nextConfig?.remoteSteamcmdPath)
-        const loadedZomboidServerDir = cleanRemoteLinuxPath(nextConfig?.remoteZomboidServerDir) || defaultZomboidServerDir
-        const loadedZomboidServerPath = cleanRemoteLinuxPath(nextConfig?.remoteZomboidServerPath)
+        const nextConfig = loadedConfig ?? null;
+        const loadedSteamcmdDir =
+          cleanRemoteLinuxPath(nextConfig?.remoteSteamcmdDir) ||
+          defaultSteamcmdDir;
+        const loadedSteamcmdPath = cleanRemoteLinuxPath(
+          nextConfig?.remoteSteamcmdPath,
+        );
+        const loadedZomboidServerDir =
+          cleanRemoteLinuxPath(nextConfig?.remoteZomboidServerDir) ||
+          defaultZomboidServerDir;
+        const loadedZomboidServerPath = cleanRemoteLinuxPath(
+          nextConfig?.remoteZomboidServerPath,
+        );
 
-        setConfig(nextConfig)
-        setSteamcmdDir(loadedSteamcmdDir)
-        setSteamcmdPath(loadedSteamcmdPath)
-        setZomboidServerDir(loadedZomboidServerDir)
-        setZomboidServerPath(loadedZomboidServerPath)
-        setSteamcmdStatus(loadedSteamcmdPath ? "success" : "idle")
-        setZomboidStatus(loadedZomboidServerPath ? "success" : "idle")
-        setActiveStep(1)
+        const completedStep = getRemoteSetupCompletedStep(nextConfig);
+
+        setConfig(nextConfig);
+        setSteamcmdDir(loadedSteamcmdDir);
+        setSteamcmdPath(loadedSteamcmdPath);
+        setZomboidServerDir(loadedZomboidServerDir);
+        setZomboidServerPath(loadedZomboidServerPath);
+        setHelperStatus(completedStep >= 1 ? "success" : "idle");
+        setSteamcmdStatus(
+          completedStep >= 2 || loadedSteamcmdPath ? "success" : "idle",
+        );
+        setZomboidStatus(
+          completedStep >= 4 || loadedZomboidServerPath ? "success" : "idle",
+        );
+        setActiveStep(getRemoteSetupStartStep(nextConfig));
       })
       .catch((configError) => {
-        if (!isMounted) return
-        setError(getErrorMessage(configError))
-      })
+        if (!isMounted) return;
+        setError(getErrorMessage(configError));
+      });
 
     return () => {
-      isMounted = false
-    }
-  }, [defaultSteamcmdDir, defaultZomboidServerDir, isOpen])
+      isMounted = false;
+    };
+  }, [defaultSteamcmdDir, defaultZomboidServerDir, isOpen]);
 
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) return;
 
-    let unlisten: (() => void) | null = null
+    let unlisten: (() => void) | null = null;
 
     void listen<RemoteSetupLogEvent>("remote-setup-log", ({ payload }) => {
-      setLiveLogLines((currentLines) => [...currentLines, payload].slice(-300))
+      setLiveLogLines((currentLines) => [...currentLines, payload].slice(-300));
     }).then((unsubscribe) => {
-      unlisten = unsubscribe
-    })
+      unlisten = unsubscribe;
+    });
 
     return () => {
-      unlisten?.()
-    }
-  }, [isOpen])
+      unlisten?.();
+    };
+  }, [isOpen]);
 
   useEffect(() => {
-    if (helperStatus !== "running" || helperStartedAt === null) return
+    if (helperStatus !== "running" || helperStartedAt === null) return;
 
     const interval = window.setInterval(() => {
-      setHelperElapsedSeconds(Math.max(0, Math.floor((Date.now() - helperStartedAt) / 1000)))
-    }, 1000)
+      setHelperElapsedSeconds(
+        Math.max(0, Math.floor((Date.now() - helperStartedAt) / 1000)),
+      );
+    }, 1000);
 
-    return () => window.clearInterval(interval)
-  }, [helperStartedAt, helperStatus])
+    return () => window.clearInterval(interval);
+  }, [helperStartedAt, helperStatus]);
 
   useEffect(() => {
-    if (steamcmdStatus !== "running" || steamcmdStartedAt === null) return
+    if (steamcmdStatus !== "running" || steamcmdStartedAt === null) return;
 
     const interval = window.setInterval(() => {
-      setSteamcmdElapsedSeconds(Math.max(0, Math.floor((Date.now() - steamcmdStartedAt) / 1000)))
-    }, 1000)
+      setSteamcmdElapsedSeconds(
+        Math.max(0, Math.floor((Date.now() - steamcmdStartedAt) / 1000)),
+      );
+    }, 1000);
 
-    return () => window.clearInterval(interval)
-  }, [steamcmdStartedAt, steamcmdStatus])
+    return () => window.clearInterval(interval);
+  }, [steamcmdStartedAt, steamcmdStatus]);
 
   useEffect(() => {
-    if (zomboidStatus !== "running" || zomboidStartedAt === null) return
+    if (zomboidStatus !== "running" || zomboidStartedAt === null) return;
 
     const interval = window.setInterval(() => {
-      setZomboidElapsedSeconds(Math.max(0, Math.floor((Date.now() - zomboidStartedAt) / 1000)))
-    }, 1000)
+      setZomboidElapsedSeconds(
+        Math.max(0, Math.floor((Date.now() - zomboidStartedAt) / 1000)),
+      );
+    }, 1000);
 
-    return () => window.clearInterval(interval)
-  }, [zomboidStartedAt, zomboidStatus])
+    return () => window.clearInterval(interval);
+  }, [zomboidStartedAt, zomboidStatus]);
 
-  if (!isOpen) return null
+  if (!isOpen) return null;
 
   async function setupHelperStep() {
-    if (!canSetupHelper) return
+    if (!canSetupHelper) return;
 
-    const startedAt = Date.now()
-    setHelperStatus("running")
-    setHelperStartedAt(startedAt)
-    setHelperElapsedSeconds(0)
-    setError(null)
-    setHelperResult(null)
-    setLiveLogLines((currentLines) => currentLines.filter((line) => line.phase !== "helper"))
+    const startedAt = Date.now();
+    setHelperStatus("running");
+    setHelperStartedAt(startedAt);
+    setHelperElapsedSeconds(0);
+    setError(null);
+    setHelperResult(null);
+    setLiveLogLines((currentLines) =>
+      currentLines.filter((line) => line.phase !== "helper"),
+    );
 
     try {
-      const result = await invokeTauri<RemoteHelperSetupResult>("setup_remote_helper", {
-        connection,
-      })
+      const result = await invokeTauri<RemoteHelperSetupResult>(
+        "setup_remote_helper",
+        {
+          connection,
+        },
+      );
 
-      setHelperResult(result)
-      setHelperStatus(result.success ? "success" : "error")
-      finishHelperTimer(startedAt)
+      setHelperResult(result);
+      setHelperStatus(result.success ? "success" : "error");
+      finishHelperTimer(startedAt);
 
       if (result.success) {
-        setActiveStep(steamcmdStatus === "success" ? (zomboidStatus === "success" ? 4 : 3) : 2)
+        try {
+          const nextConfig = await refreshConfig();
+          setActiveStep(getRemoteSetupStartStep(nextConfig));
+        } catch (refreshError) {
+          setError(
+            `Helper was configured, but the saved config could not be refreshed: ${getErrorMessage(refreshError)}`,
+          );
+          setActiveStep(
+            steamcmdStatus === "success"
+              ? zomboidStatus === "success"
+                ? 4
+                : 3
+              : 2,
+          );
+        }
       } else {
-        setError(formatSetupFailure(result, "Remote setup upload failed."))
+        setError(formatSetupFailure(result, "Server setup upload failed."));
       }
     } catch (setupError) {
-      setHelperStatus("error")
-      finishHelperTimer(startedAt)
-      setError(getErrorMessage(setupError))
+      setHelperStatus("error");
+      finishHelperTimer(startedAt);
+      setError(getErrorMessage(setupError));
+    }
+  }
+
+  async function verifyExistingSteamcmdStep() {
+    if (!canVerifyExistingSteamcmd) return;
+
+    const startedAt = Date.now();
+    setSteamcmdStatus("running");
+    setSteamcmdStartedAt(startedAt);
+    setSteamcmdElapsedSeconds(0);
+    setError(null);
+    setUploadResult(null);
+    setLiveLogLines((currentLines) =>
+      currentLines.filter((line) => line.phase !== "steamcmd"),
+    );
+
+    try {
+      const result = await invokeTauri<RemoteSteamCmdUploadResult>(
+        "verify_remote_steamcmd_available",
+        { connection },
+      );
+
+      setUploadResult(result);
+      setSteamcmdStatus(result.success ? "success" : "error");
+      finishSteamcmdTimer(startedAt);
+
+      if (result.success) {
+        setSteamcmdPath(result.steamcmdExecutablePath);
+        try {
+          await refreshConfig();
+        } catch (refreshError) {
+          setError(
+            `SteamCMD was found, but the saved config could not be refreshed: ${getErrorMessage(refreshError)}`,
+          );
+        }
+        setActiveStep(3);
+      } else {
+        setError(
+          formatSetupFailure(result, t("remoteSetup.step2ExistingNotFound")),
+        );
+      }
+    } catch (verifyError) {
+      setSteamcmdStatus("error");
+      finishSteamcmdTimer(startedAt);
+      setError(getErrorMessage(verifyError));
     }
   }
 
   async function installSteamcmdStep() {
-    if (!canInstallSteamcmd) return
+    if (!canInstallSteamcmd) return;
 
-    const startedAt = Date.now()
-    setSteamcmdStatus("running")
-    setSteamcmdStartedAt(startedAt)
-    setSteamcmdElapsedSeconds(0)
-    setError(null)
-    setUploadResult(null)
-    setLiveLogLines((currentLines) => currentLines.filter((line) => line.phase !== "steamcmd"))
+    const startedAt = Date.now();
+    setSteamcmdStatus("running");
+    setSteamcmdStartedAt(startedAt);
+    setSteamcmdElapsedSeconds(0);
+    setError(null);
+    setUploadResult(null);
+    setLiveLogLines((currentLines) =>
+      currentLines.filter((line) => line.phase !== "steamcmd"),
+    );
 
     try {
-      const result = await invokeTauri<RemoteSteamCmdUploadResult>("upload_steamcmd_to_remote", {
-        request: {
-          connection,
-          remoteDirectory: steamcmdDir,
+      const result = await invokeTauri<RemoteSteamCmdUploadResult>(
+        "upload_steamcmd_to_remote",
+        {
+          request: {
+            connection,
+            remoteDirectory: managedSteamcmdDir,
+          },
         },
-      })
+      );
 
-      setUploadResult(result)
-      setSteamcmdStatus(result.success ? "success" : "error")
-      finishSteamcmdTimer(startedAt)
+      setUploadResult(result);
+      setSteamcmdStatus(result.success ? "success" : "error");
+      finishSteamcmdTimer(startedAt);
 
       if (result.success) {
-        setSteamcmdPath(result.steamcmdExecutablePath)
+        setSteamcmdPath(result.steamcmdExecutablePath);
         try {
-          await refreshConfig()
+          await refreshConfig();
         } catch (refreshError) {
-          setError(`SteamCMD was configured, but the saved config could not be refreshed: ${getErrorMessage(refreshError)}`)
+          setError(
+            `SteamCMD was configured, but the saved config could not be refreshed: ${getErrorMessage(refreshError)}`,
+          );
         }
-        setActiveStep(3)
+        setActiveStep(3);
       }
     } catch (uploadError) {
-      setSteamcmdStatus("error")
-      finishSteamcmdTimer(startedAt)
-      setError(getErrorMessage(uploadError))
+      setSteamcmdStatus("error");
+      finishSteamcmdTimer(startedAt);
+      setError(getErrorMessage(uploadError));
     }
   }
 
   async function saveExistingZomboidStep() {
-    if (!canSaveExistingZomboid) return
+    if (!canSaveExistingZomboid) return;
 
-    const startedAt = Date.now()
-    setZomboidStatus("running")
-    setZomboidStartedAt(startedAt)
-    setZomboidElapsedSeconds(0)
-    setError(null)
+    const startedAt = Date.now();
+    setZomboidStatus("running");
+    setZomboidStartedAt(startedAt);
+    setZomboidElapsedSeconds(0);
+    setError(null);
 
     try {
-      const savedConfig = await invokeTauri<RemoteWorkspaceConfig>("save_remote_zomboid_server_path", {
-        request: {
-          connection,
-          serverDirectory: zomboidServerDir,
-          serverLaunchPath: resolvedZomboidServerPath,
+      const savedConfig = await invokeTauri<RemoteWorkspaceConfig>(
+        "save_remote_zomboid_server_path",
+        {
+          request: {
+            connection,
+            serverDirectory: derivedZomboidServerDir,
+            serverLaunchPath: resolvedZomboidServerPath,
+          },
         },
-      })
-      setConfig(savedConfig)
-      setZomboidServerDir(savedConfig.remoteZomboidServerDir)
-      setZomboidServerPath(savedConfig.remoteZomboidServerPath)
-      setZomboidStatus("success")
-      finishZomboidTimer(startedAt)
-      setActiveStep(4)
+      );
+      setConfig(savedConfig);
+      setZomboidServerDir(savedConfig.remoteZomboidServerDir);
+      setZomboidServerPath(savedConfig.remoteZomboidServerPath);
+      setZomboidStatus("success");
+      finishZomboidTimer(startedAt);
+      setActiveStep(4);
     } catch (saveError) {
-      setZomboidStatus("error")
-      finishZomboidTimer(startedAt)
-      setError(getErrorMessage(saveError))
+      setZomboidStatus("error");
+      finishZomboidTimer(startedAt);
+      setError(getErrorMessage(saveError));
     }
   }
 
   async function downloadZomboidStep() {
-    if (!canDownloadZomboid) return
+    if (!canDownloadZomboid) return;
 
-    const startedAt = Date.now()
-    setZomboidStatus("running")
-    setZomboidStartedAt(startedAt)
-    setZomboidElapsedSeconds(0)
-    setError(null)
-    setInstallResult(null)
-    setLiveLogLines((currentLines) => currentLines.filter((line) => line.phase !== "zomboid-server"))
+    const startedAt = Date.now();
+    setZomboidStatus("running");
+    setZomboidStartedAt(startedAt);
+    setZomboidElapsedSeconds(0);
+    setError(null);
+    setInstallResult(null);
+    setLiveLogLines((currentLines) =>
+      currentLines.filter((line) => line.phase !== "zomboid-server"),
+    );
 
     try {
-      const result = await invokeTauri<RemoteZomboidServerInstallResult>("install_zomboid_server_on_remote", {
-        request: {
-          connection,
-          steamcmdPath: resolvedSteamcmdPath,
-          installDirectory: zomboidServerDir,
-          branch: zomboidBranch,
+      const result = await invokeTauri<RemoteZomboidServerInstallResult>(
+        "install_zomboid_server_on_remote",
+        {
+          request: {
+            connection,
+            steamcmdPath: resolvedSteamcmdPath,
+            installDirectory: derivedZomboidServerDir,
+            branch: zomboidBranch,
+          },
         },
-      })
+      );
 
-      setInstallResult(result)
-      setZomboidStatus(result.success ? "success" : "error")
-      finishZomboidTimer(startedAt)
+      setInstallResult(result);
+      setZomboidStatus(result.success ? "success" : "error");
+      finishZomboidTimer(startedAt);
 
       if (result.success) {
-        setZomboidServerPath(result.serverExecutablePath)
+        setZomboidServerPath(result.serverExecutablePath);
         try {
-          await refreshConfig()
+          await refreshConfig();
         } catch (refreshError) {
-          setError(`Server path was saved, but the saved config could not be refreshed: ${getErrorMessage(refreshError)}`)
+          setError(
+            `Server path was saved, but the saved config could not be refreshed: ${getErrorMessage(refreshError)}`,
+          );
         }
-        setActiveStep(4)
+        setActiveStep(4);
       }
     } catch (installError) {
-      setZomboidStatus("error")
-      finishZomboidTimer(startedAt)
-      setError(getErrorMessage(installError))
+      setZomboidStatus("error");
+      finishZomboidTimer(startedAt);
+      setError(getErrorMessage(installError));
     }
   }
 
   function finishHelperTimer(startedAt: number | null = helperStartedAt) {
     setHelperElapsedSeconds((currentSeconds) =>
-      startedAt === null ? currentSeconds : Math.max(currentSeconds, Math.floor((Date.now() - startedAt) / 1000)),
-    )
+      startedAt === null
+        ? currentSeconds
+        : Math.max(currentSeconds, Math.floor((Date.now() - startedAt) / 1000)),
+    );
   }
 
   function finishSteamcmdTimer(startedAt: number | null = steamcmdStartedAt) {
     setSteamcmdElapsedSeconds((currentSeconds) =>
-      startedAt === null ? currentSeconds : Math.max(currentSeconds, Math.floor((Date.now() - startedAt) / 1000)),
-    )
+      startedAt === null
+        ? currentSeconds
+        : Math.max(currentSeconds, Math.floor((Date.now() - startedAt) / 1000)),
+    );
   }
 
   function finishZomboidTimer(startedAt: number | null = zomboidStartedAt) {
     setZomboidElapsedSeconds((currentSeconds) =>
-      startedAt === null ? currentSeconds : Math.max(currentSeconds, Math.floor((Date.now() - startedAt) / 1000)),
-    )
+      startedAt === null
+        ? currentSeconds
+        : Math.max(currentSeconds, Math.floor((Date.now() - startedAt) / 1000)),
+    );
   }
 
   async function saveRemoteConfig(values: Partial<RemoteWorkspaceConfig>) {
     const baseConfig = config ?? {
       ...connection,
-      remoteSteamcmdDir: steamcmdDir,
+      remoteSteamcmdDir: managedSteamcmdDir,
       remoteSteamcmdPath: resolvedSteamcmdPath,
-      remoteZomboidServerDir: zomboidServerDir,
+      remoteZomboidServerDir: derivedZomboidServerDir,
       remoteZomboidServerPath: resolvedZomboidServerPath,
       remoteClientRam: "4.00",
       remoteServerRam: "4.00",
+      remoteSetupCompletedStep: 0,
       remoteModLocations: [],
-    }
-    const savedConfig = await invokeTauri<RemoteWorkspaceConfig>("save_remote_workspace_config", {
-      config: {
-        ...baseConfig,
-        ...connection,
-        remoteSteamcmdDir: steamcmdDir,
-        remoteSteamcmdPath: resolvedSteamcmdPath,
-        remoteZomboidServerDir: zomboidServerDir,
-        remoteZomboidServerPath: resolvedZomboidServerPath,
-        ...values,
+    };
+    const savedConfig = await invokeTauri<RemoteWorkspaceConfig>(
+      "save_remote_workspace_config",
+      {
+        config: {
+          ...baseConfig,
+          ...connection,
+          remoteSteamcmdDir: managedSteamcmdDir,
+          remoteSteamcmdPath: resolvedSteamcmdPath,
+          remoteZomboidServerDir: derivedZomboidServerDir,
+          remoteZomboidServerPath: resolvedZomboidServerPath,
+          ...values,
+        },
       },
-    })
+    );
 
-    setConfig(savedConfig)
-    return savedConfig
+    setConfig(savedConfig);
+    return savedConfig;
   }
 
   async function refreshConfig() {
-    const nextConfig = await invokeTauri<RemoteWorkspaceConfig | null>("get_remote_workspace_config")
-    setConfig(nextConfig)
-    return nextConfig
+    const nextConfig = await invokeTauri<RemoteWorkspaceConfig | null>(
+      "get_remote_workspace_config",
+      { connection },
+    );
+    setConfig(nextConfig);
+    return nextConfig;
   }
 
   return (
@@ -452,8 +650,12 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
               <FileArchive size={22} />
             </div>
             <div>
-              <h2 className="text-lg font-black text-white">{t("remoteSetup.modalTitle")}</h2>
-              <p className="text-xs text-gray-500">{connection.username}@{connection.host}</p>
+              <h2 className="text-lg font-black text-white">
+                {t("remoteSetup.modalTitle")}
+              </h2>
+              <p className="text-xs text-gray-500">
+                {connection.username}@{connection.host}
+              </p>
             </div>
           </div>
           <button
@@ -499,7 +701,13 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                 index={4}
                 title={t("remoteSetup.step4Title")}
                 description={t("remoteSetup.step4Description")}
-                status={helperStatus === "success" && steamcmdStatus === "success" && zomboidStatus === "success" ? "success" : "idle"}
+                status={
+                  helperStatus === "success" &&
+                  steamcmdStatus === "success" &&
+                  zomboidStatus === "success"
+                    ? "success"
+                    : "idle"
+                }
                 active={activeStep === 4}
                 onClick={() => setActiveStep(4)}
                 disabled={isRunning}
@@ -517,7 +725,9 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
             {activeStep === 1 && (
               <section className="space-y-5">
                 <div>
-                  <h3 className="text-xl font-black text-white">{t("remoteSetup.step1Header")}</h3>
+                  <h3 className="text-xl font-black text-white">
+                    {t("remoteSetup.step1Header")}
+                  </h3>
                   <p className="mt-1 text-sm text-gray-400">
                     {t("remoteSetup.step1Subheader")}
                   </p>
@@ -525,8 +735,12 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
 
                 <div className="grid gap-4">
                   <RemotePathInput
-                    label="Remote setup folder"
-                    value={helperResult?.remotePath ? parentRemotePath(helperResult.remotePath) : defaultHelperDir}
+                    label="Server setup folder"
+                    value={
+                      helperResult?.remotePath
+                        ? parentRemotePath(helperResult.remotePath)
+                        : defaultHelperDir
+                    }
                     placeholder={defaultHelperDir}
                     disabled
                     onChange={() => undefined}
@@ -534,10 +748,12 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                 </div>
 
                 <ResultPanel
-                  title="Remote setup upload"
+                  title="Server setup upload"
                   status={helperStatus}
                   result={helperResult}
-                  liveLines={liveLogLines.filter((line) => line.phase === "helper")}
+                  liveLines={liveLogLines.filter(
+                    (line) => line.phase === "helper",
+                  )}
                   elapsedSeconds={helperElapsedSeconds}
                 />
 
@@ -548,7 +764,11 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                     onClick={() => void setupHelperStep()}
                     className="flex items-center justify-center gap-2 rounded-[8px] bg-cyan-500 px-5 py-2 text-sm font-black text-white transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-500"
                   >
-                    {helperStatus === "running" ? <Loader2 size={17} className="animate-spin" /> : <UploadCloud size={17} />}
+                    {helperStatus === "running" ? (
+                      <Loader2 size={17} className="animate-spin" />
+                    ) : (
+                      <UploadCloud size={17} />
+                    )}
                     {helperStatus === "running" ? "Sending..." : "Send setup"}
                   </button>
                 </div>
@@ -558,7 +778,9 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
             {activeStep === 2 && (
               <section className="space-y-5">
                 <div>
-                  <h3 className="text-xl font-black text-white">{t("remoteSetup.step2Header")}</h3>
+                  <h3 className="text-xl font-black text-white">
+                    {t("remoteSetup.step2Header")}
+                  </h3>
                   <p className="mt-1 text-sm text-gray-400">
                     {t("remoteSetup.step2Subheader")}
                   </p>
@@ -567,19 +789,19 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                 <div className="grid gap-4">
                   <RemotePathInput
                     label={t("remoteSetup.step2DirLabel")}
-                    value={steamcmdDir}
+                    value={managedSteamcmdDir}
                     placeholder={defaultSteamcmdDir}
-                    disabled={isRunning}
-                    onChange={setSteamcmdDir}
+                    disabled
+                    onChange={() => undefined}
                   />
                   <RemotePathInput
                     label={t("remoteSetup.step2PathLabel")}
                     value={resolvedSteamcmdPath}
-                    placeholder="/usr/games/steamcmd"
+                    placeholder={remoteSteamcmdPath(defaultSteamcmdDir)}
                     disabled
                     onChange={setSteamcmdPath}
                   />
-                  {steamcmdDir.trim().length > 0 && !isSteamcmdDirValid ? (
+                  {!isSteamcmdDirValid ? (
                     <p className="rounded-[8px] border border-yellow-400/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100">
                       {t("remoteSetup.linuxPathRequired")}
                     </p>
@@ -587,14 +809,16 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                 </div>
 
                 <ResultPanel
-                   title={t("remoteSetup.step2PanelTitle")}
+                  title={t("remoteSetup.step2PanelTitle")}
                   status={steamcmdStatus}
                   result={uploadResult}
-                  liveLines={liveLogLines.filter((line) => line.phase === "steamcmd")}
+                  liveLines={liveLogLines.filter(
+                    (line) => line.phase === "steamcmd",
+                  )}
                   elapsedSeconds={steamcmdElapsedSeconds}
                 />
 
-                <div className="flex justify-between gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
                   <button
                     type="button"
                     disabled={isRunning}
@@ -603,15 +827,38 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                   >
                     {t("remoteSetup.btnBack")}
                   </button>
-                  <button
-                    type="button"
-                    disabled={!canInstallSteamcmd}
-                    onClick={() => void installSteamcmdStep()}
-                    className="flex items-center justify-center gap-2 rounded-[8px] bg-cyan-500 px-5 py-2 text-sm font-black text-white transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-500"
-                  >
-                    {steamcmdStatus === "running" ? <Loader2 size={17} className="animate-spin" /> : <UploadCloud size={17} />}
-                    {steamcmdStatus === "running" ? t("remoteSetup.step2Installing") : t("remoteSetup.step2InstallBtn")}
-                  </button>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                    <button
+                      type="button"
+                      disabled={!canVerifyExistingSteamcmd}
+                      onClick={() => void verifyExistingSteamcmdStep()}
+                      className="flex items-center justify-center gap-2 rounded-[8px] border border-cyan-400/30 bg-cyan-400/10 px-5 py-2 text-sm font-black text-cyan-100 transition-colors hover:bg-cyan-400 hover:text-[#1c2024] disabled:cursor-not-allowed disabled:border-transparent disabled:bg-gray-700 disabled:text-gray-500"
+                    >
+                      {steamcmdStatus === "running" ? (
+                        <Loader2 size={17} className="animate-spin" />
+                      ) : (
+                        <CheckCircle2 size={17} />
+                      )}
+                      {steamcmdStatus === "running"
+                        ? t("remoteSetup.step2Checking")
+                        : t("remoteSetup.step2UseExistingBtn")}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canInstallSteamcmd}
+                      onClick={() => void installSteamcmdStep()}
+                      className="flex items-center justify-center gap-2 rounded-[8px] bg-cyan-500 px-5 py-2 text-sm font-black text-white transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-500"
+                    >
+                      {steamcmdStatus === "running" ? (
+                        <Loader2 size={17} className="animate-spin" />
+                      ) : (
+                        <UploadCloud size={17} />
+                      )}
+                      {steamcmdStatus === "running"
+                        ? t("remoteSetup.step2Installing")
+                        : t("remoteSetup.step2InstallBtn")}
+                    </button>
+                  </div>
                 </div>
               </section>
             )}
@@ -619,7 +866,9 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
             {activeStep === 3 && (
               <section className="space-y-5">
                 <div>
-                  <h3 className="text-xl font-black text-white">{t("remoteSetup.step3Header")}</h3>
+                  <h3 className="text-xl font-black text-white">
+                    {t("remoteSetup.step3Header")}
+                  </h3>
                   <p className="mt-1 text-sm text-gray-400">
                     {t("remoteSetup.step3Subheader")}
                   </p>
@@ -642,21 +891,34 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
 
                 <div className="grid gap-4">
                   <RemotePathInput
-                    label={t("remoteSetup.step3DirLabel")}
-                    value={zomboidServerDir}
-                    placeholder={defaultZomboidServerDir}
-                    disabled={isRunning}
-                    onChange={setZomboidServerDir}
-                  />
-                  <RemotePathInput
                     label={t("remoteSetup.step3PathLabel")}
                     value={resolvedZomboidServerPath}
-                    placeholder={joinRemotePath(defaultZomboidServerDir, "start-server.sh")}
+                    placeholder={joinRemotePath(
+                      defaultZomboidServerDir,
+                      "start-server.sh",
+                    )}
                     disabled={isRunning || zomboidMode === "download"}
-                    onChange={setZomboidServerPath}
+                    onChange={(value) => {
+                      setZomboidServerPath(value);
+                      const nextDir = cleanRemoteLinuxPath(
+                        parentRemotePath(value),
+                      );
+                      if (nextDir) {
+                        setZomboidServerDir(nextDir);
+                      }
+                    }}
                   />
-                  {(zomboidServerDir.trim().length > 0 && !isZomboidServerDirValid) ||
-                  (zomboidMode === "existing" && resolvedZomboidServerPath.trim().length > 0 && !isZomboidServerPathValid) ? (
+                  <RemotePathInput
+                    label={t("remoteSetup.step3DirLabel")}
+                    value={derivedZomboidServerDir}
+                    placeholder={defaultZomboidServerDir}
+                    disabled
+                    onChange={() => undefined}
+                  />
+                  {!isZomboidServerDirValid ||
+                  (zomboidMode === "existing" &&
+                    resolvedZomboidServerPath.trim().length > 0 &&
+                    !isZomboidServerPathValid) ? (
                     <p className="rounded-[8px] border border-yellow-400/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100">
                       {t("remoteSetup.linuxPathRequired")}
                     </p>
@@ -669,7 +931,9 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                       <p className="ml-1 text-[9px] font-black uppercase tracking-[0.2em] text-gray-500">
                         {t("remoteSetup.step3BranchLabel")}
                       </p>
-                      <p className="mt-1 ml-1 font-mono text-xs text-gray-500">{selectedZomboidBranchCommand}</p>
+                      <p className="mt-1 ml-1 font-mono text-xs text-gray-500">
+                        {selectedZomboidBranchCommand}
+                      </p>
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <ModeButton
@@ -693,7 +957,9 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                     title={t("remoteSetup.step3PanelTitle")}
                     status={zomboidStatus}
                     result={installResult}
-                    liveLines={liveLogLines.filter((line) => line.phase === "zomboid-server")}
+                    liveLines={liveLogLines.filter(
+                      (line) => line.phase === "zomboid-server",
+                    )}
                     elapsedSeconds={zomboidElapsedSeconds}
                   />
                 )}
@@ -714,8 +980,14 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                       onClick={() => void saveExistingZomboidStep()}
                       className="flex items-center justify-center gap-2 rounded-[8px] bg-cyan-500 px-5 py-2 text-sm font-black text-white transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-500"
                     >
-                      {zomboidStatus === "running" ? <Loader2 size={17} className="animate-spin" /> : <Save size={17} />}
-                      {zomboidStatus === "running" ? t("remoteSetup.step3Saving") : t("remoteSetup.step3SaveBtn")}
+                      {zomboidStatus === "running" ? (
+                        <Loader2 size={17} className="animate-spin" />
+                      ) : (
+                        <Save size={17} />
+                      )}
+                      {zomboidStatus === "running"
+                        ? t("remoteSetup.step3Saving")
+                        : t("remoteSetup.step3SaveBtn")}
                     </button>
                   ) : (
                     <button
@@ -724,8 +996,14 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
                       onClick={() => void downloadZomboidStep()}
                       className="flex items-center justify-center gap-2 rounded-[8px] bg-cyan-500 px-5 py-2 text-sm font-black text-white transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-500"
                     >
-                      {zomboidStatus === "running" ? <Loader2 size={17} className="animate-spin" /> : <HardDriveDownload size={17} />}
-                      {zomboidStatus === "running" ? t("remoteSetup.step3Downloading") : t("remoteSetup.step3DownloadBtn")}
+                      {zomboidStatus === "running" ? (
+                        <Loader2 size={17} className="animate-spin" />
+                      ) : (
+                        <HardDriveDownload size={17} />
+                      )}
+                      {zomboidStatus === "running"
+                        ? t("remoteSetup.step3Downloading")
+                        : t("remoteSetup.step3DownloadBtn")}
                     </button>
                   )}
                 </div>
@@ -735,16 +1013,34 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
             {activeStep === 4 && (
               <section className="space-y-5">
                 <div>
-                  <h3 className="text-xl font-black text-white">{t("remoteSetup.step4Header")}</h3>
+                  <h3 className="text-xl font-black text-white">
+                    {t("remoteSetup.step4Header")}
+                  </h3>
                   <p className="mt-1 text-sm text-gray-400">
                     {t("remoteSetup.step4Subheader")}
                   </p>
                 </div>
                 <div className="grid gap-3 rounded-[8px] border border-green-400/20 bg-green-500/10 p-4 text-sm text-green-100">
-                  <SavedPath label={t("remoteSetup.step1Title")} value={helperResult?.remotePath ? parentRemotePath(helperResult.remotePath) : defaultHelperDir} />
-                  <SavedPath label={t("remoteSetup.step2Title")} value={resolvedSteamcmdPath} />
-                  <SavedPath label={t("remoteSetup.step3Title")} value={zomboidServerDir} />
-                  <SavedPath label={t("remoteSetup.step3PathLabel")} value={resolvedZomboidServerPath} />
+                  <SavedPath
+                    label={t("remoteSetup.step1Title")}
+                    value={
+                      helperResult?.remotePath
+                        ? parentRemotePath(helperResult.remotePath)
+                        : defaultHelperDir
+                    }
+                  />
+                  <SavedPath
+                    label={t("remoteSetup.step2Title")}
+                    value={resolvedSteamcmdPath}
+                  />
+                  <SavedPath
+                    label={t("remoteSetup.step3Title")}
+                    value={zomboidServerDir}
+                  />
+                  <SavedPath
+                    label={t("remoteSetup.step3PathLabel")}
+                    value={resolvedZomboidServerPath}
+                  />
                 </div>
                 <div className="flex justify-between gap-3">
                   <button
@@ -774,11 +1070,11 @@ export function RemoteSteamCmdModal({ connection, isOpen, onClose }: RemoteSteam
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 function zomboidModeRequiresSteamcmd(mode: ZomboidSetupMode) {
-  return mode === "download"
+  return mode === "download";
 }
 
 function SetupStep({
@@ -790,13 +1086,13 @@ function SetupStep({
   onClick,
   disabled,
 }: {
-  index: number
-  title: string
-  description: string
-  status: StepStatus
-  active: boolean
-  onClick?: () => void
-  disabled?: boolean
+  index: number;
+  title: string;
+  description: string;
+  status: StepStatus;
+  active: boolean;
+  onClick?: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -810,16 +1106,24 @@ function SetupStep({
       } disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[#22272b] disabled:hover:border-white/5`}
     >
       <div className="flex items-start gap-3">
-        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] text-sm font-black ${
-          status === "success"
-            ? "bg-green-500 text-white"
-            : status === "running"
-              ? "bg-cyan-500 text-white"
-              : status === "error"
-                ? "bg-red-500 text-white"
-                : "bg-white/5 text-gray-400"
-        }`}>
-          {status === "success" ? <CheckCircle2 size={17} /> : status === "running" ? <Loader2 size={17} className="animate-spin" /> : index}
+        <div
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] text-sm font-black ${
+            status === "success"
+              ? "bg-green-500 text-white"
+              : status === "running"
+                ? "bg-cyan-500 text-white"
+                : status === "error"
+                  ? "bg-red-500 text-white"
+                  : "bg-white/5 text-gray-400"
+          }`}
+        >
+          {status === "success" ? (
+            <CheckCircle2 size={17} />
+          ) : status === "running" ? (
+            <Loader2 size={17} className="animate-spin" />
+          ) : (
+            index
+          )}
         </div>
         <div>
           <h3 className="text-sm font-black text-white">{title}</h3>
@@ -827,7 +1131,7 @@ function SetupStep({
         </div>
       </div>
     </button>
-  )
+  );
 }
 
 function ModeButton({
@@ -836,10 +1140,10 @@ function ModeButton({
   description,
   onClick,
 }: {
-  active: boolean
-  title: string
-  description: string
-  onClick: () => void
+  active: boolean;
+  title: string;
+  description: string;
+  onClick: () => void;
 }) {
   return (
     <button
@@ -854,7 +1158,7 @@ function ModeButton({
       <p className="text-sm font-black">{title}</p>
       <p className="mt-1 text-xs leading-5 opacity-80">{description}</p>
     </button>
-  )
+  );
 }
 
 function RemotePathInput({
@@ -864,11 +1168,11 @@ function RemotePathInput({
   disabled,
   onChange,
 }: {
-  label: string
-  value: string
-  placeholder: string
-  disabled?: boolean
-  onChange: (value: string) => void
+  label: string;
+  value: string;
+  placeholder: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
 }) {
   return (
     <label className="space-y-2">
@@ -883,7 +1187,7 @@ function RemotePathInput({
         placeholder={placeholder}
       />
     </label>
-  )
+  );
 }
 
 function ResultPanel({
@@ -893,33 +1197,42 @@ function ResultPanel({
   liveLines = [],
   elapsedSeconds = 0,
 }: {
-  title: string
-  status: StepStatus
-  result: RemoteSetupResult | null
-  liveLines?: RemoteSetupLogEvent[]
-  elapsedSeconds?: number
+  title: string;
+  status: StepStatus;
+  result: RemoteSetupResult | null;
+  liveLines?: RemoteSetupLogEvent[];
+  elapsedSeconds?: number;
 }) {
-  const isSuccess = status === "success"
-  const isError = status === "error"
+  const isSuccess = status === "success";
+  const isError = status === "error";
   const PanelIcon = title.includes("SteamCMD")
     ? UploadCloud
     : title.toLowerCase().includes("helper")
       ? FileArchive
-      : HardDriveDownload
-  const output = liveLines.length > 0
-    ? formatLiveLogOutput(liveLines)
-    : result
-      ? formatResultOutput(result)
-      : "(no output yet)"
+      : HardDriveDownload;
+  const output =
+    liveLines.length > 0
+      ? formatLiveLogOutput(liveLines)
+      : result
+        ? formatResultOutput(result)
+        : "(no output yet)";
 
   return (
-    <div className={`overflow-hidden rounded-[8px] border ${
-      isSuccess ? "border-green-400/20" : isError ? "border-red-400/20" : "border-white/5"
-      }`}>
+    <div
+      className={`overflow-hidden rounded-[8px] border ${
+        isSuccess
+          ? "border-green-400/20"
+          : isError
+            ? "border-red-400/20"
+            : "border-white/5"
+      }`}
+    >
       <div className="flex items-center justify-between gap-3 border-b border-white/5 bg-[#1e2327] px-4 py-3">
         <div className="flex items-center gap-2">
           <PanelIcon size={17} className="text-cyan-200" />
-          <span className="text-xs font-black uppercase tracking-widest text-gray-400">{title}</span>
+          <span className="text-xs font-black uppercase tracking-widest text-gray-400">
+            {title}
+          </span>
         </div>
         <div className="flex items-center gap-3">
           {(status === "running" || elapsedSeconds > 0) && (
@@ -927,8 +1240,22 @@ function ResultPanel({
               {formatElapsedTime(elapsedSeconds)}
             </span>
           )}
-          <span className={isSuccess ? "text-xs font-bold text-green-300" : isError ? "text-xs font-bold text-red-300" : "text-xs font-bold text-gray-500"}>
-            {status === "running" ? "Running" : status === "success" ? "Done" : status === "error" ? "Failed" : "Waiting"}
+          <span
+            className={
+              isSuccess
+                ? "text-xs font-bold text-green-300"
+                : isError
+                  ? "text-xs font-bold text-red-300"
+                  : "text-xs font-bold text-gray-500"
+            }
+          >
+            {status === "running"
+              ? "Running"
+              : status === "success"
+                ? "Done"
+                : status === "error"
+                  ? "Failed"
+                  : "Waiting"}
           </span>
         </div>
       </div>
@@ -937,25 +1264,27 @@ function ResultPanel({
         {output}
       </pre>
     </div>
-  )
+  );
 }
 
 function SavedPath({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="text-[10px] font-black uppercase tracking-widest text-green-300/70">{label}</p>
+      <p className="text-[10px] font-black uppercase tracking-widest text-green-300/70">
+        {label}
+      </p>
       <p className="mt-1 break-all font-mono text-xs text-green-50">{value}</p>
     </div>
-  )
+  );
 }
 
 function formatSetupFailure(result: RemoteSetupResult, fallback: string) {
   const details = [result.stderr, result.stdout]
     .map((value) => value.trim())
     .filter(Boolean)
-    .join("\n")
+    .join("\n");
 
-  return details ? `${fallback}\n\n${details}` : fallback
+  return details ? `${fallback}\n\n${details}` : fallback;
 }
 function formatResultOutput(result: RemoteSetupResult) {
   const output = [
@@ -963,27 +1292,32 @@ function formatResultOutput(result: RemoteSetupResult) {
     result.command.trim() ? `$ command\n${result.command.trim()}` : "",
     result.stdout.trim() ? `$ stdout\n${result.stdout.trim()}` : "",
     result.stderr.trim() ? `$ stderr\n${result.stderr.trim()}` : "",
-  ].filter(Boolean).join("\n\n")
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
-  return output || "(no output)"
+  return output || "(no output)";
 }
 
 function formatLiveLogOutput(lines: RemoteSetupLogEvent[]) {
   return lines
     .map((event) => {
-      const prefix = event.stream === "stderr" ? "[ERR]" : event.stream === "info" ? "[..]" : "[OUT]"
-      return `${prefix} ${event.line}`
+      const prefix =
+        event.stream === "stderr"
+          ? "[ERR]"
+          : event.stream === "info"
+            ? "[..]"
+            : "[OUT]";
+      return `${prefix} ${event.line}`;
     })
-    .join("\n")
+    .join("\n");
 }
 
 function formatElapsedTime(totalSeconds: number) {
-  const hours = Math.floor(totalSeconds / 3600)
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-  const seconds = totalSeconds % 60
-  const parts = hours > 0
-    ? [hours, minutes, seconds]
-    : [minutes, seconds]
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts = hours > 0 ? [hours, minutes, seconds] : [minutes, seconds];
 
-  return parts.map((part) => String(part).padStart(2, "0")).join(":")
+  return parts.map((part) => String(part).padStart(2, "0")).join(":");
 }

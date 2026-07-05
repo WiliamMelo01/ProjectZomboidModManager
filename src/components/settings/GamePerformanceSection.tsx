@@ -68,7 +68,7 @@ export function GamePerformanceSection({
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <p className="text-sm font-bold text-white">
                     {isConfigured ? t("settings.performanceSection.configured") : t("settings.performanceSection.notConfigured")}
-                    {isRemoteWorkspace && <span className="ml-2 rounded-full border border-cyan-300/20 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-black uppercase text-cyan-200">Remote</span>}
+                    {isRemoteWorkspace && <span className="ml-2 rounded-full border border-cyan-300/20 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-black uppercase text-cyan-200">Server</span>}
                   </p>
                   <button type="button" onClick={onScan} className="flex items-center gap-2 rounded-xl border border-orange-500/20 bg-orange-500/10 px-3 py-1.5 text-xs font-bold text-orange-400 transition-all hover:bg-orange-500 hover:text-white">
                     <RefreshCw size={14} className={isScanning ? "animate-spin" : ""} />
@@ -98,7 +98,7 @@ export function GamePerformanceSection({
 
           <div className="space-y-3">
             <label htmlFor="game-path" className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">
-              {isRemoteWorkspace ? "Remote server launch path" : t("settings.performanceSection.gameExecutable")}
+              {isRemoteWorkspace ? "Server launch path" : t("settings.performanceSection.gameExecutable")}
             </label>
             <div className="flex flex-col gap-3 md:flex-row">
               <div className="relative flex-1 group/input">

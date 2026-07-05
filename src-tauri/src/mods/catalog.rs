@@ -96,9 +96,12 @@ fn collect_workshop_items(
     if !root.is_dir() {
         return Ok(());
     }
-    for entry in fs::read_dir(root)
-        .map_err(|error| format!("Nao foi possivel ler {}: {error}", root.display()))?
-    {
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => return Ok(()),
+        Err(error) => return Err(format!("Nao foi possivel ler {}: {error}", root.display())),
+    };
+    for entry in entries {
         let item = entry.map_err(|error| error.to_string())?.path();
         let workshop_id = item
             .file_name()

@@ -48,6 +48,20 @@ pub(super) fn find_critical_server_lines(log_lines: &[String]) -> Vec<String> {
 pub(super) fn summarize_known_server_error(log_lines: &[String]) -> Option<String> {
     let combined_log = log_lines.join("\n").to_lowercase();
 
+    if combined_log.contains("killed")
+        || combined_log.contains("outofmemory")
+        || combined_log.contains("out of memory")
+        || combined_log.contains("oom")
+    {
+        return Some(
+            text(
+                "The server process was killed by the operating system, most likely because the VM ran out of memory while loading mods. Increase server RAM, reduce enabled mods, or use a larger instance/swap.",
+                "O processo do servidor foi encerrado pelo sistema operacional, provavelmente porque a VM ficou sem memoria ao carregar os mods. Aumente a RAM do servidor, reduza os mods ativos ou use uma instancia/swap maior.",
+            )
+            .to_string(),
+        );
+    }
+
     if combined_log.contains("raknet.startup() return code: 5")
         || combined_log.contains("connection startup failed. code: 5")
     {

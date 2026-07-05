@@ -1,4 +1,5 @@
 use crate::i18n::text;
+#[cfg(windows)]
 use crate::util::hide_command_window;
 use std::{
     collections::HashSet,

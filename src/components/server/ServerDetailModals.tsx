@@ -251,11 +251,12 @@ export function DependencyWarningModal({ mod, dependents, onClose }: DependencyW
 
 type PendingActivationModalProps = {
   activation: PendingActivation
+  isConfirming?: boolean
   onCancel: () => void
   onConfirm: () => void
 }
 
-export function PendingActivationModal({ activation, onCancel, onConfirm }: PendingActivationModalProps) {
+export function PendingActivationModal({ activation, isConfirming = false, onCancel, onConfirm }: PendingActivationModalProps) {
   const { t } = useTranslation()
 
   return (
@@ -266,9 +267,9 @@ export function PendingActivationModal({ activation, onCancel, onConfirm }: Pend
             <div className="p-2 bg-orange-500/20 text-orange-400 rounded-xl">
               <AlertCircle size={24} />
             </div>
-            <h3 className="text-xl font-bold text-white">{t("modals.pendingDependencies")}</h3>
+            <h3 className="text-xl font-bold text-white">{t("modals.pendingInstallation")}</h3>
           </div>
-          <button onClick={onCancel} className="p-2 hover:bg-white/5 rounded-full text-gray-400 transition-colors">
+          <button onClick={onCancel} disabled={isConfirming} className="p-2 hover:bg-white/5 rounded-full text-gray-400 transition-colors disabled:cursor-not-allowed disabled:opacity-50">
             <X size={20} />
           </button>
         </div>
@@ -278,21 +279,23 @@ export function PendingActivationModal({ activation, onCancel, onConfirm }: Pend
             {t("modals.pendingBody", { name: activation.mod.name })}
           </p>
           <div className="space-y-3 mb-6 max-h-56 overflow-y-auto custom-scrollbar pr-2">
-            {activation.modNeedsInstall && <ActivationItem mod={activation.mod} action={t("modals.bring")} />}
-            {activation.dependenciesToActivate.map((dependency) => {
+            {activation.modNeedsInstall && <ActivationItem mod={activation.mod} action={t("modals.install")} />}
+            {activation.dependenciesToActivate.filter(
+              (dependency) => normalizeModId(dependency.id) !== normalizeModId(activation.mod.id),
+            ).map((dependency) => {
               const willInstall = activation.dependenciesToInstall.some(
                 (installDependency) => normalizeModId(installDependency.id) === normalizeModId(dependency.id),
               )
 
-              return <ActivationItem key={dependency.id} mod={dependency} action={willInstall ? t("modals.bring") : t("modals.activate")} />
+              return <ActivationItem key={dependency.id} mod={dependency} action={willInstall ? t("modals.install") : t("modals.activate")} />
             })}
           </div>
           <div className="flex flex-col gap-3">
-            <button onClick={onConfirm} className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl transition-all shadow-lg shadow-orange-500/20 flex items-center justify-center gap-2">
-              <CheckCircle2 size={18} />
-              {t("modals.prepareAndActivate")}
+            <button onClick={onConfirm} disabled={isConfirming} className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl transition-all shadow-lg shadow-orange-500/20 flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60">
+              <CheckCircle2 size={18} className={isConfirming ? "animate-pulse" : ""} />
+              {isConfirming ? t("modals.installingAndActivating") : t("modals.prepareAndActivate")}
             </button>
-            <button onClick={onCancel} className="w-full py-3 bg-transparent border border-white/10 text-gray-400 hover:text-white hover:bg-white/5 font-bold rounded-xl transition-all">
+            <button onClick={onCancel} disabled={isConfirming} className="w-full py-3 bg-transparent border border-white/10 text-gray-400 hover:text-white hover:bg-white/5 font-bold rounded-xl transition-all disabled:cursor-not-allowed disabled:opacity-50">
               {t("common.cancel")}
             </button>
           </div>

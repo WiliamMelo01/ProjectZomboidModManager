@@ -17,6 +17,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
+import { LinuxSteamCmdFirstRunModal } from "@/components/LinuxSteamCmdFirstRunModal"
 import type { WorkshopDownloadManager } from "@/hooks/useWorkshopDownloadManager"
 import type { RemoteConnectionDraft } from "@/lib/commandRunner"
 import { invokeTauri } from "@/lib/tauri"
@@ -51,6 +52,9 @@ export function DownloadMods({ manager, remoteConnection = null, onOpenSettings 
   const [isCheckingSettings, setIsCheckingSettings] = useState(true)
   const [isSteamcmdConfigured, setIsSteamcmdConfigured] = useState(false)
   const [resolvedSteamcmdPath, setResolvedSteamcmdPath] = useState<string | null>(null)
+  const [isLinuxSteamCmdModalOpen, setIsLinuxSteamCmdModalOpen] = useState(false)
+  const [isInstallingSteamcmd, setIsInstallingSteamcmd] = useState(false)
+  const [steamcmdInstallError, setSteamcmdInstallError] = useState<string | null>(null)
   const logEndRef = useRef<HTMLDivElement>(null)
   const workshopId = useMemo(() => extractWorkshopId(workshopInput), [workshopInput])
   const canDownload = Boolean(workshopId) && isSteamcmdConfigured && !manager.isDownloading && !isCheckingSettings
@@ -64,9 +68,42 @@ export function DownloadMods({ manager, remoteConnection = null, onOpenSettings 
         : await invokeTauri<AppSettings>("get_app_settings")
       setIsSteamcmdConfigured(settings.isSteamcmdConfigured)
       setResolvedSteamcmdPath(settings.resolvedSteamcmdPath)
+
+      if (!remoteConnection && isLinuxRuntime() && !settings.isSteamcmdConfigured && localStorage.getItem("pzmm:linux-steamcmd-downloads-prompt-seen") !== "1") {
+        setIsLinuxSteamCmdModalOpen(true)
+      }
     } finally {
       setIsCheckingSettings(false)
     }
+  }
+
+  async function installSteamcmd() {
+    if (remoteConnection || isInstallingSteamcmd) {
+      return
+    }
+
+    setIsInstallingSteamcmd(true)
+    setSteamcmdInstallError(null)
+
+    try {
+      const settings = await invokeTauri<AppSettings>("install_linux_steamcmd")
+      setIsSteamcmdConfigured(settings.isSteamcmdConfigured)
+      setResolvedSteamcmdPath(settings.resolvedSteamcmdPath)
+
+      if (settings.isSteamcmdConfigured) {
+        localStorage.setItem("pzmm:linux-steamcmd-downloads-prompt-seen", "1")
+        setIsLinuxSteamCmdModalOpen(false)
+      }
+    } catch (error) {
+      setSteamcmdInstallError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsInstallingSteamcmd(false)
+    }
+  }
+
+  function closeLinuxSteamCmdModal() {
+    localStorage.setItem("pzmm:linux-steamcmd-downloads-prompt-seen", "1")
+    setIsLinuxSteamCmdModalOpen(false)
   }
 
   async function handleDownload() {
@@ -230,6 +267,23 @@ export function DownloadMods({ manager, remoteConnection = null, onOpenSettings 
         )}
       </div>
 
+      {!remoteConnection && (
+        <LinuxSteamCmdFirstRunModal
+          isOpen={isLinuxSteamCmdModalOpen}
+          resolvedPath={resolvedSteamcmdPath}
+          isChecking={isCheckingSettings}
+          isInstalling={isInstallingSteamcmd}
+          installError={steamcmdInstallError}
+          onCheckAgain={loadSettings}
+          onInstall={() => void installSteamcmd()}
+          onClose={closeLinuxSteamCmdModal}
+          onOpenSettings={() => {
+            closeLinuxSteamCmdModal()
+            onOpenSettings?.()
+          }}
+        />
+      )}
+
       {manager.result && manager.isResultModalOpen && (
         <DownloadResultModal
           result={manager.result}
@@ -327,4 +381,12 @@ function steamCmdInstanceLineClass(colorKey: string) {
 
 function statusLabel(status: DownloadItemStatus, t: (key: string) => string) {
   return t({ queued: "downloads.queued", downloading: "downloads.downloading", completed: "downloads.completed", retrying: "downloads.retryingStatus", failed: "downloads.failed", cancelled: "downloads.cancelledStatus", skipped: "downloads.skippedStatus" }[status])
+}
+
+function isLinuxRuntime() {
+  const navigatorWithUserAgentData = navigator as Navigator & { userAgentData?: { platform?: string } }
+  const platform = navigatorWithUserAgentData.userAgentData?.platform ?? navigator.platform ?? ""
+  const userAgent = navigator.userAgent ?? ""
+
+  return `${platform} ${userAgent}`.toLowerCase().includes("linux")
 }

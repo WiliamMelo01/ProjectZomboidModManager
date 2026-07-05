@@ -110,8 +110,9 @@ pub(crate) fn steam_zomboid_game_dirs() -> Vec<PathBuf> {
 
         if let Some(home) = env::var_os("HOME") {
             let home = PathBuf::from(home);
-            candidates.push(home.join(".steam").join("steam"));
             candidates.push(home.join(".local").join("share").join("Steam"));
+            candidates.push(home.join(".steam").join("steam"));
+            candidates.push(home.join(".steam").join("root"));
             candidates.push(
                 home.join("snap")
                     .join("steam")
@@ -179,6 +180,12 @@ fn default_steam_zomboid_game_dir() -> PathBuf {
 
 fn find_zomboid_executable_in_dir(game_dir: &Path) -> Option<PathBuf> {
     #[cfg(windows)]
+    let search_dirs = vec![game_dir.to_path_buf()];
+
+    #[cfg(not(windows))]
+    let search_dirs = vec![game_dir.join("projectzomboid"), game_dir.to_path_buf()];
+
+    #[cfg(windows)]
     let file_names = [
         "ProjectZomboid64.exe",
         "ProjectZomboid32.exe",
@@ -186,13 +193,23 @@ fn find_zomboid_executable_in_dir(game_dir: &Path) -> Option<PathBuf> {
     ];
 
     #[cfg(not(windows))]
-    let file_names = ["ProjectZomboid64", "ProjectZomboid32", "ProjectZomboid"];
+    let file_names = [
+        "ProjectZomboid64",
+        "projectzomboid",
+        "projectzomboid.sh",
+        "ProjectZomboid32",
+        "ProjectZomboid",
+        "ProjectZomboid64.sh",
+        "ProjectZomboid32.sh",
+    ];
 
-    for file_name in file_names {
-        let candidate = game_dir.join(file_name);
+    for search_dir in search_dirs {
+        for file_name in file_names {
+            let candidate = search_dir.join(file_name);
 
-        if candidate.exists() && candidate.is_file() {
-            return Some(candidate);
+            if candidate.exists() && candidate.is_file() {
+                return Some(candidate);
+            }
         }
     }
 

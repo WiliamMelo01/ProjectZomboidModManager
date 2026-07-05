@@ -1,12 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(windows)]
+use std::process::Command;
 use std::{
     collections::HashSet,
     env, fs,
     path::{Path, PathBuf},
-    process::Command,
 };
 use tauri::{path::BaseDirectory, Manager};
+#[cfg(windows)]
 use util::hide_command_window;
 
 rust_i18n::i18n!("locales", fallback = "en");
@@ -40,20 +42,21 @@ use remote::{
     cancel_remote_zomboid_server_test, check_remote_zomboid_server_firewall,
     check_remote_zomboid_server_status, clear_remote_zomboid_mods_and_images_cache,
     clear_remote_zomboid_mods_cache, configure_remote_zomboid_server_firewall,
-    create_remote_zomboid_server, delete_remote_zomboid_server,
+    create_remote_zomboid_server, delete_remote_workspace_config, delete_remote_zomboid_server,
     deploy_local_zomboid_server_to_remote, download_remote_steam_workshop_collection,
     download_remote_steam_workshop_item, download_remote_steam_workshop_items,
-    generate_ssh_public_key, get_remote_app_settings, get_remote_mod_locations,
-    get_remote_system_ram, get_remote_workspace_config, get_remote_zomboid_server_lua_settings,
-    get_remote_zomboid_server_settings, install_remote_zomboid_mod,
-    install_remote_zomboid_server_map, install_zomboid_server_on_remote, list_remote_zomboid_mods,
-    list_remote_zomboid_servers, open_remote_mod_location, run_terminal_command,
+    fix_ssh_key_permissions, generate_ssh_public_key, get_remote_app_settings,
+    get_remote_mod_locations, get_remote_system_ram, get_remote_workspace_config,
+    get_remote_zomboid_server_lua_settings, get_remote_zomboid_server_settings,
+    install_remote_zomboid_mod, install_remote_zomboid_server_map,
+    install_zomboid_server_on_remote, list_remote_zomboid_mods, list_remote_zomboid_servers,
+    open_remote_mod_location, read_remote_zomboid_server_file, run_terminal_command,
     save_remote_app_settings, save_remote_workspace_config, save_remote_zomboid_server_path,
-    select_ssh_key_file, send_remote_zomboid_server_command, setup_remote_helper,
-    start_remote_zomboid_server, start_remote_zomboid_server_test, test_remote_server_connection,
-    test_remote_server_latency, update_remote_zomboid_server_build,
-    update_remote_zomboid_server_lua_settings, update_remote_zomboid_server_mods,
-    update_remote_zomboid_server_settings, upload_steamcmd_to_remote,
+    select_ssh_key_file, send_remote_zomboid_server_command, setup_remote_helper, start_remote_zomboid_server,
+    start_remote_zomboid_server_test, test_remote_server_connection, test_remote_server_latency,
+    update_remote_zomboid_server_build, update_remote_zomboid_server_lua_settings,
+    update_remote_zomboid_server_mods, update_remote_zomboid_server_settings,
+    upload_steamcmd_to_remote, verify_remote_steamcmd_available,
 };
 use server_test::{
     cancel_zomboid_server_test, check_zomboid_server_ports, kill_processes_by_pid,
@@ -66,8 +69,9 @@ use servers::{
     update_zomboid_server_mods, update_zomboid_server_settings,
 };
 use settings::{
-    add_mod_location, get_app_settings, get_mod_locations, open_mod_location, push_mod_location,
-    save_app_settings, select_mod_folder, DEFAULT_MAX_CONCURRENT_DOWNLOADS,
+    add_mod_location, get_app_settings, get_mod_locations, install_linux_steamcmd,
+    open_mod_location, push_mod_location, save_app_settings, select_mod_folder,
+    DEFAULT_MAX_CONCURRENT_DOWNLOADS,
 };
 use util::*;
 use workshop::{
@@ -76,7 +80,9 @@ use workshop::{
     open_steam_workshop_external, open_steam_workshop_steam_client,
 };
 
+#[cfg(windows)]
 const MANAGED_STEAMCMD_POOL_DIR_NAME: &str = "steamcmd-pool";
+#[cfg(windows)]
 const MAX_MANAGED_STEAMCMD_POOL_INSTANCES: usize = 3;
 
 async fn run_blocking<T, F>(task: F) -> Result<T, String>
@@ -153,17 +159,32 @@ fn app_settings_path() -> Result<PathBuf, String> {
 }
 
 fn app_config_dir() -> Result<PathBuf, String> {
-    let config_root = env::var_os("LOCALAPPDATA")
-        .or_else(|| env::var_os("APPDATA"))
-        .or_else(|| env::var_os("USERPROFILE"))
-        .or_else(|| env::var_os("HOME"))
-        .ok_or_else(|| {
+    #[cfg(not(windows))]
+    {
+        let home = env::var_os("HOME").ok_or_else(|| {
             "Nao foi possivel encontrar a pasta de configuracoes do usuario.".to_string()
         })?;
 
-    Ok(PathBuf::from(config_root).join("ZomboidServerModManager"))
+        return Ok(PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("ZomboidServerModManager"));
+    }
+
+    #[cfg(windows)]
+    {
+        let config_root = env::var_os("LOCALAPPDATA")
+            .or_else(|| env::var_os("APPDATA"))
+            .or_else(|| env::var_os("USERPROFILE"))
+            .ok_or_else(|| {
+                "Nao foi possivel encontrar a pasta de configuracoes do usuario.".to_string()
+            })?;
+
+        Ok(PathBuf::from(config_root).join("ZomboidServerModManager"))
+    }
 }
 
+#[cfg(windows)]
 fn steamcmd_executable_name() -> &'static str {
     if cfg!(windows) {
         "steamcmd.exe"
@@ -172,16 +193,90 @@ fn steamcmd_executable_name() -> &'static str {
     }
 }
 
+#[cfg(windows)]
 fn managed_steamcmd_pool_dir() -> Result<PathBuf, String> {
     Ok(app_config_dir()?.join(MANAGED_STEAMCMD_POOL_DIR_NAME))
 }
 
+#[cfg(windows)]
 fn managed_steamcmd_pool_instance_dir(instance_id: usize) -> Result<PathBuf, String> {
     Ok(managed_steamcmd_pool_dir()?.join(format!("instance-{instance_id}")))
 }
 
+#[cfg(windows)]
 fn managed_steamcmd_pool_instance_path(instance_id: usize) -> Result<PathBuf, String> {
     Ok(managed_steamcmd_pool_instance_dir(instance_id)?.join(steamcmd_executable_name()))
+}
+
+#[cfg(not(windows))]
+fn linux_steamcmd_executable_path() -> Result<PathBuf, String> {
+    Ok(app_config_dir()?.join("steamcmd.sh"))
+}
+
+#[cfg(not(windows))]
+fn linux_steamcmd_command_path() -> Result<PathBuf, String> {
+    if let Some(path_var) = env::var_os("PATH") {
+        for path_dir in env::split_paths(&path_var) {
+            let candidate = path_dir.join("steamcmd");
+
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+    }
+
+    let local_steamcmd = linux_steamcmd_executable_path()?;
+
+    if local_steamcmd.is_file() {
+        return Ok(local_steamcmd);
+    }
+
+    Err(format!(
+        "SteamCMD nao encontrado no PATH nem em {}. Use a aba Downloads para instalar o SteamCMD local do app.",
+        local_steamcmd.display()
+    ))
+}
+
+#[cfg(not(windows))]
+fn linux_steamcmd_runtime_dir() -> Result<PathBuf, String> {
+    let workshop_dir = linux_steamcmd_workshop_dir()?;
+    workshop_dir
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .ok_or_else(|| {
+            format!(
+                "Nao foi possivel resolver a pasta da Steam a partir de {}.",
+                workshop_dir.display()
+            )
+        })
+}
+
+#[cfg(not(windows))]
+fn linux_steamcmd_workshop_dir() -> Result<PathBuf, String> {
+    Ok(crate::settings::default_steam_workshop_dir())
+}
+
+#[cfg(not(windows))]
+fn ensure_linux_steamcmd_runtime_layout() -> Result<(), String> {
+    let runtime_dir = linux_steamcmd_runtime_dir()?;
+
+    for path in [
+        linux_steamcmd_workshop_dir()?,
+        runtime_dir.join("downloads"),
+        runtime_dir.join("logs"),
+    ] {
+        fs::create_dir_all(&path).map_err(|error| {
+            format!(
+                "Nao foi possivel criar a pasta SteamCMD Linux em {}: {error}",
+                path.display()
+            )
+        })?;
+    }
+
+    Ok(())
 }
 
 fn ensure_managed_steamcmd_pool(
@@ -192,19 +287,24 @@ fn ensure_managed_steamcmd_pool(
     {
         let _ = app;
         let _ = instance_count;
-        return Ok(Vec::new());
+        ensure_linux_steamcmd_runtime_layout()?;
+        Ok(vec![linux_steamcmd_command_path()?])
     }
 
-    let instance_count = instance_count.clamp(1, MAX_MANAGED_STEAMCMD_POOL_INSTANCES);
-    let mut steamcmd_paths = Vec::new();
+    #[cfg(windows)]
+    {
+        let instance_count = instance_count.clamp(1, MAX_MANAGED_STEAMCMD_POOL_INSTANCES);
+        let mut steamcmd_paths = Vec::new();
 
-    for instance_id in 1..=instance_count {
-        steamcmd_paths.push(ensure_managed_steamcmd_pool_instance(app, instance_id)?);
+        for instance_id in 1..=instance_count {
+            steamcmd_paths.push(ensure_managed_steamcmd_pool_instance(app, instance_id)?);
+        }
+
+        Ok(steamcmd_paths)
     }
-
-    Ok(steamcmd_paths)
 }
 
+#[cfg(windows)]
 fn ensure_managed_steamcmd_pool_instance(
     app: &tauri::AppHandle,
     instance_id: usize,
@@ -213,46 +313,42 @@ fn ensure_managed_steamcmd_pool_instance(
     {
         let _ = app;
         let _ = instance_id;
-        return Err(
-            "Pool de SteamCMD gerenciado pelo app esta disponivel apenas no Windows.".to_string(),
-        );
+        Err("Pool de SteamCMD gerenciado pelo app esta disponivel apenas no Windows.".to_string())
     }
 
-    let steamcmd_path = managed_steamcmd_pool_instance_path(instance_id)?;
+    #[cfg(windows)]
+    {
+        let steamcmd_path = managed_steamcmd_pool_instance_path(instance_id)?;
 
-    if steamcmd_path.exists() && steamcmd_path.is_file() {
-        ensure_managed_steamcmd_pool_instance_layout(&steamcmd_path)?;
-        return Ok(steamcmd_path);
-    }
+        if steamcmd_path.exists() && steamcmd_path.is_file() {
+            ensure_managed_steamcmd_pool_instance_layout(&steamcmd_path)?;
+            return Ok(steamcmd_path);
+        }
 
-    if !cfg!(windows) {
-        return Err(
-            "Pool de SteamCMD gerenciado pelo app esta disponivel apenas no Windows.".to_string(),
-        );
-    }
+        let steamcmd_dir = managed_steamcmd_pool_instance_dir(instance_id)?;
+        fs::create_dir_all(&steamcmd_dir).map_err(|error| {
+            format!(
+                "Nao foi possivel criar a pasta da instancia SteamCMD em {}: {error}",
+                steamcmd_dir.display()
+            )
+        })?;
 
-    let steamcmd_dir = managed_steamcmd_pool_instance_dir(instance_id)?;
-    fs::create_dir_all(&steamcmd_dir).map_err(|error| {
-        format!(
-            "Nao foi possivel criar a pasta da instancia SteamCMD em {}: {error}",
-            steamcmd_dir.display()
-        )
-    })?;
+        let zip_path = steamcmd_zip_resource_path(app)?;
+        extract_zip_with_powershell(&zip_path, &steamcmd_dir)?;
 
-    let zip_path = steamcmd_zip_resource_path(app)?;
-    extract_zip_with_powershell(&zip_path, &steamcmd_dir)?;
-
-    if steamcmd_path.exists() && steamcmd_path.is_file() {
-        ensure_managed_steamcmd_pool_instance_layout(&steamcmd_path)?;
-        Ok(steamcmd_path)
-    } else {
-        Err(format!(
-            "SteamCMD foi extraido, mas {} nao foi encontrado.",
-            steamcmd_path.display()
-        ))
+        if steamcmd_path.exists() && steamcmd_path.is_file() {
+            ensure_managed_steamcmd_pool_instance_layout(&steamcmd_path)?;
+            Ok(steamcmd_path)
+        } else {
+            Err(format!(
+                "SteamCMD foi extraido, mas {} nao foi encontrado.",
+                steamcmd_path.display()
+            ))
+        }
     }
 }
 
+#[cfg(windows)]
 fn ensure_managed_steamcmd_pool_instance_layout(steamcmd_path: &Path) -> Result<(), String> {
     let steamcmd_dir = steamcmd_path.parent().ok_or_else(|| {
         format!(
@@ -281,6 +377,7 @@ fn ensure_managed_steamcmd_pool_instance_layout(steamcmd_path: &Path) -> Result<
     Ok(())
 }
 
+#[cfg(windows)]
 fn steamcmd_workshop_dir_from_executable(steamcmd_path: &Path) -> Option<PathBuf> {
     let steamcmd_dir = steamcmd_path.parent()?;
 
@@ -294,32 +391,41 @@ fn steamcmd_workshop_dir_from_executable(steamcmd_path: &Path) -> Option<PathBuf
 }
 
 fn managed_steamcmd_pool_workshop_dirs() -> Vec<PathBuf> {
-    let Ok(pool_dir) = managed_steamcmd_pool_dir() else {
-        return Vec::new();
-    };
-    let Ok(entries) = fs::read_dir(pool_dir) else {
-        return Vec::new();
-    };
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
 
-    let mut entries = entries.filter_map(Result::ok).collect::<Vec<_>>();
-    entries.sort_by_key(|entry| entry.file_name());
+    #[cfg(windows)]
+    {
+        let Ok(pool_dir) = managed_steamcmd_pool_dir() else {
+            return Vec::new();
+        };
+        let Ok(entries) = fs::read_dir(pool_dir) else {
+            return Vec::new();
+        };
 
-    entries
-        .into_iter()
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .map(|name| name.starts_with("instance-"))
-                .unwrap_or(false)
-        })
-        .filter_map(|path| {
-            steamcmd_workshop_dir_from_executable(&path.join(steamcmd_executable_name()))
-        })
-        .collect()
+        let mut entries = entries.filter_map(Result::ok).collect::<Vec<_>>();
+        entries.sort_by_key(|entry| entry.file_name());
+
+        entries
+            .into_iter()
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.starts_with("instance-"))
+                    .unwrap_or(false)
+            })
+            .filter_map(|path| {
+                steamcmd_workshop_dir_from_executable(&path.join(steamcmd_executable_name()))
+            })
+            .collect()
+    }
 }
 
+#[cfg(windows)]
 pub(crate) fn steamcmd_zip_resource_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
 
@@ -382,6 +488,7 @@ pub(crate) fn steamcmd_zip_resource_path(app: &tauri::AppHandle) -> Result<PathB
     Err("steamcmd.zip nao encontrado nos resources.".to_string())
 }
 
+#[cfg(windows)]
 fn extract_zip_with_powershell(zip_path: &Path, target_dir: &Path) -> Result<(), String> {
     #[cfg(windows)]
     {
@@ -416,6 +523,7 @@ fn extract_zip_with_powershell(zip_path: &Path, target_dir: &Path) -> Result<(),
     }
 }
 
+#[cfg(windows)]
 fn finish_zip_extraction(output: std::process::Output) -> Result<(), String> {
     if output.status.success() {
         return Ok(());
@@ -575,9 +683,11 @@ fn main() {
             run_terminal_command,
             save_remote_app_settings,
             save_remote_workspace_config,
+            delete_remote_workspace_config,
             save_remote_zomboid_server_path,
             select_ssh_key_file,
             generate_ssh_public_key,
+            fix_ssh_key_permissions,
             test_remote_server_connection,
             test_remote_server_latency,
             start_remote_zomboid_server_test,
@@ -586,9 +696,11 @@ fn main() {
             check_remote_zomboid_server_status,
             configure_remote_zomboid_server_firewall,
             send_remote_zomboid_server_command,
+            read_remote_zomboid_server_file,
             start_remote_zomboid_server,
             setup_remote_helper,
             upload_steamcmd_to_remote,
+            verify_remote_steamcmd_available,
             install_zomboid_server_on_remote,
             list_zomboid_mods,
             count_zomboid_mods,
@@ -602,6 +714,7 @@ fn main() {
             get_app_settings,
             get_mod_locations,
             save_app_settings,
+            install_linux_steamcmd,
             select_game_executable,
             get_system_ram,
             scan_zomboid_installation,

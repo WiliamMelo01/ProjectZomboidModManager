@@ -1,5 +1,6 @@
 import { Play, SquareTerminal, X } from "lucide-react"
 import { useMemo, useState } from "react"
+import { useTranslation } from "react-i18next"
 
 import {
   createCommandRunner,
@@ -15,6 +16,7 @@ type RemoteTerminalModalProps = {
 }
 
 export function RemoteTerminalModal({ connection, isOpen, onClose }: RemoteTerminalModalProps) {
+  const { t } = useTranslation()
   const [command, setCommand] = useState("hostname")
   const [result, setResult] = useState<TerminalCommandResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -58,7 +60,7 @@ export function RemoteTerminalModal({ connection, isOpen, onClose }: RemoteTermi
               <SquareTerminal size={22} />
             </div>
             <div>
-              <h2 className="text-lg font-black text-white">Terminal</h2>
+              <h2 className="text-lg font-black text-white">{t("remoteTerminal.title")}</h2>
               <p className="text-xs text-gray-500">{connection.username}@{connection.host}</p>
             </div>
           </div>
@@ -80,7 +82,7 @@ export function RemoteTerminalModal({ connection, isOpen, onClose }: RemoteTermi
 
           <label className="space-y-2">
             <span className="ml-1 text-[9px] font-black uppercase tracking-[0.2em] text-gray-500">
-              SSH command
+              {t("remoteTerminal.command")}
             </span>
             <textarea
               value={command}
@@ -107,11 +109,11 @@ export function RemoteTerminalModal({ connection, isOpen, onClose }: RemoteTermi
                   exit {result.exitCode ?? "-"}
                 </span>
                 <span className={result.success ? "text-xs font-bold text-green-300" : "text-xs font-bold text-red-300"}>
-                  {result.success ? "Success" : "Failed"}
+                  {result.success ? t("remoteTerminal.success") : t("remoteTerminal.failed")}
                 </span>
               </div>
               <pre className="max-h-80 overflow-auto whitespace-pre-wrap bg-[#15191d] p-4 font-mono text-xs leading-5 text-gray-200 custom-scrollbar">
-                {formatTerminalOutput(result)}
+                {formatTerminalOutput(result, t("remoteTerminal.noOutput"))}
               </pre>
             </div>
           )}
@@ -123,7 +125,7 @@ export function RemoteTerminalModal({ connection, isOpen, onClose }: RemoteTermi
             onClick={onClose}
             className="rounded-[8px] border border-white/10 px-4 py-2 text-sm font-bold text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
           >
-            Close
+            {t("remoteTerminal.close")}
           </button>
           <button
             type="button"
@@ -132,7 +134,7 @@ export function RemoteTerminalModal({ connection, isOpen, onClose }: RemoteTermi
             className="flex items-center justify-center gap-2 rounded-[8px] bg-cyan-500 px-5 py-2 text-sm font-black text-white transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-500"
           >
             <Play size={17} />
-            {isRunning ? "Running..." : "Run"}
+            {isRunning ? t("remoteTerminal.running") : t("remoteTerminal.run")}
           </button>
         </div>
       </div>
@@ -140,11 +142,11 @@ export function RemoteTerminalModal({ connection, isOpen, onClose }: RemoteTermi
   )
 }
 
-function formatTerminalOutput(result: TerminalCommandResult) {
+function formatTerminalOutput(result: TerminalCommandResult, emptyText: string) {
   const output = [
     result.stdout.trim() ? `$ stdout\n${result.stdout.trim()}` : "",
     result.stderr.trim() ? `$ stderr\n${result.stderr.trim()}` : "",
   ].filter(Boolean).join("\n\n")
 
-  return output || "(no output)"
+  return output || emptyText
 }

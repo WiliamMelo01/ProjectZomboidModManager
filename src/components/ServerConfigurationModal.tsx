@@ -580,7 +580,7 @@ function CustomSelect({
 
       {defaultOption && (
         <div className="ml-1 flex items-center gap-1.5 text-[10px] font-medium text-gray-500">
-          <span className="text-[9px] font-black uppercase tracking-wider text-gray-600">Opção padrão:</span>
+          <span className="text-[9px] font-black uppercase tracking-wider text-gray-600">{i18n.t("serverConfig.defaultOption")}</span>
           <span className="rounded bg-orange-500/10 px-1.5 py-0.5 text-[9px] font-black text-orange-300 ring-1 ring-orange-500/20">
             {defaultOption.label}
           </span>
@@ -599,7 +599,7 @@ function DefaultBadge({ tone }: { tone: "muted" | "strong" }) {
           : "bg-white/5 text-gray-500 ring-white/10"
       }`}
     >
-      Padrão
+      {i18n.t("serverConfig.defaultLabel")}
     </span>
   )
 }
@@ -637,11 +637,11 @@ function LuaSettingField({ setting, onChange }: { setting: ServerLuaSetting; onC
           <div className="flex items-center justify-between gap-4 py-1">
              <div className="flex flex-col">
                <span className="text-sm font-black uppercase italic text-gray-200">
-                 {setting.value === "true" ? "Ativado" : "Desativado"}
+                 {setting.value === "true" ? i18n.t("serverConfig.enabled") : i18n.t("serverConfig.disabled")}
                </span>
                {setting.defaultValue && (
                  <span className="text-[10px] font-medium text-gray-600">
-                   Padrão: {setting.defaultValue === "true" ? "Ativado" : "Desativado"}
+                   {i18n.t("serverConfig.defaultValue")} {setting.defaultValue === "true" ? i18n.t("serverConfig.enabled") : i18n.t("serverConfig.disabled")}
                  </span>
                )}
              </div>
@@ -681,7 +681,7 @@ function LuaSettingField({ setting, onChange }: { setting: ServerLuaSetting; onC
             </div>
             {setting.defaultValue && (
               <div className="ml-1 flex items-center gap-1.5">
-                <span className="text-[9px] font-black uppercase tracking-wider text-gray-600">Padrão:</span>
+                <span className="text-[9px] font-black uppercase tracking-wider text-gray-600">{i18n.t("serverConfig.defaultValue")}</span>
                 <span className="rounded bg-white/5 px-1.5 py-0.5 text-[9px] font-bold text-gray-500 ring-1 ring-white/5">
                   {setting.defaultValue}
                 </span>

@@ -1,3 +1,4 @@
+#[cfg(windows)]
 use crate::util::hide_command_window;
 use std::{
     path::Path,

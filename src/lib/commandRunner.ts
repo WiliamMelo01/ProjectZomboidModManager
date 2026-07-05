@@ -1,56 +1,62 @@
-import { invokeTauri } from "@/lib/tauri"
+import { invokeTauri } from "@/lib/tauri";
 
-export type TerminalCommandTarget = "local" | "remote"
+export type TerminalCommandTarget = "local" | "remote";
 
 export type RemoteConnectionDraft = {
-  name: string
-  host: string
-  port: string
-  username: string
-  authMethod: "password" | "key"
-  password: string
-  sshKeyPath: string
-  serverPath: string
-}
+  name: string;
+  host: string;
+  port: string;
+  username: string;
+  authMethod: "password" | "key";
+  password: string;
+  sshKeyPath: string;
+  serverPath: string;
+};
 
 export type RemoteWorkspaceConfig = RemoteConnectionDraft & {
-  remoteSteamcmdDir: string
-  remoteSteamcmdPath: string
-  remoteZomboidServerDir: string
-  remoteZomboidServerPath: string
-  remoteClientRam: string
-  remoteServerRam: string
-  remoteModLocations: string[]
-}
+  remoteSteamcmdDir: string;
+  remoteSteamcmdPath: string;
+  remoteZomboidServerDir: string;
+  remoteZomboidServerPath: string;
+  remoteClientRam: string;
+  remoteServerRam: string;
+  remoteSetupCompletedStep: number;
+  remoteModLocations: string[];
+};
 
 export type TerminalCommandResult = {
-  target: TerminalCommandTarget
-  command: string
-  exitCode: number | null
-  success: boolean
-  stdout: string
-  stderr: string
-}
+  target: TerminalCommandTarget;
+  command: string;
+  exitCode: number | null;
+  success: boolean;
+  stdout: string;
+  stderr: string;
+};
 
 export type CommandRunner = {
-  target: TerminalCommandTarget
-  unavailableReason?: string
-  run: (command: string) => Promise<TerminalCommandResult>
-}
+  target: TerminalCommandTarget;
+  unavailableReason?: string;
+  run: (command: string) => Promise<TerminalCommandResult>;
+};
 
 type CommandRunnerConfig = {
-  target: TerminalCommandTarget
-  localWorkingDirectory: string
-  remoteConnection: RemoteConnectionDraft
-  isRemoteConnected: boolean
-}
+  target: TerminalCommandTarget;
+  localWorkingDirectory: string;
+  remoteConnection: RemoteConnectionDraft;
+  isRemoteConnected: boolean;
+};
 
-export function createCommandRunner(config: CommandRunnerConfig): CommandRunner {
+export function createCommandRunner(
+  config: CommandRunnerConfig,
+): CommandRunner {
   switch (config.target) {
     case "local":
-      return createLocalCommandRunner(config.localWorkingDirectory)
+      return createLocalCommandRunner(config.localWorkingDirectory);
     case "remote":
-      return createRemoteCommandRunner(config.remoteConnection, config.isRemoteConnected)
+      return createRemoteCommandRunner(
+        config.remoteConnection,
+        config.isRemoteConnected,
+      );
   }
 }
 
@@ -66,14 +72,14 @@ function createLocalCommandRunner(workingDirectory: string): CommandRunner {
           connection: null,
         },
       }),
-  }
+  };
 }
 
 function createRemoteCommandRunner(
   connection: RemoteConnectionDraft,
   isConnected: boolean,
 ): CommandRunner {
-  const unavailableReason = getRemoteUnavailableReason(connection, isConnected)
+  const unavailableReason = getRemoteUnavailableReason(connection, isConnected);
 
   return {
     target: "remote",
@@ -87,17 +93,20 @@ function createRemoteCommandRunner(
           connection,
         },
       }),
-  }
+  };
 }
 
-function getRemoteUnavailableReason(connection: RemoteConnectionDraft, isConnected: boolean) {
+function getRemoteUnavailableReason(
+  connection: RemoteConnectionDraft,
+  isConnected: boolean,
+) {
   if (connection.authMethod !== "key") {
-    return "Remote command execution is prepared for SSH key authentication. Switch to a private key file to run commands on the server."
+    return "Remote command execution is prepared for SSH key authentication. Switch to a private key file to run commands on the server.";
   }
 
   if (!isConnected) {
-    return "Connect to the remote host before running SSH commands."
+    return "Connect to the remote host before running SSH commands.";
   }
 
-  return undefined
+  return undefined;
 }

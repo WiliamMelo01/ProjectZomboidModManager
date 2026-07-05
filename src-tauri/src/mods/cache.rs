@@ -9,7 +9,7 @@ use std::{
     time::UNIX_EPOCH,
 };
 
-const CACHE_VERSION: u32 = 1;
+const CACHE_VERSION: u32 = 3;
 const CACHE_FILE_NAME: &str = "mods-library-cache.json";
 const LOCAL_WORKSHOP_ID_FILE: &str = ".pzmm-workshop-id";
 

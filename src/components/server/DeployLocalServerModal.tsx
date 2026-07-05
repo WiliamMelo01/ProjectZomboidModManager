@@ -189,7 +189,7 @@ export function DeployLocalServerModal({
       id: "extract",
       label: t("deployLocalServer.stepExtract", "Extraindo e instalando na VM"),
       description: (currentStatus: string) => {
-        if (currentStatus === "extracting") return progressDetail || t("deployLocalServer.progress.extracting", "Executando script remoto de extração...")
+        if (currentStatus === "extracting") return progressDetail || t("deployLocalServer.progress.extracting", "Executando script de extração...")
         if (currentStatus === "success") return t("deployLocalServer.progress.success", "Implantação concluída com sucesso!")
         return null
       },
@@ -215,7 +215,7 @@ export function DeployLocalServerModal({
                 {t("deployLocalServer.title", "Deploy de Servidor Local")}
               </h3>
               <p className="text-xs font-medium text-gray-500">
-                {t("deployLocalServer.subtitle", "Envie um servidor local com seus mods ativos para a VM remota")}
+                {t("deployLocalServer.subtitle", "Envie um servidor local com seus mods ativos para a VM")}
               </p>
             </div>
           </div>
@@ -443,7 +443,7 @@ export function DeployLocalServerModal({
                         {t("deployLocalServer.optIncludeMods", "Copiar mods ativos instalados localmente")}
                       </span>
                       <p className="text-xs text-gray-500">
-                        {t("deployLocalServer.optIncludeModsDesc", "Compacta e envia as pastas dos mods locais ativos para a pasta 'Zomboid/mods' da VM remota.")}
+                        {t("deployLocalServer.optIncludeModsDesc", "Compacta e envia as pastas dos mods locais ativos para a pasta 'Zomboid/mods' da VM.")}
                       </p>
                     </div>
                   </label>
@@ -469,7 +469,7 @@ export function DeployLocalServerModal({
                           {t("deployLocalServer.optOverwrite", "Sobrescrever arquivos existentes")}
                         </span>
                         <p className="text-xs text-gray-500">
-                          {t("deployLocalServer.optOverwriteDesc", "Substitui arquivos de configurações e mods remotos existentes se houver conflito.")}
+                          {t("deployLocalServer.optOverwriteDesc", "Substitui arquivos de configurações e mods existentes se houver conflito.")}
                         </p>
                       </div>
                     </label>

@@ -1,4 +1,4 @@
-import { ArrowLeft, FilePenLine, Play, RefreshCw, Search, Server, Settings, Terminal } from "lucide-react"
+import { ArrowLeft, FilePenLine, Play, RefreshCw, Search, Server, Settings, Square, Terminal } from "lucide-react"
 import { useDeferredValue, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -25,11 +25,18 @@ import { i18n } from "@/i18n"
 import type { ZomboidMod } from "@/types/mod"
 import type { ZomboidServer } from "@/types/server"
 
+type ServerFilePreview = {
+  serverId: string
+  fileName: string
+  path: string
+  content: string
+}
+
 type ServerDetailProps = {
   server: ZomboidServer | null
   allMods?: ZomboidMod[]
   onBack: () => void
-  onInstallMods: (mods: ZomboidMod[]) => Promise<void>
+  onInstallMods: (mods: ZomboidMod[]) => Promise<ZomboidMod[] | void>
   onActivateMods: (mods: ZomboidMod[]) => Promise<void>
   onToggleMod: (mod: ZomboidMod, action: "activate" | "deactivate") => Promise<void>
   onMoveActiveMod: (mod: ZomboidMod, position: "start" | "end") => Promise<void>
@@ -47,6 +54,8 @@ type ServerDetailProps = {
   isStartingRemoteServer: boolean
   onTestServer: (server: ZomboidServer) => void
   onStartRemoteServer: (server: ZomboidServer) => void
+  onOpenRemoteConsole?: (server: ZomboidServer) => void
+  onStopRemoteServer?: (server: ZomboidServer) => void
 }
 
 const MOVE_MOD_WARNING_KEY = "pzmm_move_mod_warning_modal_seen"
@@ -87,6 +96,7 @@ export function ServerDetail({
   onTestServer,
   onStartRemoteServer,
   onOpenRemoteConsole,
+  onStopRemoteServer,
 }: ServerDetailProps) {
   const { t } = useTranslation()
   const [search, setSearch] = useState("")
@@ -94,11 +104,14 @@ export function ServerDetail({
   const [dependencyWarning, setDependencyWarning] = useState<{ mod: ZomboidMod; dependents: ZomboidMod[] } | null>(null)
   const [missingDependency, setMissingDependency] = useState<{ mod: ZomboidMod; dependencyId: string } | null>(null)
   const [pendingActivation, setPendingActivation] = useState<PendingActivation | null>(null)
+  const [isConfirmingPendingActivation, setIsConfirmingPendingActivation] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ mod: ZomboidMod; x: number; y: number } | null>(null)
   const [showMoveWarning, setShowMoveWarning] = useState<MoveModRequest | null>(null)
   const [dontShowAgainMove, setDontShowAgainMove] = useState(false)
   const [mapInstallError, setMapInstallError] = useState<string | null>(null)
   const [serverFileOpenError, setServerFileOpenError] = useState<string | null>(null)
+  const [serverFilePreview, setServerFilePreview] = useState<ServerFilePreview | null>(null)
+  const [isOpeningServerFile, setIsOpeningServerFile] = useState(false)
   const [pendingMapInstall, setPendingMapInstall] = useState<ZomboidMod | null>(null)
   const [isChangingBuild, setIsChangingBuild] = useState(false)
   const [pendingBuild, setPendingBuild] = useState<"b41" | "b42" | null>(null)
@@ -111,7 +124,7 @@ export function ServerDetail({
   const safeMods = useMemo(() => Array.isArray(allMods) ? allMods : [], [allMods])
   const safeActiveIds = useMemo(() => Array.isArray(server?.activeModIds) ? server.activeModIds : [], [server?.activeModIds])
   const activatedModIds = useMemo(() => new Set(safeActiveIds.map((modId) => normalizeModId(modId))), [safeActiveIds])
-  const libraryMods = useMemo(() => safeMods.filter((mod) => mod?.id), [safeMods])
+  const libraryMods = useMemo(() => dedupeModsForServer(safeMods), [safeMods])
   const compatibleMods = useMemo(
     () => server
       ? libraryMods
@@ -183,6 +196,7 @@ export function ServerDetail({
   }
 
   const isCurrentServerTesting = isTestingServer || runningServerTestId === server.id
+  const isServerOnline = server.status === "online"
 
   const handleActiveModContextMenu = (event: React.MouseEvent, mod: ZomboidMod) => {
     event.preventDefault()
@@ -261,20 +275,58 @@ export function ServerDetail({
   }
 
   const confirmActivationWithDependencies = async () => {
-    if (!pendingActivation) {
+    if (!pendingActivation || isConfirmingPendingActivation) {
       return
     }
 
-    const modsToInstall = pendingActivation.modNeedsInstall
-      ? [...pendingActivation.dependenciesToInstall, pendingActivation.mod]
-      : pendingActivation.dependenciesToInstall
-
-    if (modsToInstall.length > 0) {
-      await onInstallMods(modsToInstall)
+    const uniqueMods = (items: ZomboidMod[]) => {
+      const seen = new Set<string>()
+      return items.filter((item) => {
+        const id = normalizeModId(item.id)
+        if (!id || seen.has(id)) return false
+        seen.add(id)
+        return true
+      })
     }
 
-    await onActivateMods([...pendingActivation.dependenciesToActivate, pendingActivation.mod])
+    const activation = pendingActivation
+
+    setIsConfirmingPendingActivation(true)
     setPendingActivation(null)
+    try {
+      const modsToInstall = uniqueMods(
+        activation.modNeedsInstall
+          ? [...activation.dependenciesToInstall, activation.mod]
+          : activation.dependenciesToInstall,
+      )
+      const modsToActivate = uniqueMods([
+        ...activation.dependenciesToActivate,
+        activation.mod,
+      ])
+
+      let installedMods: ZomboidMod[] = []
+
+      if (modsToInstall.length > 0) {
+        installedMods = (await onInstallMods(modsToInstall)) ?? []
+      }
+
+      const installedModsById = new Map(
+        installedMods.flatMap((installedMod) => [
+          [normalizeModId(installedMod.id), installedMod] as const,
+          ...installedMod.variants.map((variant) => [
+            normalizeModId(variant.id),
+            { ...installedMod, id: variant.id, path: variant.path, dependencies: variant.dependencies, mapNames: variant.mapNames },
+          ] as const),
+        ]),
+      )
+      const optimisticModsToActivate = modsToActivate.map(
+        (mod) => installedModsById.get(normalizeModId(mod.id)) ?? mod,
+      )
+
+      await onActivateMods(optimisticModsToActivate)
+    } finally {
+      setIsConfirmingPendingActivation(false)
+    }
   }
 
   const installMap = async (mod: ZomboidMod) => {
@@ -310,13 +362,24 @@ export function ServerDetail({
 
   const openServerFile = async () => {
     setServerFileOpenError(null)
+    setIsOpeningServerFile(true)
 
     try {
-      await invokeTauri("open_zomboid_server_file", {
-        serverId: server.id,
-      })
+      if (remoteConnection) {
+        const file = await invokeTauri<ServerFilePreview>("read_remote_zomboid_server_file", {
+          connection: remoteConnection,
+          serverId: server.id,
+        })
+        setServerFilePreview(file)
+      } else {
+        await invokeTauri("open_zomboid_server_file", {
+          serverId: server.id,
+        })
+      }
     } catch (error) {
       setServerFileOpenError(getErrorMessage(error))
+    } finally {
+      setIsOpeningServerFile(false)
     }
   }
 
@@ -354,18 +417,19 @@ export function ServerDetail({
             <div>
               <h2 className="text-3xl font-black text-white tracking-tight">{server.name}</h2>
               <div className="flex items-center gap-3 mt-1 text-sm text-gray-400 font-mono">
-                <span className="flex items-center gap-1.5">
-                  <div className="w-2 h-2 rounded-full bg-red-500" />
-                  OFFLINE
+                <span className={`flex items-center gap-1.5 ${server.status === "online" ? "text-green-300" : "text-gray-400"}`}>
+                  <div className={`w-2 h-2 rounded-full ${server.status === "online" ? "bg-green-400 animate-pulse" : "bg-red-500"}`} />
+                  {server.status.toUpperCase()}
                 </span>
                 <span className="text-white/10">|</span>
                 <button
                   type="button"
                   onClick={() => void openServerFile()}
+                  disabled={isOpeningServerFile}
                   title={t("serverDetail.openFile")}
-                  className="flex items-center gap-1.5 transition-colors hover:text-orange-300 hover:underline"
+                  className="flex items-center gap-1.5 transition-colors hover:text-orange-300 hover:underline disabled:cursor-wait disabled:opacity-60"
                 >
-                  <FilePenLine size={14} />
+                  {isOpeningServerFile ? <RefreshCw size={14} className="animate-spin" /> : <FilePenLine size={14} />}
                   <span>{server.fileName}</span>
                 </button>
                 <span className="text-white/10">|</span>
@@ -411,19 +475,30 @@ export function ServerDetail({
                  <button
                     type="button"
                     onClick={() => void onOpenRemoteConsole?.(server)}
-                    className="flex items-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-sm font-black text-cyan-300 transition-all hover:bg-cyan-500 hover:text-[#071014]"
+                    disabled={!isServerOnline}
+                    className="flex items-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-sm font-black text-cyan-300 transition-all hover:bg-cyan-500 hover:text-[#071014] disabled:cursor-not-allowed disabled:opacity-50"
                  >
                     <Terminal size={18} />
-                    <span>Console remoto</span>
+                    <span>Console</span>
                  </button>
+                 {isServerOnline && (
+                   <button
+                      type="button"
+                      onClick={() => void onStopRemoteServer?.(server)}
+                      className="flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-2 text-sm font-black text-red-300 transition-all hover:bg-red-500 hover:text-white"
+                   >
+                      <Square size={18} />
+                      <span>Parar servidor</span>
+                   </button>
+                 )}
                  <button
                     type="button"
                     onClick={() => void onStartRemoteServer(server)}
-                    disabled={isCheckingRemoteFirewall || isConfiguringRemoteFirewall || isStartingRemoteServer}
+                    disabled={isServerOnline || isCheckingRemoteFirewall || isConfiguringRemoteFirewall || isStartingRemoteServer}
                     className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-sm font-black text-emerald-300 transition-all hover:bg-emerald-500 hover:text-[#071014] disabled:cursor-not-allowed disabled:opacity-60"
                  >
                     {isCheckingRemoteFirewall || isConfiguringRemoteFirewall || isStartingRemoteServer ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
-                    <span>Iniciar remoto</span>
+                    <span>Iniciar servidor</span>
                  </button>
                </>
              )}
@@ -521,7 +596,29 @@ export function ServerDetail({
         <ServerModDetailsModal mod={selectedMod} onClose={() => setSelectedMod(null)} />
       )}
 
-
+      {serverFilePreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#22272b] shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-white/10 bg-[#2b3238] px-6 py-5">
+              <div className="min-w-0">
+                <p className="text-xs font-black uppercase tracking-[0.25em] text-orange-300">server.ini</p>
+                <h3 className="mt-1 truncate text-2xl font-black text-white">{serverFilePreview.fileName}</h3>
+                <p className="mt-1 break-all font-mono text-xs text-gray-400">{serverFilePreview.path}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setServerFilePreview(null)}
+                className="rounded-xl border border-white/10 bg-[#22272b] px-4 py-2 text-sm font-black text-gray-300 transition-colors hover:border-orange-400/30 hover:text-orange-300"
+              >
+                Fechar
+              </button>
+            </div>
+            <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-6 font-mono text-xs leading-relaxed text-gray-200 custom-scrollbar">
+              {serverFilePreview.content}
+            </pre>
+          </div>
+        </div>
+      )}
 
       {/* Confirmation Modal */}
       {confirmDelete && (
@@ -548,7 +645,10 @@ export function ServerDetail({
       {pendingActivation && (
         <PendingActivationModal
           activation={pendingActivation}
-          onCancel={() => setPendingActivation(null)}
+          isConfirming={isConfirmingPendingActivation}
+          onCancel={() => {
+            if (!isConfirmingPendingActivation) setPendingActivation(null)
+          }}
           onConfirm={() => void confirmActivationWithDependencies()}
         />
       )}
@@ -605,6 +705,31 @@ export function ServerDetail({
       </div>
     </div>
   )
+}
+
+function dedupeModsForServer(mods: ZomboidMod[]) {
+  const seen = new Set<string>()
+  const result: ZomboidMod[] = []
+
+  for (const mod of mods) {
+    if (!mod?.id) continue
+
+    const keys = modIdentityKeys(mod)
+    if (keys.some((key) => seen.has(key))) continue
+
+    keys.forEach((key) => seen.add(key))
+    result.push(mod)
+  }
+
+  return result
+}
+
+function modIdentityKeys(mod: ZomboidMod) {
+  const keys = [mod.id, mod.workshopId, ...(mod.variants ?? []).map((variant) => variant.id)]
+    .map((value) => String(value ?? "").trim().toLowerCase())
+    .filter(Boolean)
+
+  return keys.length > 0 ? Array.from(new Set(keys)) : [`path:${mod.packagePath || mod.path}`]
 }
 
 function getErrorMessage(error: unknown) {

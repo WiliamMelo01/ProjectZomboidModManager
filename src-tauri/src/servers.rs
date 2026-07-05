@@ -129,7 +129,7 @@ pub(crate) fn delete_zomboid_server_impl(server_id: &str) -> Result<DeleteServer
             text("Invalid server file.", "Arquivo de servidor invalido.").to_string()
         })?;
         let target = backup_dir.join(file_name);
-        fs::rename(&source, &target).map_err(|error| {
+        move_file_with_copy_fallback(&source, &target).map_err(|error| {
             format!(
                 "{} {}: {error}",
                 text("Could not move", "Nao foi possivel mover"),
@@ -198,6 +198,22 @@ fn server_profile_files(server_dir: &Path, server_id: &str) -> Result<Vec<PathBu
 
     files.sort();
     Ok(files)
+}
+
+fn move_file_with_copy_fallback(source: &Path, target: &Path) -> Result<(), String> {
+    match fs::rename(source, target) {
+        Ok(()) => Ok(()),
+        Err(rename_error) => {
+            fs::copy(source, target).map_err(|copy_error| {
+                format!("{rename_error}; fallback copy failed: {copy_error}")
+            })?;
+            fs::remove_file(source).map_err(|remove_error| {
+                let _ = fs::remove_file(target);
+                format!("{rename_error}; fallback cleanup failed: {remove_error}")
+            })?;
+            Ok(())
+        }
+    }
 }
 
 fn unique_server_backup_dir(server_id: &str) -> Result<PathBuf, String> {

@@ -1,13 +1,20 @@
-use crate::game::{apply_performance_settings, normalize_ram_gb, validate_game_executable_path};
+use crate::game::{
+    apply_performance_settings, normalize_ram_gb, steam_zomboid_game_dirs,
+    validate_game_executable_path,
+};
 use crate::i18n::{mod_location_label, text, validate_language_preference, LANGUAGE_AUTO};
 use crate::models::{AppSettings, ModLocation};
 #[cfg(windows)]
 use crate::util::hide_command_window;
 use crate::workshop::open_path_external;
 use crate::{
-    app_settings_path, ensure_managed_steamcmd_pool, managed_steamcmd_pool_instance_path,
-    managed_steamcmd_pool_workshop_dirs, read_config_value, read_saved_custom_mod_locations,
-    read_saved_mod_locations, run_blocking, zomboid_mods_dir,
+    app_config_dir, app_settings_path, ensure_managed_steamcmd_pool, read_config_value,
+    read_saved_custom_mod_locations, run_blocking, zomboid_mods_dir,
+};
+#[cfg(windows)]
+use crate::{
+    managed_steamcmd_pool_instance_path, managed_steamcmd_pool_workshop_dirs,
+    read_saved_mod_locations,
 };
 #[cfg(windows)]
 use std::process::Command;
@@ -17,6 +24,10 @@ use std::{collections::HashSet, env, fs, path::PathBuf};
 
 pub(crate) const DEFAULT_MAX_CONCURRENT_DOWNLOADS: u32 = 1;
 pub(crate) const MAX_CONCURRENT_DOWNLOADS_LIMIT: u32 = 1;
+
+#[cfg(not(windows))]
+const LINUX_STEAMCMD_DOWNLOAD_URL: &str =
+    "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz";
 
 #[tauri::command]
 pub(crate) async fn get_app_settings(app: tauri::AppHandle) -> Result<AppSettings, String> {
@@ -54,6 +65,11 @@ pub(crate) async fn save_app_settings(
 }
 
 #[tauri::command]
+pub(crate) async fn install_linux_steamcmd() -> Result<AppSettings, String> {
+    run_blocking(install_linux_steamcmd_impl).await
+}
+
+#[tauri::command]
 pub(crate) async fn select_mod_folder() -> Result<Option<String>, String> {
     run_blocking(select_mod_folder_impl).await
 }
@@ -68,12 +84,81 @@ pub(crate) async fn open_mod_location(path: String) -> Result<(), String> {
     run_blocking(move || open_mod_location_impl(&path)).await
 }
 
+#[cfg(windows)]
+fn install_linux_steamcmd_impl() -> Result<AppSettings, String> {
+    Err("A instalacao automatica do SteamCMD pelo app esta disponivel apenas no Linux.".to_string())
+}
+
+#[cfg(not(windows))]
+fn install_linux_steamcmd_impl() -> Result<AppSettings, String> {
+    let steamcmd_dir = app_config_dir()?;
+    fs::create_dir_all(&steamcmd_dir).map_err(|error| {
+        format!(
+            "Nao foi possivel criar a pasta do SteamCMD em {}: {error}",
+            steamcmd_dir.display()
+        )
+    })?;
+
+    let archive_path = env::temp_dir().join("pzmm-steamcmd-linux.tar.gz");
+    let curl_status = Command::new("curl")
+        .args([
+            "-fsSL",
+            LINUX_STEAMCMD_DOWNLOAD_URL,
+            "-o",
+            &archive_path.display().to_string(),
+        ])
+        .status()
+        .map_err(|error| format!("Nao foi possivel baixar o SteamCMD com curl: {error}"))?;
+
+    if !curl_status.success() {
+        return Err(format!(
+            "Download do SteamCMD falhou com status {curl_status}. Verifique sua conexao e tente novamente."
+        ));
+    }
+
+    let tar_status = Command::new("tar")
+        .args([
+            "-xzf",
+            &archive_path.display().to_string(),
+            "-C",
+            &steamcmd_dir.display().to_string(),
+        ])
+        .status()
+        .map_err(|error| format!("Nao foi possivel extrair o SteamCMD com tar: {error}"))?;
+
+    let _ = fs::remove_file(&archive_path);
+
+    if !tar_status.success() {
+        return Err(format!(
+            "Extracao do SteamCMD falhou com status {tar_status}."
+        ));
+    }
+
+    let steamcmd_path = linux_steamcmd_executable_path()?;
+    if !steamcmd_path.is_file() {
+        return Err(format!(
+            "SteamCMD foi extraido, mas {} nao foi encontrado.",
+            steamcmd_path.display()
+        ));
+    }
+
+    let chmod_status = Command::new("chmod")
+        .args(["0755", &steamcmd_path.display().to_string()])
+        .status()
+        .map_err(|error| format!("Nao foi possivel ajustar permissao do SteamCMD: {error}"))?;
+
+    if !chmod_status.success() {
+        return Err(format!(
+            "Ajuste de permissao do SteamCMD falhou com status {chmod_status}."
+        ));
+    }
+
+    load_app_settings()
+}
+
 fn load_app_settings() -> Result<AppSettings, String> {
-    let configured_path = String::new();
-    let resolved_steamcmd_path = managed_steamcmd_pool_instance_path(1)
-        .ok()
-        .filter(|path| path.exists())
-        .map(|path| path.display().to_string());
+    let configured_path = read_config_value("steamcmd_path")?.unwrap_or_default();
+    let resolved_steamcmd_path = resolve_steamcmd_path();
     let is_steamcmd_configured = resolved_steamcmd_path.is_some();
     let game_executable_path = read_config_value("game_executable_path")?.unwrap_or_default();
     let client_ram = read_config_value("client_ram")?.unwrap_or_else(|| "4.00".to_string());
@@ -94,15 +179,20 @@ fn load_app_settings() -> Result<AppSettings, String> {
 }
 
 fn get_mod_locations_impl() -> Result<Vec<ModLocation>, String> {
-    let saved_locations = read_saved_mod_locations()?;
-    let mut locations = build_default_mod_locations()?;
-    merge_custom_mod_locations(
-        &mut locations,
-        saved_locations
-            .into_iter()
-            .filter(|location| location.kind == "custom")
-            .collect(),
-    );
+    let locations = build_default_mod_locations()?;
+    #[cfg(windows)]
+    let locations = {
+        let mut locations = locations;
+        let saved_locations = read_saved_mod_locations()?;
+        merge_custom_mod_locations(
+            &mut locations,
+            saved_locations
+                .into_iter()
+                .filter(|location| location.kind == "custom")
+                .collect(),
+        );
+        locations
+    };
     let game_executable_path = read_config_value("game_executable_path")?.unwrap_or_default();
     let client_ram = read_config_value("client_ram")?.unwrap_or_else(|| "4.00".to_string());
     let server_ram = read_config_value("server_ram")?.unwrap_or_else(|| "4.00".to_string());
@@ -156,27 +246,36 @@ fn build_default_mod_locations() -> Result<Vec<ModLocation>, String> {
         default_steam_workshop_dir(),
     );
 
+    let local_mods_dir = ensure_local_zomboid_mods_dir_when_game_exists()?;
     push_mod_location(
         &mut locations,
         &mut seen,
         &mod_location_label("local", None),
         "local",
-        zomboid_mods_dir()?,
+        local_mods_dir,
     );
 
-    let steamcmd_label = mod_location_label("steamcmd", None);
-    for (index, pool_workshop_dir) in managed_steamcmd_pool_workshop_dirs()
-        .into_iter()
-        .take(1)
-        .enumerate()
+    #[cfg(windows)]
     {
-        push_mod_location(
-            &mut locations,
-            &mut seen,
-            &format!("{} {}", steamcmd_label, index + 1),
-            "steamcmd",
-            pool_workshop_dir,
-        );
+        let steamcmd_label = mod_location_label("steamcmd", None);
+        let steamcmd_workshop_dirs = default_steamcmd_workshop_dirs();
+        let should_number_steamcmd_locations = steamcmd_workshop_dirs.len() > 1;
+
+        for (index, pool_workshop_dir) in steamcmd_workshop_dirs.into_iter().enumerate() {
+            let label = if should_number_steamcmd_locations {
+                format!("{} {}", steamcmd_label, index + 1)
+            } else {
+                steamcmd_label.clone()
+            };
+
+            push_mod_location(
+                &mut locations,
+                &mut seen,
+                &label,
+                "steamcmd",
+                pool_workshop_dir,
+            );
+        }
     }
 
     Ok(locations)
@@ -205,29 +304,146 @@ fn merge_custom_mod_locations(
 }
 
 pub(crate) fn default_steam_workshop_dir() -> PathBuf {
-    if let Some(program_files_x86) = env::var_os("ProgramFiles(x86)") {
-        return PathBuf::from(program_files_x86)
-            .join("Steam")
+    #[cfg(not(windows))]
+    {
+        linux_steam_roots()
+            .into_iter()
+            .find(|path| path.exists() && path.is_dir())
+            .unwrap_or_else(|| {
+                home_dir()
+                    .unwrap_or_else(|| PathBuf::from("~"))
+                    .join(".steam")
+                    .join("steam")
+            })
             .join("steamapps")
             .join("workshop")
             .join("content")
-            .join("108600");
+            .join("108600")
     }
 
-    if let Some(program_files) = env::var_os("ProgramFiles") {
-        return PathBuf::from(program_files)
-            .join("Steam")
+    #[cfg(windows)]
+    {
+        if let Some(program_files_x86) = env::var_os("ProgramFiles(x86)") {
+            return PathBuf::from(program_files_x86)
+                .join("Steam")
+                .join("steamapps")
+                .join("workshop")
+                .join("content")
+                .join("108600");
+        }
+
+        if let Some(program_files) = env::var_os("ProgramFiles") {
+            return PathBuf::from(program_files)
+                .join("Steam")
+                .join("steamapps")
+                .join("workshop")
+                .join("content")
+                .join("108600");
+        }
+
+        PathBuf::from(r"C:\Program Files (x86)\Steam")
             .join("steamapps")
             .join("workshop")
             .join("content")
-            .join("108600");
+            .join("108600")
+    }
+}
+
+fn resolve_steamcmd_path() -> Option<String> {
+    #[cfg(windows)]
+    {
+        managed_steamcmd_pool_instance_path(1)
+            .ok()
+            .filter(|path| path.exists())
+            .map(|path| path.display().to_string())
     }
 
-    PathBuf::from(r"C:\Program Files (x86)\Steam")
-        .join("steamapps")
-        .join("workshop")
-        .join("content")
-        .join("108600")
+    #[cfg(not(windows))]
+    {
+        let command_exists = find_command_path("steamcmd").is_some()
+            || linux_steamcmd_executable_path()
+                .ok()
+                .filter(|path| path.is_file())
+                .is_some();
+
+        if command_exists {
+            Some(default_steam_workshop_dir().display().to_string())
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(windows)]
+fn default_steamcmd_workshop_dirs() -> Vec<PathBuf> {
+    managed_steamcmd_pool_workshop_dirs()
+        .into_iter()
+        .take(1)
+        .collect()
+}
+
+fn ensure_local_zomboid_mods_dir_when_game_exists() -> Result<PathBuf, String> {
+    let mods_dir = zomboid_mods_dir()?;
+
+    if steam_zomboid_game_dirs()
+        .into_iter()
+        .any(|path| path.exists() && path.is_dir())
+    {
+        fs::create_dir_all(&mods_dir).map_err(|error| {
+            format!(
+                "Nao foi possivel criar a pasta de mods local em {}: {error}",
+                mods_dir.display()
+            )
+        })?;
+    }
+
+    Ok(mods_dir)
+}
+
+#[cfg(not(windows))]
+fn linux_steamcmd_executable_path() -> Result<PathBuf, String> {
+    Ok(app_config_dir()?.join("steamcmd.sh"))
+}
+
+#[cfg(not(windows))]
+fn find_command_path(command_name: &str) -> Option<PathBuf> {
+    let path_var = env::var_os("PATH")?;
+
+    for path_dir in env::split_paths(&path_var) {
+        let candidate = path_dir.join(command_name);
+
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+#[cfg(not(windows))]
+fn linux_steam_roots() -> Vec<PathBuf> {
+    let Some(home) = home_dir() else {
+        return Vec::new();
+    };
+
+    [
+        home.join("Steam"),
+        home.join(".local").join("share").join("Steam"),
+        home.join(".steam").join("steam"),
+        home.join(".steam").join("root"),
+        home.join("snap")
+            .join("steam")
+            .join("common")
+            .join(".steam")
+            .join("steam"),
+    ]
+    .into_iter()
+    .collect()
+}
+
+#[cfg(not(windows))]
+fn home_dir() -> Option<PathBuf> {
+    env::var_os("HOME").map(PathBuf::from)
 }
 
 fn save_app_settings_impl(
@@ -309,8 +525,9 @@ fn add_mod_location_impl(path: &str) -> Result<Vec<ModLocation>, String> {
     let server_ram = read_config_value("server_ram")?.unwrap_or_else(|| "4.00".to_string());
     let max_concurrent_downloads = read_max_concurrent_downloads()?;
     let language_preference = read_language_preference()?;
+    let steamcmd_path = read_config_value("steamcmd_path")?.unwrap_or_default();
     write_app_settings_file(
-        "",
+        &steamcmd_path,
         &game_executable_path,
         &client_ram,
         &server_ram,
@@ -323,7 +540,7 @@ fn add_mod_location_impl(path: &str) -> Result<Vec<ModLocation>, String> {
 }
 
 fn write_app_settings_file(
-    _steamcmd_path: &str,
+    steamcmd_path: &str,
     game_executable_path: &str,
     client_ram: &str,
     server_ram: &str,
@@ -340,7 +557,7 @@ fn write_app_settings_file(
     }
 
     let mut content = format!(
-        "steamcmd_path=\ngame_executable_path={game_executable_path}\nclient_ram={client_ram}\nserver_ram={server_ram}\nmax_concurrent_downloads={max_concurrent_downloads}\nlanguage={language_preference}\n"
+        "steamcmd_path={steamcmd_path}\ngame_executable_path={game_executable_path}\nclient_ram={client_ram}\nserver_ram={server_ram}\nmax_concurrent_downloads={max_concurrent_downloads}\nlanguage={language_preference}\n"
     );
 
     for location in mod_locations {
@@ -401,8 +618,9 @@ pub(crate) fn save_language_preference(preference: &str) -> Result<(), String> {
     let max_concurrent_downloads = read_max_concurrent_downloads()?;
     let mut locations = build_default_mod_locations()?;
     merge_custom_mod_locations(&mut locations, read_saved_custom_mod_locations()?);
+    let steamcmd_path = read_config_value("steamcmd_path")?.unwrap_or_default();
     write_app_settings_file(
-        "",
+        &steamcmd_path,
         &game_executable_path,
         &client_ram,
         &server_ram,

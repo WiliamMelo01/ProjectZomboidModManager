@@ -4,6 +4,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const command = process.argv[2]
+const passthroughArgs = process.argv.slice(3)
 
 if (!command) {
   console.error("Missing Tauri command.")
@@ -32,12 +33,31 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const localTauri = path.join(repoRoot, "node_modules", ".bin", process.platform === "win32" ? "tauri.cmd" : "tauri")
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm"
 const commandPath = existsSync(localTauri) ? localTauri : npmCommand
-const commandArgs = existsSync(localTauri) ? [command] : ["exec", "--", "tauri", command]
+const platformBuildArgs = command === "build" && process.platform === "linux" && !passthroughArgs.includes("--bundles") && !passthroughArgs.includes("-b")
+  ? ["--bundles", "deb"]
+  : []
+const tauriArgs = [command, ...platformBuildArgs, ...passthroughArgs]
+const commandArgs = existsSync(localTauri)
+  ? tauriArgs
+  : ["exec", "--package", "@tauri-apps/cli", "--", "tauri", ...tauriArgs]
 
-const child = spawn(commandPath, commandArgs, {
+function quoteWindowsCommandArg(value) {
+  if (/^[A-Za-z0-9_@%+=:,./\\-]+$/.test(value)) {
+    return value
+  }
+
+  return `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/\\+$/g, '$&$&')}"`
+}
+
+const spawnCommand = process.platform === "win32" ? "cmd.exe" : commandPath
+const spawnArgs = process.platform === "win32"
+  ? ["/d", "/c", [commandPath, ...commandArgs].map(quoteWindowsCommandArg).join(" ")]
+  : commandArgs
+
+const child = spawn(spawnCommand, spawnArgs, {
   stdio: "inherit",
   env,
-  shell: process.platform === "win32",
+  shell: false,
 })
 
 child.on("error", (error) => {

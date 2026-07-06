@@ -1734,7 +1734,8 @@ fn is_firewall_rule_allowed(protocol: &str, port: u16) -> Result<bool, String> {
     let script = r#"$ErrorActionPreference='Stop'; $protocol=__PROTOCOL__; $port=__PORT__; $filters=Get-NetFirewallPortFilter -Protocol $protocol -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -eq 'Any' -or (($_.LocalPort -split ',') | ForEach-Object { $_.Trim() }) -contains $port }; $allowed=$false; foreach($filter in $filters){ $rule=$filter | Get-NetFirewallRule -ErrorAction SilentlyContinue; if($rule -and $rule.Enabled -eq 'True' -and $rule.Direction -eq 'Inbound' -and $rule.Action -eq 'Allow'){ $allowed=$true; break } }; if($allowed){ 'true' } else { 'false' }"#
         .replace("__PROTOCOL__", &quote_powershell_single_string(protocol))
         .replace("__PORT__", &quote_powershell_single_string(&port_text));
-    let output = Command::new("powershell.exe")
+    let mut command = Command::new("powershell.exe");
+    let output = util::hide_command_window(&mut command)
         .args([
             "-NoProfile",
             "-ExecutionPolicy",
@@ -1764,7 +1765,8 @@ fn create_firewall_rule(server_id: &str, protocol: &str, port: u16) -> Result<()
         .replace("__PROTOCOL__", &quote_powershell_single_string(protocol))
         .replace("__PORT__", &quote_powershell_single_string(&port_text))
         .replace("__DISPLAY_NAME__", &quote_powershell_single_string(&display_name));
-    let output = Command::new("powershell.exe")
+    let mut command = Command::new("powershell.exe");
+    let output = util::hide_command_window(&mut command)
         .args([
             "-NoProfile",
             "-ExecutionPolicy",
@@ -1807,7 +1809,8 @@ fn command_output_error(prefix: &str, output: &std::process::Output) -> String {
 fn get_system_ram() -> Result<u32, String> {
     #[cfg(windows)]
     {
-        let output = Command::new("powershell.exe")
+        let mut command = Command::new("powershell.exe");
+        let output = util::hide_command_window(&mut command)
             .args([
                 "-NoProfile",
                 "-Command",

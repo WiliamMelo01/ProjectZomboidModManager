@@ -13,9 +13,10 @@ use crate::models::{
     WorkshopDownloadLogEvent, WorkshopDownloadResult, ZomboidModInstallResult, ZomboidServer,
 };
 use crate::mods::{list_zomboid_mods_impl, parse_server_mod_ids};
-#[cfg(windows)]
-use crate::util::hide_command_window;
-use crate::util::{read_ini_value, read_ini_values, read_text_lossy, replace_or_append_ini_value};
+use crate::util::{
+    hide_command_window, read_ini_value, read_ini_values, read_text_lossy,
+    replace_or_append_ini_value,
+};
 use crate::workshop::api::{fetch_steam_workshop_collection_items, validate_workshop_id};
 use crate::{app_config_dir, run_blocking};
 use base64::Engine;
@@ -26,7 +27,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     hash::{Hash, Hasher},
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     net::{TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
@@ -365,7 +366,8 @@ fn generate_ssh_public_key_impl(ssh_key_path: &str) -> Result<String, String> {
         return Err(format!("SSH key file not found: {}.", key_path.display()));
     }
 
-    let output = Command::new(ssh_keygen_command_name())
+    let mut command = Command::new(ssh_keygen_command_name());
+    let output = hide_command_window(&mut command)
         .arg("-y")
         .arg("-f")
         .arg(&key_path)
@@ -1107,7 +1109,7 @@ fn run_ssh_deploy_streaming(
     let remote = format!("{username}@{host}");
     let mut ssh_command = Command::new(ssh_command_name());
     append_ssh_command_args(&mut ssh_command, connection, &key_path, port)?;
-    let mut child = ssh_command
+    let mut child = hide_command_window(&mut ssh_command)
         .args([&remote, command_text])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1420,8 +1422,9 @@ fn upload_bundle_to_remote(
     let remote = format!("{username}@{host}:{remote_path}");
     let mut scp_command = Command::new(scp_command_name());
     append_scp_command_args(&mut scp_command, connection, &key_path, port)?;
-    let output = scp_command
-        .arg(local_path)
+    let local_path_arg = scp_local_path_arg(local_path);
+    let output = hide_command_window(&mut scp_command)
+        .arg(&local_path_arg)
         .arg(&remote)
         .output()
         .map_err(|error| format!("Could not run scp: {error}"))?;
@@ -3012,7 +3015,7 @@ fn stream_remote_server_event_command(
     let remote = format!("{username}@{host}");
     let mut ssh_command = Command::new(ssh_command_name());
     append_ssh_command_args(&mut ssh_command, connection, &key_path, port)?;
-    let mut child = ssh_command
+    let mut child = hide_command_window(&mut ssh_command)
         .args([&remote, command_text])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -3352,9 +3355,10 @@ fn download_remote_file(
     );
     let mut scp_command = Command::new(scp_command_name());
     append_scp_command_args(&mut scp_command, connection, &key_path, port)?;
-    let output = scp_command
+    let local_path_arg = scp_local_path_arg(local_path);
+    let output = hide_command_window(&mut scp_command)
         .arg(&remote)
-        .arg(local_path)
+        .arg(&local_path_arg)
         .output()
         .map_err(|error| format!("Could not run scp for remote file: {error}"))?;
 
@@ -3544,24 +3548,67 @@ fn setup_remote_helper_impl(
 }
 
 fn local_helper_binary_path() -> Result<PathBuf, String> {
-    for candidate in local_helper_binary_candidates() {
-        if candidate.is_file() {
-            return candidate
-                .canonicalize()
-                .map_err(|error| format!("Could not canonicalize helper binary path: {error}"));
-        }
+    if pzmm_dev_mode_enabled() {
+        return local_dev_helper_binary_path();
     }
 
     download_release_helper_binary()
 }
 
+fn local_dev_helper_binary_path() -> Result<PathBuf, String> {
+    let mut invalid_candidates = Vec::new();
+    let mut searched_candidates = Vec::new();
+
+    for candidate in local_helper_binary_candidates() {
+        searched_candidates.push(candidate.display().to_string());
+
+        if !candidate.is_file() {
+            continue;
+        }
+
+        match validate_linux_helper_binary(&candidate) {
+            Ok(()) => {
+                return candidate.canonicalize().map_err(|error| {
+                    format!("Could not canonicalize helper binary path: {error}")
+                });
+            }
+            Err(error) => invalid_candidates.push(format!("{}: {error}", candidate.display())),
+        }
+    }
+
+    let mut details = vec![
+        "PZMM_DEV is enabled, but no valid local Linux helper was found.".to_string(),
+        "Build the helper on Linux with `npm run build:helper:release`, copy the extensionless ELF helper into src-tauri/target/release, or unset PZMM_DEV to use the GitHub release download.".to_string(),
+    ];
+
+    if !invalid_candidates.is_empty() {
+        details.push(format!(
+            "Invalid local helper candidate(s):\n{}",
+            invalid_candidates.join("\n")
+        ));
+    }
+
+    details.push(format!(
+        "Searched local helper path(s):\n{}",
+        searched_candidates.join("\n")
+    ));
+
+    Err(details.join("\n"))
+}
+
 fn local_helper_binary_candidates() -> Vec<PathBuf> {
-    let binary_names = if cfg!(windows) {
-        vec!["pzmm-helper-linux-x86_64.exe", "pzmm-helper.exe"]
-    } else {
-        vec!["pzmm-helper-linux-x86_64", "pzmm-helper"]
-    };
+    let binary_names = vec!["pzmm-helper-linux-x86_64", "pzmm-helper"];
     let mut candidates = Vec::new();
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    for binary_name in &binary_names {
+        candidates.push(
+            manifest_dir
+                .join("target")
+                .join("release")
+                .join(binary_name),
+        );
+    }
 
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(current_dir) = current_exe.parent() {
@@ -3572,18 +3619,93 @@ fn local_helper_binary_candidates() -> Vec<PathBuf> {
         }
     }
 
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for binary_name in binary_names {
         candidates.push(manifest_dir.join("target").join("debug").join(binary_name));
-        candidates.push(
-            manifest_dir
-                .join("target")
-                .join("release")
-                .join(binary_name),
-        );
     }
 
     candidates
+}
+
+fn pzmm_dev_mode_enabled() -> bool {
+    std::env::var("PZMM_DEV")
+        .ok()
+        .or_else(|| pzmm_env_file_value("PZMM_DEV"))
+        .map(|value| env_truthy(&value))
+        .unwrap_or(false)
+}
+
+fn pzmm_env_file_value(key: &str) -> Option<String> {
+    for env_file in pzmm_env_file_candidates() {
+        let Ok(content) = fs::read_to_string(env_file) else {
+            continue;
+        };
+
+        for line in content.lines() {
+            let line = line.trim();
+
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            let Some((current_key, value)) = line.split_once('=') else {
+                continue;
+            };
+
+            if current_key.trim() == key {
+                return Some(clean_env_value(value));
+            }
+        }
+    }
+
+    None
+}
+
+fn pzmm_env_file_candidates() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+
+    if let Ok(current_dir) = std::env::current_dir() {
+        roots.push(current_dir);
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if let Some(repo_root) = manifest_dir.parent() {
+        roots.push(repo_root.to_path_buf());
+    }
+    roots.push(manifest_dir);
+
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(current_dir) = current_exe.parent() {
+            roots.push(current_dir.to_path_buf());
+        }
+    }
+
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+
+    for root in roots {
+        for file_name in [".env.local", ".env"] {
+            let candidate = root.join(file_name);
+            if seen.insert(candidate.clone()) {
+                candidates.push(candidate);
+            }
+        }
+    }
+
+    candidates
+}
+
+fn clean_env_value(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim()
+        .to_string()
+}
+
+fn env_truthy(value: &str) -> bool {
+    let normalized = value.trim().to_lowercase();
+    !matches!(normalized.as_str(), "" | "0" | "false" | "no" | "off")
 }
 
 fn download_release_helper_binary() -> Result<PathBuf, String> {
@@ -3604,10 +3726,14 @@ fn download_release_helper_binary() -> Result<PathBuf, String> {
             .unwrap_or(0)
             > 0
     {
-        make_helper_executable(&helper_path)?;
-        return helper_path
-            .canonicalize()
-            .map_err(|error| format!("Could not canonicalize cached helper path: {error}"));
+        if validate_linux_helper_binary(&helper_path).is_ok() {
+            make_helper_executable(&helper_path)?;
+            return helper_path
+                .canonicalize()
+                .map_err(|error| format!("Could not canonicalize cached helper path: {error}"));
+        }
+
+        let _ = fs::remove_file(&helper_path);
     }
 
     let version = env!("CARGO_PKG_VERSION");
@@ -3621,7 +3747,8 @@ fn download_release_helper_binary() -> Result<PathBuf, String> {
             HELPER_RELEASE_REPOSITORY, tag, asset_name
         );
         let temp_path = helper_dir.join(format!("{asset_name}.download"));
-        let output = Command::new(curl_command_name())
+        let mut command = Command::new(curl_command_name());
+        let output = hide_command_window(&mut command)
             .args(["-fL", "--retry", "2", "--connect-timeout", "15", "-o"])
             .arg(&temp_path)
             .arg(&url)
@@ -3638,6 +3765,7 @@ fn download_release_helper_binary() -> Result<PathBuf, String> {
                     errors.push(format!("{url}: downloaded file was empty"));
                     continue;
                 }
+                validate_linux_helper_binary(&temp_path)?;
                 fs::rename(&temp_path, &helper_path).map_err(|error| {
                     format!(
                         "Could not store downloaded helper at {}: {error}",
@@ -3678,6 +3806,32 @@ fn release_helper_asset_names() -> Vec<&'static str> {
         "pzmm-helper-x86_64-unknown-linux-gnu",
         "pzmm-helper",
     ]
+}
+
+fn validate_linux_helper_binary(path: &Path) -> Result<(), String> {
+    let mut file = fs::File::open(path).map_err(|error| {
+        format!(
+            "Could not open Linux helper candidate {}: {error}",
+            path.display()
+        )
+    })?;
+    let mut magic = [0_u8; 4];
+    file.read_exact(&mut magic).map_err(|error| {
+        format!(
+            "Could not read Linux helper candidate {}: {error}",
+            path.display()
+        )
+    })?;
+
+    if magic == [0x7f, b'E', b'L', b'F'] {
+        return Ok(());
+    }
+
+    if magic[0] == b'M' && magic[1] == b'Z' {
+        return Err("found a Windows executable, expected a Linux ELF binary".to_string());
+    }
+
+    Err("expected a Linux ELF helper binary".to_string())
 }
 
 fn make_helper_executable(path: &Path) -> Result<(), String> {
@@ -3725,6 +3879,23 @@ fn upload_helper_binary_to_remote(
     remote_path: &str,
 ) -> Result<(), String> {
     upload_bundle_to_remote(connection, local_path, remote_path)
+}
+
+fn scp_local_path_arg(path: &Path) -> String {
+    let path = path.display().to_string();
+
+    #[cfg(windows)]
+    {
+        if let Some(stripped) = path.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{stripped}");
+        }
+
+        if let Some(stripped) = path.strip_prefix(r"\\?\") {
+            return stripped.to_string();
+        }
+    }
+
+    path
 }
 
 fn remote_helper_environment_prefix() -> String {
@@ -3922,7 +4093,7 @@ fn run_ssh_with_stdin(
     let remote = format!("{username}@{host}");
     let mut ssh_command = Command::new(ssh_command_name());
     append_ssh_command_args(&mut ssh_command, connection, &key_path, port)?;
-    let mut child = ssh_command
+    let mut child = hide_command_window(&mut ssh_command)
         .args([&remote, command_text])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -3977,7 +4148,7 @@ fn run_ssh_streaming(
     let remote = format!("{username}@{host}");
     let mut ssh_command = Command::new(ssh_command_name());
     append_ssh_command_args(&mut ssh_command, connection, &key_path, port)?;
-    let mut child = ssh_command
+    let mut child = hide_command_window(&mut ssh_command)
         .args([&remote, command_text])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -4088,7 +4259,7 @@ fn run_ssh_workshop_streaming(
     let remote = format!("{username}@{host}");
     let mut ssh_command = Command::new(ssh_command_name());
     append_ssh_command_args(&mut ssh_command, connection, &key_path, port)?;
-    let mut child = ssh_command
+    let mut child = hide_command_window(&mut ssh_command)
         .args([&remote, command_text])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -4206,7 +4377,7 @@ fn verify_ssh_key_authentication(
         ssh_connection_test_command_display(&key_path, port, &remote, remote_command);
     let mut ssh_command = Command::new(ssh_command_name());
     append_simple_ssh_connection_args(&mut ssh_command, &key_path, port);
-    let output = ssh_command
+    let output = hide_command_window(&mut ssh_command)
         .args([&remote, remote_command])
         .output()
         .map_err(|error| format!("Could not run ssh: {error}\n\n[COMMAND]\n{command_display}"))?;
@@ -4497,7 +4668,7 @@ impl TerminalCommandRunner for SshCommandRunner {
         let remote = format!("{username}@{host}");
         let mut ssh_command = Command::new(ssh_command_name());
         append_ssh_command_args(&mut ssh_command, &self.connection, &key_path, port)?;
-        let output = ssh_command
+        let output = hide_command_window(&mut ssh_command)
             .args([&remote, command_text])
             .output()
             .map_err(|error| format!("Could not run ssh: {error}"))?;

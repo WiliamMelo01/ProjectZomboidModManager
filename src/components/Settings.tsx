@@ -19,7 +19,7 @@ import type {
 
 const SETTINGS_VIEW_CACHE_KEY = "pzmm:settings-view";
 const REMOTE_SETTINGS_VIEW_CACHE_PREFIX = "pzmm:settings-view:remote";
-const SETTINGS_VIEW_CACHE_VERSION = 2;
+const SETTINGS_VIEW_CACHE_VERSION = 3;
 
 type SettingsViewCache = {
   version: number;

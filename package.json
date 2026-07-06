@@ -7,8 +7,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:helper": "cd src-tauri && cargo build --bin pzmm-helper-linux-x86_64",
-    "build:helper:release": "cd src-tauri && cargo build --release --bin pzmm-helper-linux-x86_64",
+    "build:helper": "node ./scripts/build-helper-if-linux.mjs",
+    "build:helper:release": "node ./scripts/build-helper-if-linux.mjs --release",
     "tauri:dev": "npm run build:helper && node ./scripts/run-tauri-command.mjs dev",
     "tauri:build": "npm run build:helper:release && node ./scripts/run-tauri-command.mjs build"
   },

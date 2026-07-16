@@ -453,63 +453,95 @@ export function ServerDetail({
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-3 relative z-10">
-             <button
+          <div className="flex flex-wrap items-center gap-4 relative z-10">
+            {/* Group 1: Configuration & Testing */}
+            <div className="flex items-center rounded-xl bg-[#22272b]/80 p-1 border border-white/5 shadow-inner">
+              <button
                 type="button"
                 onClick={() => onConfigureServer(server)}
-                className="flex items-center gap-2 rounded-xl border border-white/10 bg-[#22272b] px-4 py-2 text-sm font-black text-gray-300 transition-all hover:border-orange-400/30 hover:text-orange-300"
-             >
-                <Settings size={18} />
+                className="flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold text-gray-400 hover:text-white transition-all"
+              >
+                <Settings size={14} />
                 <span>{t("serverDetail.configure")}</span>
-             </button>
-             <button
+              </button>
+              <div className="h-4 w-[1px] bg-white/10" />
+              <button
                 onClick={() => void onTestServer(server)}
                 disabled={isCurrentServerTesting || isCheckingPorts}
-                className="flex items-center gap-2 rounded-xl border border-orange-500/20 bg-orange-500/10 px-4 py-2 text-sm font-black text-orange-400 transition-all hover:bg-orange-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-             >
-                {isCurrentServerTesting || isCheckingPorts ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
-                <span>{isCheckingPorts ? t("serverDetail.checkingPorts") : isCurrentServerTesting ? t("serverDetail.testing") : t("serverDetail.test")}</span>
-             </button>
-             {remoteConnection && (
-               <>
-                 <button
+                className="flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold text-gray-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 transition-all"
+              >
+                {isCurrentServerTesting || isCheckingPorts ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />}
+                <span>
+                  {isCheckingPorts
+                    ? t("serverDetail.checkingPorts")
+                    : isCurrentServerTesting
+                    ? t("serverDetail.testing")
+                    : t("serverDetail.test")}
+                </span>
+              </button>
+            </div>
+
+            {/* Group 2: Remote VM Operation Controls */}
+            {remoteConnection && (
+              <div className="flex items-center rounded-xl bg-[#22272b]/80 p-1 border border-white/5 shadow-inner">
+                <button
+                  type="button"
+                  onClick={() => void onOpenRemoteConsole?.(server)}
+                  disabled={!isServerOnline}
+                  className="flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold text-gray-400 hover:text-cyan-400 disabled:cursor-not-allowed disabled:opacity-50 transition-all"
+                >
+                  <Terminal size={14} />
+                  <span>Console</span>
+                </button>
+                <div className="h-4 w-[1px] bg-white/10" />
+                {isServerOnline ? (
+                  <button
                     type="button"
-                    onClick={() => void onOpenRemoteConsole?.(server)}
-                    disabled={!isServerOnline}
-                    className="flex items-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-sm font-black text-cyan-300 transition-all hover:bg-cyan-500 hover:text-[#071014] disabled:cursor-not-allowed disabled:opacity-50"
-                 >
-                    <Terminal size={18} />
-                    <span>Console</span>
-                 </button>
-                 {isServerOnline && (
-                   <button
-                      type="button"
-                      onClick={() => void onStopRemoteServer?.(server)}
-                      className="flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-2 text-sm font-black text-red-300 transition-all hover:bg-red-500 hover:text-white"
-                   >
-                      <Square size={18} />
-                      <span>Parar servidor</span>
-                   </button>
-                 )}
-                 <button
+                    onClick={() => void onStopRemoteServer?.(server)}
+                    className="flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold text-red-400 hover:text-red-300 transition-all"
+                  >
+                    <Square size={12} />
+                    <span>Parar</span>
+                  </button>
+                ) : (
+                  <button
                     type="button"
                     onClick={() => void onStartRemoteServer(server)}
-                    disabled={isServerOnline || isCheckingRemoteFirewall || isConfiguringRemoteFirewall || isStartingRemoteServer}
-                    className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-sm font-black text-emerald-300 transition-all hover:bg-emerald-500 hover:text-[#071014] disabled:cursor-not-allowed disabled:opacity-60"
-                 >
-                    {isCheckingRemoteFirewall || isConfiguringRemoteFirewall || isStartingRemoteServer ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
-                    <span>Iniciar servidor</span>
-                 </button>
-               </>
-             )}
-             <div className="bg-[#22272b] px-4 py-2 rounded-xl border border-white/5 text-center">
-                <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest">{t("serverDetail.activeMods")}</p>
-                <p className="text-xl font-black text-orange-400">{activatedMods.length}</p>
-             </div>
-             <div className="bg-[#22272b] px-4 py-2 rounded-xl border border-white/5 text-center">
-                <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest">{t("serverDetail.maxPlayers")}</p>
-                <p className="text-xl font-black text-white">{server.maxPlayers || "-"}</p>
-             </div>
+                    disabled={
+                      isCheckingRemoteFirewall ||
+                      isConfiguringRemoteFirewall ||
+                      isStartingRemoteServer
+                    }
+                    className="flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold text-emerald-400 hover:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-50 transition-all"
+                  >
+                    {isCheckingRemoteFirewall ||
+                    isConfiguringRemoteFirewall ||
+                    isStartingRemoteServer ? (
+                      <RefreshCw size={14} className="animate-spin" />
+                    ) : (
+                      <Play size={14} />
+                    )}
+                    <span>Iniciar</span>
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Group 3: Stats tags */}
+            <div className="flex items-center gap-3">
+              <div className="bg-[#22272b] px-4 py-2 rounded-xl border border-white/5 flex items-center gap-2 shadow-sm">
+                <span className="text-[10px] text-gray-500 uppercase font-black tracking-wider">
+                  {t("serverDetail.activeMods")}
+                </span>
+                <span className="text-sm font-black text-orange-400">{activatedMods.length}</span>
+              </div>
+              <div className="bg-[#22272b] px-4 py-2 rounded-xl border border-white/5 flex items-center gap-2 shadow-sm">
+                <span className="text-[10px] text-gray-500 uppercase font-black tracking-wider">
+                  {t("serverDetail.maxPlayers")}
+                </span>
+                <span className="text-sm font-black text-white">{server.maxPlayers || "-"}</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>

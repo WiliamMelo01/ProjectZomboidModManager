@@ -17,6 +17,7 @@ import type {
 } from "@/lib/commandRunner";
 import { getErrorMessage } from "@/lib/errors";
 import { invokeTauri } from "@/lib/tauri";
+import { RamDropdown } from "@/components/settings/RamDropdown";
 
 type RemoteSteamCmdUploadResult = {
   localPath: string;
@@ -129,7 +130,7 @@ function cleanRemoteLinuxPath(path?: string) {
 function getRemoteSetupCompletedStep(config?: RemoteWorkspaceConfig | null) {
   let completedStep = Math.min(
     Math.max(config?.remoteSetupCompletedStep ?? 0, 0),
-    4,
+    5,
   );
 
   if (cleanRemoteLinuxPath(config?.remoteSteamcmdPath)) {
@@ -137,6 +138,10 @@ function getRemoteSetupCompletedStep(config?: RemoteWorkspaceConfig | null) {
   }
 
   if (cleanRemoteLinuxPath(config?.remoteZomboidServerPath)) {
+    completedStep = Math.max(completedStep, 3);
+  }
+
+  if (config?.remoteServerRam && config.remoteServerRam !== "4.00") {
     completedStep = Math.max(completedStep, 4);
   }
 
@@ -145,7 +150,7 @@ function getRemoteSetupCompletedStep(config?: RemoteWorkspaceConfig | null) {
 
 function getRemoteSetupStartStep(config?: RemoteWorkspaceConfig | null) {
   const completedStep = getRemoteSetupCompletedStep(config);
-  return completedStep >= 4 ? 4 : completedStep + 1;
+  return completedStep >= 5 ? 5 : completedStep + 1;
 }
 
 export function RemoteSteamCmdModal({
@@ -168,7 +173,7 @@ export function RemoteSteamCmdModal({
   );
   const [config, setConfig] = useState<RemoteWorkspaceConfig | null>(null);
   const [activeStep, setActiveStep] = useState(1);
-  const [zomboidMode, setZomboidMode] = useState<ZomboidSetupMode>("existing");
+  const [zomboidMode, setZomboidMode] = useState<ZomboidSetupMode>("download");
   const [zomboidBranch, setZomboidBranch] =
     useState<ZomboidServerBranch>("default");
   const [steamcmdDir, setSteamcmdDir] = useState(defaultSteamcmdDir);
@@ -180,6 +185,11 @@ export function RemoteSteamCmdModal({
   const [steamcmdStatus, setSteamcmdStatus] = useState<StepStatus>("idle");
   const [helperStatus, setHelperStatus] = useState<StepStatus>("idle");
   const [zomboidStatus, setZomboidStatus] = useState<StepStatus>("idle");
+  const [clientRam, setClientRam] = useState("4.00");
+  const [serverRam, setServerRam] = useState("4.00");
+  const [remoteSystemRam, setRemoteSystemRam] = useState<number>(16);
+  const [ramStatus, setRamStatus] = useState<StepStatus>("idle");
+  const [isSavingRam, setIsSavingRam] = useState(false);
   const [uploadResult, setUploadResult] =
     useState<RemoteSteamCmdUploadResult | null>(null);
   const [helperResult, setHelperResult] =
@@ -196,10 +206,16 @@ export function RemoteSteamCmdModal({
   const [steamcmdElapsedSeconds, setSteamcmdElapsedSeconds] = useState(0);
   const [zomboidElapsedSeconds, setZomboidElapsedSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const ramOptions = useMemo(() => {
+    return Array.from({ length: Math.ceil(remoteSystemRam * 4) }, (_, i) =>
+      ((i + 1) * 0.25).toFixed(2),
+    );
+  }, [remoteSystemRam]);
   const isRunning =
     helperStatus === "running" ||
     steamcmdStatus === "running" ||
-    zomboidStatus === "running";
+    zomboidStatus === "running" ||
+    isSavingRam;
   const managedSteamcmdDir = defaultSteamcmdDir;
   const resolvedSteamcmdPath =
     steamcmdPath || remoteSteamcmdPath(managedSteamcmdDir);
@@ -281,13 +297,31 @@ export function RemoteSteamCmdModal({
         setSteamcmdPath(loadedSteamcmdPath);
         setZomboidServerDir(loadedZomboidServerDir);
         setZomboidServerPath(loadedZomboidServerPath);
+        setClientRam(nextConfig?.remoteClientRam || "4.00");
+        setServerRam(nextConfig?.remoteServerRam || "4.00");
         setHelperStatus(completedStep >= 1 ? "success" : "idle");
         setSteamcmdStatus(
           completedStep >= 2 || loadedSteamcmdPath ? "success" : "idle",
         );
         setZomboidStatus(
-          completedStep >= 4 || loadedZomboidServerPath ? "success" : "idle",
+          completedStep >= 3 || loadedZomboidServerPath ? "success" : "idle",
         );
+        setRamStatus(completedStep >= 4 ? "success" : "idle");
+
+        if (completedStep >= 1) {
+          void invokeTauri<number>("get_remote_system_ram", { connection })
+            .then((ramGb) => {
+              if (!isMounted) return;
+              setRemoteSystemRam(ramGb);
+              if (!nextConfig?.remoteServerRam || nextConfig.remoteServerRam === "4.00") {
+                setServerRam((ramGb * 0.70).toFixed(2));
+              }
+            })
+            .catch((e) => {
+              console.error("Could not fetch remote system RAM:", e);
+            });
+        }
+
         setActiveStep(getRemoteSetupStartStep(nextConfig));
       })
       .catch((configError) => {
@@ -382,6 +416,11 @@ export function RemoteSteamCmdModal({
       if (result.success) {
         try {
           const nextConfig = await refreshConfig();
+          const ramGb = await invokeTauri<number>("get_remote_system_ram", { connection }).catch(() => 16);
+          setRemoteSystemRam(ramGb);
+          if (!nextConfig?.remoteServerRam || nextConfig.remoteServerRam === "4.00") {
+            setServerRam((ramGb * 0.70).toFixed(2));
+          }
           setActiveStep(getRemoteSetupStartStep(nextConfig));
         } catch (refreshError) {
           setError(
@@ -577,6 +616,29 @@ export function RemoteSteamCmdModal({
     }
   }
 
+  async function saveRamStep() {
+    setIsSavingRam(true);
+    setError(null);
+    try {
+      await invokeTauri<AppSettings>("save_remote_app_settings", {
+        request: {
+          connection,
+          gameExecutablePath: resolvedZomboidServerPath,
+          clientRam,
+          serverRam,
+        },
+      });
+      setRamStatus("success");
+      await refreshConfig();
+      setActiveStep(5);
+    } catch (saveRamError) {
+      setRamStatus("error");
+      setError(getErrorMessage(saveRamError));
+    } finally {
+      setIsSavingRam(false);
+    }
+  }
+
   function finishHelperTimer(startedAt: number | null = helperStartedAt) {
     setHelperElapsedSeconds((currentSeconds) =>
       startedAt === null
@@ -701,15 +763,25 @@ export function RemoteSteamCmdModal({
                 index={4}
                 title={t("remoteSetup.step4Title")}
                 description={t("remoteSetup.step4Description")}
+                status={ramStatus}
+                active={activeStep === 4}
+                onClick={() => setActiveStep(4)}
+                disabled={isRunning}
+              />
+              <SetupStep
+                index={5}
+                title={t("remoteSetup.step5Title")}
+                description={t("remoteSetup.step5Description")}
                 status={
                   helperStatus === "success" &&
                   steamcmdStatus === "success" &&
-                  zomboidStatus === "success"
+                  zomboidStatus === "success" &&
+                  ramStatus === "success"
                     ? "success"
                     : "idle"
                 }
-                active={activeStep === 4}
-                onClick={() => setActiveStep(4)}
+                active={activeStep === 5}
+                onClick={() => setActiveStep(5)}
                 disabled={isRunning}
               />
             </div>
@@ -876,16 +948,16 @@ export function RemoteSteamCmdModal({
 
                 <div className="grid gap-3 sm:grid-cols-2">
                   <ModeButton
-                    active={zomboidMode === "existing"}
-                    title={t("remoteSetup.step3ModeExistingTitle")}
-                    description={t("remoteSetup.step3ModeExistingDesc")}
-                    onClick={() => setZomboidMode("existing")}
-                  />
-                  <ModeButton
                     active={zomboidMode === "download"}
                     title={t("remoteSetup.step3ModeDownloadTitle")}
                     description={t("remoteSetup.step3ModeDownloadDesc")}
                     onClick={() => setZomboidMode("download")}
+                  />
+                  <ModeButton
+                    active={zomboidMode === "existing"}
+                    title={t("remoteSetup.step3ModeExistingTitle")}
+                    description={t("remoteSetup.step3ModeExistingDesc")}
+                    onClick={() => setZomboidMode("existing")}
                   />
                 </div>
 
@@ -1011,7 +1083,7 @@ export function RemoteSteamCmdModal({
             )}
 
             {activeStep === 4 && (
-              <section className="space-y-5">
+              <section className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-300">
                 <div>
                   <h3 className="text-xl font-black text-white">
                     {t("remoteSetup.step4Header")}
@@ -1020,7 +1092,75 @@ export function RemoteSteamCmdModal({
                     {t("remoteSetup.step4Subheader")}
                   </p>
                 </div>
-                <div className="grid gap-3 rounded-[8px] border border-green-400/20 bg-green-500/10 p-4 text-sm text-green-100">
+
+                <div className="rounded-2xl border border-white/5 bg-[#1e2327] p-4 text-sm text-gray-400">
+                  <p>
+                    Memória total detectada no servidor: <strong className="text-white">{remoteSystemRam} GB</strong>
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Recomendado (70%): <strong className="text-cyan-400">{(remoteSystemRam * 0.70).toFixed(2)} GB</strong>
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                  <div className="space-y-3">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 ml-1">
+                      {t("remoteSetup.step4ClientRamLabel")}
+                    </label>
+                    <RamDropdown
+                      value={clientRam}
+                      onChange={setClientRam}
+                      options={ramOptions}
+                    />
+                  </div>
+                  <div className="space-y-3">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 ml-1">
+                      {t("remoteSetup.step4ServerRamLabel")}
+                    </label>
+                    <RamDropdown
+                      value={serverRam}
+                      onChange={setServerRam}
+                      options={ramOptions}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-between gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setActiveStep(3)}
+                    className="rounded-[8px] border border-white/10 px-4 py-2 text-sm font-bold text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
+                  >
+                    {t("remoteSetup.btnBack")}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSavingRam}
+                    onClick={() => void saveRamStep()}
+                    className="flex items-center justify-center gap-2 rounded-[8px] bg-cyan-500 px-5 py-2 text-sm font-black text-white transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-500"
+                  >
+                    {isSavingRam ? (
+                      <Loader2 size={17} className="animate-spin" />
+                    ) : (
+                      <Save size={17} />
+                    )}
+                    {isSavingRam ? t("remoteSetup.step4Saving") : t("remoteSetup.step4SaveBtn")}
+                  </button>
+                </div>
+              </section>
+            )}
+
+            {activeStep === 5 && (
+              <section className="space-y-5">
+                <div>
+                  <h3 className="text-xl font-black text-white">
+                    {t("remoteSetup.step5Header")}
+                  </h3>
+                  <p className="mt-1 text-sm text-gray-400">
+                    {t("remoteSetup.step5Subheader")}
+                  </p>
+                </div>
+                <div className="grid gap-3 rounded-[8px] border border-green-400/20 bg-green-500/10 p-4 text-sm text-green-100 animate-in fade-in duration-300">
                   <SavedPath
                     label={t("remoteSetup.step1Title")}
                     value={
@@ -1041,11 +1181,19 @@ export function RemoteSteamCmdModal({
                     label={t("remoteSetup.step3PathLabel")}
                     value={resolvedZomboidServerPath}
                   />
+                  <SavedPath
+                    label={t("remoteSetup.step4ClientRamLabel")}
+                    value={`${clientRam} GB`}
+                  />
+                  <SavedPath
+                    label={t("remoteSetup.step4ServerRamLabel")}
+                    value={`${serverRam} GB`}
+                  />
                 </div>
                 <div className="flex justify-between gap-3">
                   <button
                     type="button"
-                    onClick={() => setActiveStep(3)}
+                    onClick={() => setActiveStep(4)}
                     className="rounded-[8px] border border-white/10 px-4 py-2 text-sm font-bold text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
                   >
                     {t("remoteSetup.btnBack")}

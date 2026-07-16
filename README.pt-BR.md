@@ -6,8 +6,8 @@
 
 ### Gerencie mods de servidores multiplayer de Project Zomboid sem editar configurações manualmente.
 
-[![Versão](https://img.shields.io/badge/versão-0.0.1-6d5dfc?style=for-the-badge)](package.json)
-![Plataforma](https://img.shields.io/badge/plataforma-Windows-0078D4?style=for-the-badge&logo=windows)
+[![Versão](https://img.shields.io/badge/versão-0.4.0-6d5dfc?style=for-the-badge)](package.json)
+![Plataforma](https://img.shields.io/badge/plataforma-Windows%20%7C%20Linux-0078D4?style=for-the-badge&logo=windows)
 ![Desktop](https://img.shields.io/badge/desktop-Tauri-24C8D8?style=for-the-badge&logo=tauri&logoColor=white)
 ![Status](https://img.shields.io/badge/status-em%20desenvolvimento-F59E0B?style=for-the-badge)
 
@@ -21,21 +21,24 @@ O **PZ Manager** é um aplicativo desktop para organizar mods de servidores de *
 
 O aplicativo suporta perfis para **Build 41** e **Build 42**. Cada servidor mantém sua própria build, lista de mods e itens da Workshop.
 
-## Destaques da versao 0.3.0
+## Destaques da versão 0.4.0
 
-- Cache persistente no backend para a biblioteca de mods, reutilizado pelo preflight do servidor.
-- Atualizacoes mais rapidas ao revalidar apenas pacotes de mods alterados.
-- Acao de reescanear tudo para limpar o cache de mods e reconstruir a biblioteca.
-- Configuracoes abrem com os ultimos valores conhecidos enquanto o backend atualiza os dados.
-- Imagens locais de mods carregam pelo protocolo de assets do Tauri em vez de payloads base64.
+- **Workspaces Remotos**: Gerencie remotamente servidores dedicados de Project Zomboid rodando em máquinas Linux via SSH.
+- **Seletor de Workspace**: Escolha entre gerenciar workspaces locais (Windows) ou servidores remotos Linux no carregamento do app.
+- **Localização Completa (i18n)**: Telas de escolha de workspace, credenciais SSH, guias explicativos de OpenSSH e feedback traduzidos dinamicamente.
+- **Exclusão de Mods**: Exclusão segura de mods locais ou remotos direto pelos cards da biblioteca, protegida por modais de confirmação traduzidos.
+- **Métricas e Ping**: Visualize latência de ping em tempo real dos servidores remotos e a listagem limpa de jogadores conectados no formato `X/Y` (ex: `0/2`).
+- **Instaladores para Linux**: Compilação integrada para Linux gerando instaladores de sistema `.deb` e o binário helper autônomo `pzmm-helper-linux-x86_64`.
 
 ## Funcionalidades
 
 | Recurso | O que você pode fazer |
 | --- | --- |
+| **Workspaces** | Escolher entre Workspace Local (Windows) ou Workspace Remoto (Linux via SSH) com suporte a perfis de conexão salvos. |
 | **Servidores** | Criar perfis, listar servidores existentes, pesquisar, ocultar perfis e clonar listas entre servidores da mesma build. |
 | **B41 e B42** | Escolher a build por perfil, trocar a versão com confirmação e identificar mods incompatíveis. |
 | **Mods ativos** | Ativar, desativar e reorganizar mods com atualização automática do arquivo `.ini`. |
+| **Exclusão de Mods** | Excluir mods locais ou remotos da biblioteca com modal de segurança contra cliques acidentais. |
 | **Dependências** | Detectar dependências ausentes, instalar itens necessários e validar a ordem de carregamento. |
 | **Biblioteca** | Encontrar mods locais, itens da Steam Workshop e mods armazenados em pastas personalizadas. |
 | **Downloads** | Baixar mods individuais ou coleções completas usando SteamCMD com login anônimo. |
@@ -152,40 +155,39 @@ A preferência é salva em `settings.ini` e aplicada imediatamente.
 
 ### Pré-requisitos
 
-- Windows 10 ou 11
-- [Node.js](https://nodejs.org/) com npm
-- [Rust](https://www.rust-lang.org/tools/install)
-- [Dependências do Tauri para Windows](https://v2.tauri.app/start/prerequisites/)
+- Windows 10/11 ou Linux (Ubuntu/Debian)
+- [Node.js](https://nodejs.org/) (v20+ ou v22+) com npm
+- [Rust](https://www.rust-lang.org/tools/install) (versão estável mais recente)
+- [Dependências do Tauri para Windows](https://v2.tauri.app/start/prerequisites/) / [Dependências do Tauri para Linux](https://v2.tauri.app/start/prerequisites/) (`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libsoup-3.0-dev`, etc.)
 - Project Zomboid instalado para utilizar todas as funcionalidades
 
 ### Executando localmente
 
-```powershell
+```bash
 npm install
 npm run tauri:dev
 ```
 
 Para trabalhar somente na interface:
 
-```powershell
+```bash
 npm run dev
 ```
 
-Para gerar o build desktop:
+Para gerar o build desktop e o helper do servidor Linux:
 
-```powershell
+```bash
 npm run tauri:build
 ```
 
 ### Validação
 
-```powershell
+```bash
 npm run build
 cd src-tauri
 cargo test
-cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
 cd ..
-git diff --check
 ```
 
 ## Tecnologias
@@ -197,6 +199,7 @@ git diff --check
 | Componentes e ícones | Base UI, shadcn e Lucide React |
 | Aplicativo desktop | Tauri 2 |
 | Backend local | Rust |
+| Agente servidor remoto | Helper compiled binary em Rust (`pzmm-helper-linux-x86_64`) |
 | Downloads da Workshop | SteamCMD |
 | Internacionalização | i18next, react-i18next e rust-i18n |
 
@@ -216,7 +219,7 @@ git diff --check
 
 ## Estado atual
 
-O projeto está em desenvolvimento ativo e o foco atual é Windows. O status dos servidores listados começa como offline; o diagnóstico detalhado acontece ao executar o teste do servidor.
+O projeto está em desenvolvimento ativo. A versão 0.4.0 introduz o suporte experimental a Workspaces Remotos para gerenciamento de servidores Project Zomboid hospedados em máquinas Linux via SSH, mantendo a gestão nativa de servidores locais no Windows.
 
 ## Licença
 

@@ -6,8 +6,8 @@
 
 ### Manage Project Zomboid multiplayer server mods without editing configuration files manually.
 
-[![Version](https://img.shields.io/badge/version-0.3.0-6d5dfc?style=for-the-badge)](package.json)
-![Platform](https://img.shields.io/badge/platform-Windows-0078D4?style=for-the-badge&logo=windows)
+[![Version](https://img.shields.io/badge/version-0.4.0-6d5dfc?style=for-the-badge)](package.json)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D4?style=for-the-badge&logo=windows)
 ![Desktop](https://img.shields.io/badge/desktop-Tauri-24C8D8?style=for-the-badge&logo=tauri&logoColor=white)
 ![Status](https://img.shields.io/badge/status-in%20development-F59E0B?style=for-the-badge)
 
@@ -21,21 +21,24 @@
 
 The application supports **Build 41** and **Build 42** profiles. Each server keeps its own build, mod list, and Workshop items.
 
-## Version 0.3.0 Highlights
+## Version 0.4.0 Highlights
 
-- Persistent backend cache for the mod library, reused by the server preflight.
-- Faster refreshes by revalidating only changed mod packages.
-- Full rescan action to clear the mod cache and rebuild the library.
-- Settings open with the last known values while backend settings are refreshed.
-- Local mod images load through Tauri's asset protocol instead of base64 payloads.
+- **Remote Workspaces**: Manage dedicated Project Zomboid servers hosted on Linux machines remotely over SSH.
+- **Workspaces Selector**: Choose between local Windows workspaces and remote Linux servers when booting the app.
+- **Full Localization (i18n)**: Workspace selection, SSH configs, step-by-step setup guides, and feedback modals translated dynamically.
+- **Mod Deletion**: Safe deletion of mods (local or remote) directly from the library cards with fully localized confirmation popups.
+- **Server Dashboard Metrics**: Display server pings in real-time and list connected users cleanly as `X/Y` (e.g. `0/2`).
+- **Linux Release Bundles**: Fully integrated Linux releases (including the standalone helper binary `pzmm-helper-linux-x86_64` and `.deb` desktop installers).
 
 ## Features
 
 | Feature | What you can do |
 | --- | --- |
+| **Workspaces** | Select Local Workspace (Windows) or Remote Workspace (Linux over SSH) with saved profile support. |
 | **Servers** | Create profiles, list existing servers, search, hide profiles, and clone lists between servers using the same build. |
 | **B41 and B42** | Choose a build per profile, change versions with confirmation, and identify incompatible mods. |
 | **Active mods** | Enable, disable, and reorder mods with automatic `.ini` updates. |
+| **Mod Deletion** | Delete local or remote mods directly from the library with confirmation modal safety. |
 | **Dependencies** | Detect missing dependencies, install required items, and validate load order. |
 | **Library** | Find local mods, Steam Workshop items, and mods stored in custom folders. |
 | **Downloads** | Download individual mods or complete collections through SteamCMD with anonymous login. |
@@ -152,40 +155,39 @@ The preference is saved to `settings.ini` and applied immediately.
 
 ### Prerequisites
 
-- Windows 10 or 11
-- [Node.js](https://nodejs.org/) with npm
-- [Rust](https://www.rust-lang.org/tools/install)
-- [Tauri prerequisites for Windows](https://v2.tauri.app/start/prerequisites/)
+- Windows 10/11 or Linux (Ubuntu/Debian)
+- [Node.js](https://nodejs.org/) (v20+ or v22+) with npm
+- [Rust](https://www.rust-lang.org/tools/install) (latest stable)
+- [Tauri Prerequisites for Windows](https://v2.tauri.app/start/prerequisites/) / [Tauri Prerequisites for Linux](https://v2.tauri.app/start/prerequisites/) (`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libsoup-3.0-dev`, etc.)
 - Project Zomboid installed to use all features
 
 ### Running Locally
 
-```powershell
+```bash
 npm install
 npm run tauri:dev
 ```
 
 To work only on the interface:
 
-```powershell
+```bash
 npm run dev
 ```
 
-To generate a desktop build:
+To generate a desktop build and the Linux server helper:
 
-```powershell
+```bash
 npm run tauri:build
 ```
 
 ### Validation
 
-```powershell
+```bash
 npm run build
 cd src-tauri
 cargo test
-cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
 cd ..
-git diff --check
 ```
 
 ## Technologies
@@ -197,6 +199,7 @@ git diff --check
 | Components and icons | Base UI, shadcn, and Lucide React |
 | Desktop application | Tauri 2 |
 | Local backend | Rust |
+| Remote server agent | Rust helper binary (`pzmm-helper-linux-x86_64`) |
 | Workshop downloads | SteamCMD |
 | Internationalization | i18next, react-i18next, and rust-i18n |
 
@@ -216,7 +219,7 @@ git diff --check
 
 ## Current Status
 
-The project is under active development and currently focused on Windows. Listed servers initially appear as offline; detailed diagnostics run when you execute the server test.
+The project is under active development. Version 0.4.0 introduces experimental Remote Workspace support for managing Linux Project Zomboid servers via SSH, alongside native local Windows workspace management.
 
 ## License
 

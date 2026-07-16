@@ -36,6 +36,20 @@ pub(super) fn write_local_workshop_id(
 }
 
 pub(crate) fn steam_workshop_dirs() -> Vec<PathBuf> {
+    #[cfg(not(windows))]
+    {
+        if let Some(extra_val) = env::var_os("PZMM_EXTRA_STEAM_WORKSHOP_DIRS") {
+            let mut dirs = Vec::new();
+            for line in extra_val.to_string_lossy().lines() {
+                let path = line.trim();
+                if !path.is_empty() {
+                    dirs.push(PathBuf::from(path));
+                }
+            }
+            return dedupe_paths(dirs);
+        }
+    }
+
     let mut steamapps_dirs = Vec::new();
     let mut candidates = Vec::new();
 
@@ -110,7 +124,9 @@ pub(crate) fn steam_workshop_dirs() -> Vec<PathBuf> {
 }
 
 pub(crate) fn steamcmd_workshop_dirs() -> Vec<PathBuf> {
-    dedupe_paths(managed_steamcmd_pool_workshop_dirs())
+    let mut dirs = dedupe_paths(managed_steamcmd_pool_workshop_dirs());
+    dirs.truncate(1);
+    dirs
 }
 
 #[cfg(not(windows))]

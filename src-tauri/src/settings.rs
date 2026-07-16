@@ -1,9 +1,6 @@
 #[cfg(not(windows))]
 use crate::app_config_dir;
-use crate::game::{
-    apply_performance_settings, normalize_ram_gb, steam_zomboid_game_dirs,
-    validate_game_executable_path,
-};
+use crate::game::{apply_performance_settings, normalize_ram_gb, validate_game_executable_path};
 use crate::i18n::{mod_location_label, text, validate_language_preference, LANGUAGE_AUTO};
 use crate::models::{AppSettings, ModLocation};
 #[cfg(windows)]
@@ -240,15 +237,9 @@ fn build_default_mod_locations() -> Result<Vec<ModLocation>, String> {
     let mut locations = Vec::new();
     let mut seen = HashSet::new();
 
-    push_mod_location(
-        &mut locations,
-        &mut seen,
-        &mod_location_label("steam", None),
-        "steam",
-        default_steam_workshop_dir(),
-    );
-
-    let local_mods_dir = ensure_local_zomboid_mods_dir_when_game_exists()?;
+    // 1. Zomboid default local mods directory
+    let local_mods_dir = zomboid_mods_dir()?;
+    let _ = fs::create_dir_all(&local_mods_dir);
     push_mod_location(
         &mut locations,
         &mut seen,
@@ -257,25 +248,26 @@ fn build_default_mod_locations() -> Result<Vec<ModLocation>, String> {
         local_mods_dir,
     );
 
+    // 2. Steam Client workshop directory
+    push_mod_location(
+        &mut locations,
+        &mut seen,
+        &mod_location_label("steam", None),
+        "steam",
+        default_steam_workshop_dir(),
+    );
+
+    // 3. SteamCMD workshop directory (on Windows, return first pool directory)
     #[cfg(windows)]
     {
-        let steamcmd_label = mod_location_label("steamcmd", None);
-        let steamcmd_workshop_dirs = default_steamcmd_workshop_dirs();
-        let should_number_steamcmd_locations = steamcmd_workshop_dirs.len() > 1;
-
-        for (index, pool_workshop_dir) in steamcmd_workshop_dirs.into_iter().enumerate() {
-            let label = if should_number_steamcmd_locations {
-                format!("{} {}", steamcmd_label, index + 1)
-            } else {
-                steamcmd_label.clone()
-            };
-
+        let steamcmd_dirs = default_steamcmd_workshop_dirs();
+        if let Some(first_steamcmd_dir) = steamcmd_dirs.into_iter().next() {
             push_mod_location(
                 &mut locations,
                 &mut seen,
-                &label,
+                &mod_location_label("steamcmd", None),
                 "steamcmd",
-                pool_workshop_dir,
+                first_steamcmd_dir,
             );
         }
     }
@@ -382,24 +374,6 @@ fn default_steamcmd_workshop_dirs() -> Vec<PathBuf> {
         .into_iter()
         .take(1)
         .collect()
-}
-
-fn ensure_local_zomboid_mods_dir_when_game_exists() -> Result<PathBuf, String> {
-    let mods_dir = zomboid_mods_dir()?;
-
-    if steam_zomboid_game_dirs()
-        .into_iter()
-        .any(|path| path.exists() && path.is_dir())
-    {
-        fs::create_dir_all(&mods_dir).map_err(|error| {
-            format!(
-                "Nao foi possivel criar a pasta de mods local em {}: {error}",
-                mods_dir.display()
-            )
-        })?;
-    }
-
-    Ok(mods_dir)
 }
 
 #[cfg(not(windows))]

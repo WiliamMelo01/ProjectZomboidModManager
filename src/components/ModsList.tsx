@@ -1,12 +1,14 @@
-import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Download, Info, RefreshCw, Search, X } from "lucide-react"
+import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Download, Info, RefreshCw, Search, Upload, X } from "lucide-react"
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { MissingDependencyModal } from "@/components/MissingDependencyModal"
 import { ModCard } from "@/components/mods/ModCard"
+import { UploadLocalModsModal } from "@/components/server/UploadLocalModsModal"
 import { getModImageSrc } from "@/lib/modImages"
 import { buildInstallDependencyPlan, isLocalMod } from "@/lib/modDependencies"
 import type { ZomboidMod } from "@/types/mod"
+import type { RemoteConnectionDraft } from "@/lib/commandRunner"
 
 type ModsListProps = {
   mods: ZomboidMod[]
@@ -19,6 +21,8 @@ type ModsListProps = {
   onOpenSettings?: () => void
   searchQuery: string
   onSearchChange: (value: string) => void
+  remoteConnection?: RemoteConnectionDraft | null
+  onDelete?: (mod: ZomboidMod) => Promise<void> | void
   isReadOnly?: boolean
 }
 
@@ -35,6 +39,8 @@ export function ModsList({
   onOpenSettings,
   searchQuery,
   onSearchChange,
+  remoteConnection,
+  onDelete,
   isReadOnly = false,
 }: ModsListProps) {
   const { t } = useTranslation()
@@ -42,8 +48,10 @@ export function ModsList({
   const [filterBuild, setFilterBuild] = useState<"all" | "b41" | "b42">("all")
   const [currentPage, setCurrentPage] = useState(1)
   const modsListRef = useRef<HTMLDivElement>(null)
+  const [isUploadLocalModsModalOpen, setIsUploadLocalModsModalOpen] = useState(false)
   const [pendingInstall, setPendingInstall] = useState<{ mod: ZomboidMod; dependencies: ZomboidMod[] } | null>(null)
   const [missingDependency, setMissingDependency] = useState<{ mod: ZomboidMod; dependencyId: string } | null>(null)
+  const [pendingDeleteMod, setPendingDeleteMod] = useState<ZomboidMod | null>(null)
   const deferredSearchQuery = useDeferredValue(searchQuery)
   const steamCount = useMemo(() => mods.filter((mod) => !isLocalMod(mod)).length, [mods])
 
@@ -112,14 +120,55 @@ export function ModsList({
 
   return (
     <div className="p-8 h-full flex flex-col gap-6 relative">
-      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight text-white">{t("library.title")}</h2>
-          <p className="text-gray-400 mt-1">{t("library.description")}</p>
+      <div className="flex flex-col gap-6 border-b border-white/5 pb-6">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+          <div>
+            <h2 className="text-3xl font-bold tracking-tight text-white">{t("library.title")}</h2>
+            <p className="text-gray-400 mt-1">{t("library.description")}</p>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex flex-wrap items-center gap-3 self-stretch lg:self-auto justify-end">
+            <button
+              className="flex items-center justify-center gap-2 bg-[#2b3238] border border-white/5 text-gray-300 hover:text-white hover:border-orange-400/30 px-4 py-2.5 rounded-xl transition-all text-xs font-bold uppercase tracking-wider shrink-0"
+              onClick={onRefresh}
+            >
+              <RefreshCw size={14} className={isLoading ? "animate-spin" : ""} />
+              <span>{t("common.refresh")}</span>
+            </button>
+
+            {!isReadOnly && (
+              <button
+                disabled={isLoading || isInstallingAll || steamCount === 0}
+                className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl transition-all font-bold text-xs uppercase tracking-wider shrink-0 ${
+                  isLoading || isInstallingAll || steamCount === 0
+                    ? "bg-white/5 text-gray-500 border border-white/5 cursor-not-allowed"
+                    : "bg-orange-500 text-white hover:bg-orange-600 shadow-lg shadow-orange-500/20"
+                }`}
+                onClick={() => void onInstallAll()}
+              >
+                {isInstallingAll ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />}
+                <span>{t("library.bringLocal")}</span>
+                {steamCount > 0 && <span className="text-[10px] opacity-80">({steamCount})</span>}
+              </button>
+            )}
+
+            {remoteConnection && !isReadOnly && (
+              <button
+                type="button"
+                onClick={() => setIsUploadLocalModsModalOpen(true)}
+                className="flex items-center justify-center gap-2 bg-orange-600/90 hover:bg-orange-500 text-white font-bold px-4 py-2.5 rounded-xl transition-all border border-orange-500/20 shadow-lg shadow-orange-950/20 text-xs uppercase tracking-wider shrink-0"
+              >
+                <Upload size={14} />
+                <span>{t("serverDetail.uploadLocalMods", "Enviar mods locais")}</span>
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="flex w-full flex-col gap-4 md:flex-row md:items-center xl:w-auto">
-          {/* Filtro de Status */}
+        {/* Filters Row */}
+        <div className="flex flex-wrap items-center gap-4">
+          {/* Status Filter */}
           <div className="flex bg-[#2b3238] p-1 rounded-xl border border-white/5 shadow-inner">
             <button
               onClick={() => setFilterStatus("all")}
@@ -146,6 +195,8 @@ export function ModsList({
               Steam
             </button>
           </div>
+
+          {/* Build Filter */}
           <div className="flex bg-[#2b3238] p-1 rounded-xl border border-white/5 shadow-inner">
             {(["all", "b41", "b42"] as const).map((build) => (
               <button
@@ -159,44 +210,6 @@ export function ModsList({
               </button>
             ))}
           </div>
-
-          <div className="relative w-full md:w-64 group">
-            <Search
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-orange-400 transition-colors"
-              size={18}
-            />
-            <input
-              type="text"
-              placeholder={t("mods.search")}
-              value={searchQuery}
-              onChange={(e) => onSearchChange(e.target.value)}
-              className="w-full bg-[#2b3238] border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-orange-400/50 transition-all placeholder:text-gray-600"
-            />
-          </div>
-
-          <button
-            className="flex items-center justify-center gap-2 bg-[#2b3238] border border-white/5 text-gray-300 hover:text-white hover:border-orange-400/30 px-4 py-2.5 rounded-xl transition-all"
-            onClick={onRefresh}
-          >
-            <RefreshCw size={18} className={isLoading ? "animate-spin" : ""} />
-            <span className="hidden md:inline">{t("common.refresh")}</span>
-          </button>
-
-          {!isReadOnly && (
-            <button
-              disabled={isLoading || isInstallingAll || steamCount === 0}
-              className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl transition-all font-bold text-sm ${
-                isLoading || isInstallingAll || steamCount === 0
-                  ? "bg-white/5 text-gray-500 border border-white/5 cursor-not-allowed"
-                  : "bg-orange-500 text-white hover:bg-orange-600 shadow-lg shadow-orange-500/20"
-              }`}
-              onClick={() => void onInstallAll()}
-            >
-              {isInstallingAll ? <RefreshCw size={18} className="animate-spin" /> : <Download size={18} />}
-              <span>{t("library.bringLocal")}</span>
-              {steamCount > 0 && <span className="text-xs opacity-80">({steamCount})</span>}
-            </button>
-          )}
         </div>
       </div>
 
@@ -219,6 +232,7 @@ export function ModsList({
               key={`${mod.source}:${mod.workshopId}:${mod.id}:${mod.path}`}
               mod={mod}
               onInstall={isReadOnly ? undefined : () => handleInstallClick(mod)}
+              onDelete={onDelete && !isReadOnly ? () => setPendingDeleteMod(mod) : undefined}
               isReadOnly={isReadOnly}
             />
           ))}
@@ -334,6 +348,47 @@ export function ModsList({
           onDownloaded={onRefresh}
           onOpenSettings={onOpenSettings}
         />
+      )}
+
+      {remoteConnection && (
+        <UploadLocalModsModal
+          isOpen={isUploadLocalModsModalOpen}
+          connection={remoteConnection}
+          onClose={() => setIsUploadLocalModsModalOpen(false)}
+          onSuccess={onRefresh}
+        />
+      )}
+
+      {pendingDeleteMod && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="flex w-full max-w-md flex-col overflow-hidden rounded-3xl border border-white/5 bg-[#22272b] p-6 shadow-2xl animate-in zoom-in-95 duration-300">
+            <h3 className="text-xl font-bold text-white mb-2">{t("mods.deleteConfirmTitle", "Excluir Mod")}</h3>
+            <p className="text-sm text-gray-400 leading-relaxed mb-6">
+              {t("mods.deleteConfirmBody", "Tem certeza que deseja excluir o mod {{name}}? Esta ação removerá os arquivos permanentemente e não poderá ser desfeita.", { name: pendingDeleteMod.name })}
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingDeleteMod(null)}
+                className="rounded-xl border border-white/10 px-5 py-2.5 text-xs font-bold text-gray-300 hover:text-white hover:bg-white/5 transition-colors"
+              >
+                {t("common.cancel", "Cancelar")}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (onDelete) {
+                    await onDelete(pendingDeleteMod)
+                  }
+                  setPendingDeleteMod(null)
+                }}
+                className="rounded-xl bg-red-600 px-6 py-2.5 text-xs font-black text-white hover:bg-red-700 transition-colors"
+              >
+                {t("common.confirm", "Confirmar")}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

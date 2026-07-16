@@ -1,4 +1,5 @@
-import { AlertCircle, Download, Hash, PackageCheck, User } from "lucide-react"
+import { AlertCircle, Download, Hash, PackageCheck, User, Trash2 } from "lucide-react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { getModImageSrc } from "@/lib/modImages"
@@ -8,10 +9,11 @@ import type { ZomboidMod } from "@/types/mod"
 type ModCardProps = {
   mod: ZomboidMod
   onInstall?: () => void
+  onDelete?: () => void
   isReadOnly?: boolean
 }
 
-export function ModCard({ mod, onInstall, isReadOnly = false }: ModCardProps) {
+export function ModCard({ mod, onInstall, onDelete, isReadOnly = false }: ModCardProps) {
   const { t } = useTranslation()
   const isLocal = isLocalMod(mod)
   const sourceBadge = getSourceBadge(mod)
@@ -105,17 +107,32 @@ export function ModCard({ mod, onInstall, isReadOnly = false }: ModCardProps) {
           <p className="text-xs font-mono text-gray-300 mt-0.5 text-center">{mod.size}</p>
         </div>
 
-        <button
-          disabled={isLocal || isReadOnly}
-          onClick={onInstall}
-          className={`w-full py-3 rounded-xl font-bold text-sm transition-all duration-300 flex items-center justify-center gap-2 mt-auto ${
-            isLocal || isReadOnly
-              ? "bg-white/5 text-gray-500 cursor-not-allowed border border-white/5"
-              : "bg-orange-500 text-white hover:bg-orange-600 hover:shadow-[0_4px_15_rgba(249,115,22,0.3)] active:scale-[0.98]"
-          }`}
-        >
-          {isLocal ? t("mods.installed") : isReadOnly ? "Remote" : t("mods.install")}
-        </button>
+        <div className="flex gap-2 mt-auto">
+          <button
+            disabled={isLocal || isReadOnly}
+            onClick={onInstall}
+            className={`flex-1 py-3 rounded-xl font-bold text-sm transition-all duration-300 flex items-center justify-center gap-2 ${
+              isLocal || isReadOnly
+                ? "bg-white/5 text-gray-500 cursor-not-allowed border border-white/5"
+                : "bg-orange-500 text-white hover:bg-orange-600 hover:shadow-[0_4px_15_rgba(249,115,22,0.3)] active:scale-[0.98]"
+            }`}
+          >
+            {isLocal ? t("mods.installed") : isReadOnly ? "Remote" : t("mods.install")}
+          </button>
+          {onDelete && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onDelete()
+              }}
+              className="px-4 py-3 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white transition-all border border-red-500/20 active:scale-[0.98]"
+              title={t("common.delete", "Excluir")}
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

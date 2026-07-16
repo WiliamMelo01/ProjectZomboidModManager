@@ -1,4 +1,4 @@
-import { Activity, ChevronRight, Eye, EyeOff, FolderOpen, Play, Plus, RefreshCw, Server, Settings, Square, Star, Terminal, Trash2, Users, Wifi } from "lucide-react"
+import { Activity, ChevronRight, Eye, EyeOff, FolderOpen, Play, Plus, RefreshCw, Server, Settings, Square, Star, Terminal, Trash2, Users, Wifi, Puzzle } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -526,11 +526,13 @@ function ServerCard({
         <div className="flex items-center justify-between text-sm">
           <div className="flex items-center gap-2 text-gray-400">
             <Users size={16} />
-            <span>{t("serverDetail.maxPlayers")}</span>
+            <span>{t("serverDetail.players", "Jogadores")}</span>
           </div>
-          <span className="font-medium">{server.maxPlayers || "-"}</span>
+          <span className="font-medium">
+            {`${server.connectedPlayers ?? 0}/${server.maxPlayers || "-"}`}
+          </span>
         </div>
-
+ 
         <div className="flex items-center justify-between text-sm">
           <div className="flex items-center gap-2 text-gray-400">
             <Wifi size={16} />
@@ -538,10 +540,22 @@ function ServerCard({
           </div>
           <span className="font-mono text-xs text-gray-300">{server.port}</span>
         </div>
+ 
+        {hasRemoteActions && server.pingMs !== undefined && (
+          <div className="flex items-center justify-between text-sm">
+            <div className="flex items-center gap-2 text-gray-400">
+              <Activity size={16} className="text-cyan-400" />
+              <span>Ping</span>
+            </div>
+            <span className="font-mono text-xs text-gray-300">
+              {server.pingMs === 1 ? "< 1 ms" : `${server.pingMs} ms`}
+            </span>
+          </div>
+        )}
 
         <div className="flex items-center justify-between text-sm">
           <div className="flex items-center gap-2 text-gray-400">
-            <Activity size={16} />
+            <Puzzle size={16} />
             <span>Mods</span>
           </div>
           <span className="font-medium">{server.modsCount}</span>

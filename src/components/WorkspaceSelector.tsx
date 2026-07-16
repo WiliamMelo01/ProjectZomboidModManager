@@ -33,6 +33,7 @@ import { invokeTauri } from "@/lib/tauri";
 type WorkspaceSelectorProps = {
   onSelectLocal: () => void;
   onSelectRemote: (connection: RemoteConnectionDraft) => void;
+  initialError?: string | null;
 };
 
 type RemoteServerConnectionResult = {
@@ -250,7 +251,9 @@ function latencyTone(latency?: number) {
 export function WorkspaceSelector({
   onSelectLocal,
   onSelectRemote,
+  initialError,
 }: WorkspaceSelectorProps) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<"choose" | "remote">("choose");
 
   if (mode === "remote") {
@@ -274,14 +277,16 @@ export function WorkspaceSelector({
               PZ Manager 0.4.0
             </p>
             <h1 className="mt-3 text-4xl font-black tracking-tight text-white sm:text-5xl">
-              Choose your workspace
+              {t("workspaceSelector.title")}
             </h1>
             <p className="mt-4 max-w-xl text-base leading-7 text-gray-400">
-              Work with server profiles on this PC, or connect to a Linux server
-              over SSH for hosted Project Zomboid setups. Windows cloud VMs
-              should use RDP and run this app inside the VM as a local
-              workspace.
+              {t("workspaceSelector.subtitle")}
             </p>
+            {initialError && (
+              <div className="mt-5 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+                {initialError}
+              </div>
+            )}
           </div>
 
           <div className="grid gap-5 lg:grid-cols-2">
@@ -298,19 +303,18 @@ export function WorkspaceSelector({
                   <Folder size={24} />
                 </div>
                 <span className="rounded-full border border-green-400/20 bg-green-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-green-300">
-                  Ready
+                  {t("workspaceSelector.readyBadge")}
                 </span>
               </div>
               <h2 className="mt-8 text-2xl font-black tracking-tight">
-                Local workspace
+                {t("workspaceSelector.localWorkspaceTitle")}
               </h2>
               <p className="mt-3 text-sm leading-6 text-gray-400">
-                Open the app normally and manage Project Zomboid server files,
-                mods, downloads, and tests from this OS user profile.
+                {t("workspaceSelector.localWorkspaceDesc")}
               </p>
               <div className="mt-7 flex items-center gap-2 text-sm font-bold text-orange-300">
                 <CheckCircle2 size={17} />
-                Uses the current app flow
+                {t("workspaceSelector.localWorkspaceFooter")}
               </div>
             </button>
 
@@ -324,20 +328,18 @@ export function WorkspaceSelector({
                   <Network size={24} />
                 </div>
                 <span className="rounded-full border border-cyan-300/20 bg-cyan-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-cyan-200">
-                  Linux SSH
+                  {t("workspaceSelector.sshBadge")}
                 </span>
               </div>
               <h2 className="mt-8 text-2xl font-black tracking-tight">
-                Server workspace
+                {t("workspaceSelector.remoteWorkspaceTitle")}
               </h2>
               <p className="mt-3 text-sm leading-6 text-gray-400">
-                Connect to an Ubuntu/Debian server over SSH. The app installs a
-                Linux helper, SteamCMD, and systemd units for the server
-                control.
+                {t("workspaceSelector.remoteWorkspaceDesc")}
               </p>
               <div className="mt-7 flex items-center gap-2 text-sm font-bold text-cyan-200">
                 <Wifi size={17} />
-                Configure connection
+                {t("workspaceSelector.remoteWorkspaceFooter")}
               </div>
             </button>
           </div>
@@ -631,9 +633,8 @@ function RemoteWorkspaceSetup({
         },
       );
 
-      setSavedConnections((currentConnections) =>
-        upsertSavedRemoteConnection(currentConnections, persistedConfig),
-      );
+      const nextConnections = upsertSavedRemoteConnection(savedConnections, persistedConfig);
+      setSavedConnections(nextConnections);
       setConnection(remoteConfigToDraft(persistedConfig));
       hasUserEditedConnection.current = false;
       setFeedback("Connection profile saved.");
@@ -745,9 +746,8 @@ function RemoteWorkspaceSetup({
           },
         },
       );
-      setSavedConnections((currentConnections) =>
-        upsertSavedRemoteConnection(currentConnections, persistedConfig),
-      );
+      const nextConnections = upsertSavedRemoteConnection(savedConnections, persistedConfig);
+      setSavedConnections(nextConnections);
       setConnectionStatuses((currentStatuses) => ({
         ...currentStatuses,
         [remoteConnectionId(persistedConfig)]: {
@@ -782,12 +782,12 @@ function RemoteWorkspaceSetup({
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-black uppercase tracking-[0.2em] text-cyan-400">
-                  Server Workspace
+                  {t("workspaceSelector.remoteWorkspaceTitle")}
                 </span>
                 <span className="h-1 w-1 rounded-full bg-cyan-400 animate-pulse"></span>
               </div>
               <h1 className="text-xl font-black tracking-tight text-white sm:text-2xl">
-                Connect to Linux Server
+                {t("workspaceSelector.connectTitle")}
               </h1>
             </div>
           </div>
@@ -819,7 +819,7 @@ function RemoteWorkspaceSetup({
                 <div className="flex items-center gap-2">
                   <Server size={18} className="text-cyan-400" />
                   <h2 className="text-sm font-bold text-white">
-                    Saved Connections
+                    {t("workspaceSelector.savedConnectionsTitle")}
                   </h2>
                 </div>
                 <button
@@ -828,7 +828,7 @@ function RemoteWorkspaceSetup({
                   className="flex items-center gap-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-1.5 text-xs font-bold text-cyan-300 transition-all hover:bg-cyan-500/20 hover:text-white"
                 >
                   <Plus size={14} />
-                  New Profile
+                  {t("workspaceSelector.newProfileBtn")}
                 </button>
               </div>
 
@@ -837,7 +837,7 @@ function RemoteWorkspaceSetup({
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-500" />
                 <input
                   type="text"
-                  placeholder="Search profiles or hosts..."
+                  placeholder={t("workspaceSelector.searchPlaceholder")}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full rounded-lg border border-white/5 bg-[#161a1d] pl-9 pr-4 py-2 text-sm text-white placeholder:text-gray-600 focus:border-cyan-500/50 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
@@ -863,13 +863,13 @@ function RemoteWorkspaceSetup({
                   </div>
                   <p className="text-sm font-bold text-gray-400">
                     {searchQuery
-                      ? "No matching profiles found"
-                      : "No saved profiles yet"}
+                      ? t("workspaceSelector.noMatchingProfiles")
+                      : t("workspaceSelector.noSavedProfiles")}
                   </p>
                   <p className="mt-1 text-xs text-gray-600 max-w-[240px]">
                     {searchQuery
-                      ? "Try altering your search keywords or host terms."
-                      : "Configure a connection on the right to save and quick-connect."}
+                      ? t("workspaceSelector.searchHint")
+                      : t("workspaceSelector.noSavedProfilesHint")}
                   </p>
                 </div>
               ) : (
@@ -908,7 +908,9 @@ function RemoteWorkspaceSetup({
                                   : "border-yellow-400/20 bg-yellow-500/10 text-yellow-200"
                               }`}
                             >
-                              {canQuickConnect ? "1-click" : "password"}
+                              {canQuickConnect
+                                ? t("workspaceSelector.quickConnectAuthMethodKey")
+                                : t("workspaceSelector.quickConnectAuthMethodPassword")}
                             </span>
                           </div>
 
@@ -930,7 +932,7 @@ function RemoteWorkspaceSetup({
                           {statusInfo.status === "idle" ? (
                             <>
                               <span className="text-[10px] text-gray-500 font-medium font-mono">
-                                test
+                                {t("workspaceSelector.testBtn")}
                               </span>
                             </>
                           ) : statusInfo.status === "checking" ? (
@@ -940,7 +942,7 @@ function RemoteWorkspaceSetup({
                                 className="text-cyan-400 animate-spin"
                               />
                               <span className="text-[10px] text-gray-500 font-medium font-mono">
-                                test
+                                {t("workspaceSelector.testBtn")}
                               </span>
                             </>
                           ) : statusInfo.status === "offline" ? (
@@ -949,7 +951,7 @@ function RemoteWorkspaceSetup({
                                 <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500"></span>
                               </span>
                               <span className="text-[10px] text-red-300 font-bold font-mono">
-                                off
+                                {t("workspaceSelector.offStatus")}
                               </span>
                             </>
                           ) : (
@@ -972,7 +974,7 @@ function RemoteWorkspaceSetup({
                       <div className="absolute right-3 bottom-3 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity bg-inherit pl-2 rounded-md">
                         <button
                           type="button"
-                          title="Test Latency"
+                          title={t("workspaceSelector.latencyTooltip")}
                           onClick={(e) => {
                             e.stopPropagation();
                             void testSavedConnectionLatency(savedConnection);
@@ -983,7 +985,7 @@ function RemoteWorkspaceSetup({
                         </button>
                         <button
                           type="button"
-                          title="Quick Connect"
+                          title={t("workspaceSelector.quickConnectTooltip")}
                           onClick={(e) => {
                             e.stopPropagation();
                             useSavedConnection(savedConnection);
@@ -994,7 +996,7 @@ function RemoteWorkspaceSetup({
                         </button>
                         <button
                           type="button"
-                          title="Remove Profile"
+                          title={t("workspaceSelector.removeProfileTooltip")}
                           onClick={(e) => {
                             e.stopPropagation();
                             removeSavedConnection(savedConnection.id);
@@ -1024,15 +1026,15 @@ function RemoteWorkspaceSetup({
                 <div>
                   <h2 className="text-lg font-bold text-white flex items-center gap-2">
                     <MonitorCog size={18} className="text-cyan-400" />
-                    Connection Details
+                    {t("workspaceSelector.connectionDetailsTitle")}
                   </h2>
                   <p className="mt-1 text-xs text-gray-400">
                     {remoteConnectionId(connection) &&
                     savedConnections.some(
                       (c) => c.id === remoteConnectionId(connection),
                     )
-                      ? "Viewing saved profile settings. Make changes and click Connect to save."
-                      : "Fill in the parameters below to establish a new server connection."}
+                      ? t("workspaceSelector.savedProfileNotice")
+                      : t("workspaceSelector.newProfileNotice")}
                   </p>
                 </div>
               </div>
@@ -1040,25 +1042,25 @@ function RemoteWorkspaceSetup({
               {/* Form Input fields */}
               <div className="grid gap-5 md:grid-cols-2">
                 <RemoteInput
-                  label="Connection Profile Name"
+                  label={t("workspaceSelector.fieldProfileName")}
                   value={connection.name}
                   placeholder="e.g. Server 1"
                   onChange={(value) => updateField("name", value)}
                 />
                 <RemoteInput
-                  label="SSH Host IP / Domain"
+                  label={t("workspaceSelector.fieldHost")}
                   value={connection.host}
                   placeholder="e.g. 192.168.1.100"
                   onChange={(value) => updateField("host", value)}
                 />
                 <RemoteInput
-                  label="SSH Port"
+                  label={t("workspaceSelector.fieldPort")}
                   value={connection.port}
                   placeholder="22"
                   onChange={(value) => updateField("port", value)}
                 />
                 <RemoteInput
-                  label="SSH Username"
+                  label={t("workspaceSelector.fieldUsername")}
                   value={connection.username}
                   placeholder="e.g. ubuntu"
                   onChange={(value) => updateField("username", value)}
@@ -1070,7 +1072,7 @@ function RemoteWorkspaceSetup({
                 <div className="flex items-center justify-between gap-3 mb-3">
                   <h3 className="text-xs font-black uppercase tracking-[0.2em] text-cyan-400 flex items-center gap-1.5">
                     <KeyRound size={13} />
-                    Authentication Strategy
+                    {t("workspaceSelector.authStrategyTitle")}
                   </h3>
                   <button
                     type="button"
@@ -1100,7 +1102,7 @@ function RemoteWorkspaceSetup({
                           : ""
                       }
                     />
-                    <span className="text-sm font-semibold">Password</span>
+                    <span className="text-sm font-semibold">{t("workspaceSelector.authMethodPassword")}</span>
                   </button>
                   <button
                     type="button"
@@ -1118,7 +1120,7 @@ function RemoteWorkspaceSetup({
                       }
                     />
                     <span className="text-sm font-semibold">
-                      SSH Private Key File
+                      {t("workspaceSelector.authMethodKey")}
                     </span>
                   </button>
                 </div>
@@ -1126,7 +1128,7 @@ function RemoteWorkspaceSetup({
                 {connection.authMethod === "password" ? (
                   <div className="mt-4">
                     <RemoteInput
-                      label="SSH Password"
+                      label={t("workspaceSelector.fieldPassword")}
                       type="password"
                       value={connection.password}
                       placeholder="Password for the user account"
@@ -1137,7 +1139,7 @@ function RemoteWorkspaceSetup({
                   <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-end">
                     <div className="flex-1">
                       <RemoteInput
-                        label="SSH Private Key File Path"
+                        label={t("workspaceSelector.fieldKeyPath")}
                         value={connection.sshKeyPath}
                         placeholder="~/.ssh/id_ed25519"
                         onChange={(value) => updateField("sshKeyPath", value)}
@@ -1149,7 +1151,7 @@ function RemoteWorkspaceSetup({
                       className="flex h-[44px] items-center justify-center gap-2 rounded-lg border border-white/10 px-4 text-xs font-bold text-gray-300 transition-colors hover:bg-white/5 hover:text-white shrink-0 mb-0.5"
                     >
                       <Folder size={14} />
-                      Choose File
+                      {t("workspaceSelector.chooseFileBtn")}
                     </button>
                     <button
                       type="button"
@@ -1164,7 +1166,7 @@ function RemoteWorkspaceSetup({
                       ) : (
                         <KeyRound size={14} />
                       )}
-                      Public Key
+                      {t("workspaceSelector.publicKeyBtn")}
                     </button>
                     {publicKeyError && (
                       <p className="sm:col-span-3 break-words rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 font-mono text-xs text-red-300">
@@ -1195,7 +1197,7 @@ function RemoteWorkspaceSetup({
                         ) : (
                           <KeyRound size={14} />
                         )}
-                        Fix key permissions and retry
+                        {t("workspaceSelector.fixPermissionsBtn")}
                       </button>
                     )}
                   </div>
@@ -1216,7 +1218,7 @@ function RemoteWorkspaceSetup({
                   onClick={onBack}
                   className="rounded-lg border border-white/10 px-5 py-2.5 text-xs font-bold text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="button"
@@ -1225,7 +1227,7 @@ function RemoteWorkspaceSetup({
                   className="flex items-center justify-center gap-2 rounded-lg border border-white/10 px-5 py-2.5 text-xs font-bold text-gray-300 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Save size={14} />
-                  Save Profile
+                  {t("workspaceSelector.saveProfileBtn")}
                 </button>
                 <button
                   type="submit"
@@ -1235,12 +1237,12 @@ function RemoteWorkspaceSetup({
                   {status === "connecting" ? (
                     <>
                       <RefreshCw size={14} className="animate-spin" />
-                      Testing connection...
+                      {t("workspaceSelector.testingConnectionBtn")}
                     </>
                   ) : (
                     <>
                       <KeyRound size={14} />
-                      Connect Server
+                      {t("workspaceSelector.connectServerBtn")}
                     </>
                   )}
                 </button>
@@ -1290,7 +1292,7 @@ function PublicKeyModal({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Generated public key"
+        aria-label={t("workspaceSelector.modalPublicKeyTitle")}
         className="w-full max-w-2xl rounded-3xl border border-white/10 bg-[#22272b] p-6 shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
@@ -1301,10 +1303,10 @@ function PublicKeyModal({
             </div>
             <div>
               <h3 className="text-lg font-black text-white">
-                Generated public key
+                {t("workspaceSelector.modalPublicKeyTitle")}
               </h3>
               <p className="mt-1 text-xs text-gray-400">
-                Copy this value to the server authorized_keys file.
+                {t("workspaceSelector.modalPublicKeySubtitle")}
               </p>
             </div>
           </div>
@@ -1328,7 +1330,7 @@ function PublicKeyModal({
             onClick={onClose}
             className="rounded-xl border border-white/10 px-5 py-2.5 text-xs font-bold text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
           >
-            Close
+            {t("workspaceSelector.modalPublicKeyClose")}
           </button>
           <button
             type="button"
@@ -1336,7 +1338,7 @@ function PublicKeyModal({
             className="flex items-center justify-center gap-2 rounded-xl bg-cyan-500 px-5 py-2.5 text-xs font-black text-white transition-all hover:bg-cyan-400 hover:shadow-[0_0_12px_rgba(6,182,212,0.3)]"
           >
             <Clipboard size={14} />
-            {copied ? "Copied" : "Copy"}
+            {copied ? t("workspaceSelector.modalPublicKeyCopied") : t("workspaceSelector.modalPublicKeyCopy")}
           </button>
         </div>
       </div>
@@ -1415,11 +1417,10 @@ function SshHelpModal({ onClose }: { onClose: () => void }) {
             </div>
             <div>
               <h3 className="text-xl font-black text-white">
-                Linux SSH server setup
+                {t("workspaceSelector.sshHelpModalTitle")}
               </h3>
               <p className="text-xs text-gray-400">
-                Configure only the Linux server side here. Windows VMs should be
-                accessed by RDP and run this app locally inside the VM.
+                {t("workspaceSelector.helpSshIntro")}
               </p>
             </div>
           </div>
@@ -1438,10 +1439,10 @@ function SshHelpModal({ onClose }: { onClose: () => void }) {
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-cyan-500/15 text-[11px] font-black text-cyan-300">
                 1
               </span>
-              Install and enable OpenSSH on Ubuntu/Debian
+              {t("workspaceSelector.sshHelpStep1Title")}
             </h4>
             <p className="mt-2 text-xs text-gray-400">
-              Run this on the Linux server as a sudo-capable user.
+              {t("workspaceSelector.sshHelpStep1Body")}
             </p>
             <CodeBlock
               code={
@@ -1455,11 +1456,10 @@ function SshHelpModal({ onClose }: { onClose: () => void }) {
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-cyan-500/15 text-[11px] font-black text-cyan-300">
                 2
               </span>
-              Make sure the SSH user can use sudo
+              {t("workspaceSelector.sshHelpStep2Title")}
             </h4>
             <p className="mt-2 text-xs text-gray-400">
-              The app uses sudo for /opt/pzmm, /var/lib/pzmm, SteamCMD packages,
-              and systemd service management.
+              {t("workspaceSelector.sshHelpStep2Body")}
             </p>
             <CodeBlock
               code={"sudo usermod -aG sudo <SSH_USER>\nsudo -n true"}
@@ -1471,11 +1471,10 @@ function SshHelpModal({ onClose }: { onClose: () => void }) {
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-cyan-500/15 text-[11px] font-black text-cyan-300">
                 3
               </span>
-              Generate the public key in this app
+              {t("workspaceSelector.sshHelpStep3Title")}
             </h4>
             <p className="mt-2 text-xs text-gray-400">
-              Select your private key file in the connection form, then click
-              Public Key and copy the generated public key content.
+              {t("workspaceSelector.sshHelpStep3Body")}
             </p>
           </div>
 
@@ -1484,11 +1483,10 @@ function SshHelpModal({ onClose }: { onClose: () => void }) {
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-cyan-500/15 text-[11px] font-black text-cyan-300">
                 4
               </span>
-              Add the public key to authorized_keys
+              {t("workspaceSelector.sshHelpStep4Title")}
             </h4>
             <p className="mt-2 text-xs text-gray-400">
-              Paste the generated public key into the Linux user's
-              authorized_keys file and lock down permissions.
+              {t("workspaceSelector.sshHelpStep4Body")}
             </p>
             <CodeBlock
               code={

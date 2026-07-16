@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Box, Download, Server, Settings } from "lucide-react";
+import { Box, Download, Server, Settings, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { AppHeader, type AppNotification } from "@/components/AppHeader";
@@ -67,7 +67,7 @@ function isRemoteSetupComplete(config: RemoteWorkspaceConfig | null) {
     Math.max(config?.remoteSetupCompletedStep ?? 0, 0),
     4,
   );
-  return completedStep >= 4 || Boolean(config?.remoteZomboidServerPath?.trim());
+  return completedStep >= 4;
 }
 
 function getInitialWorkspace() {
@@ -102,11 +102,53 @@ function App() {
   }
 
   const initialWorkspace = useMemo(getInitialWorkspace, []);
-  const [workspaceMode, setWorkspaceMode] = useState<"local" | "remote" | null>(
-    initialWorkspace.mode,
+  const [workspaceMode, setWorkspaceMode] = useState<"local" | "remote" | "connecting" | null>(
+    initialWorkspace.mode === "remote" ? "connecting" : initialWorkspace.mode
   );
   const [remoteConnection, setRemoteConnection] =
     useState<RemoteConnectionDraft | null>(initialWorkspace.connection);
+  const [autoConnectError, setAutoConnectError] = useState<string | null>(null);
+
+  const { t } = useTranslation();
+
+  useEffect(() => {
+    if (initialWorkspace.mode === "remote" && initialWorkspace.connection) {
+      const conn = initialWorkspace.connection;
+      invokeTauri<RemoteServerConnectionResult>("test_remote_server_connection", {
+        connection: conn,
+      })
+        .then((result) => {
+          setRemoteConnection({
+            ...conn,
+            host: result.host,
+            port: String(result.port),
+            serverPath: result.serverPath,
+          });
+          setWorkspaceMode("remote");
+        })
+        .catch((err) => {
+          console.error("Auto remote connection failed:", err);
+          window.localStorage.removeItem(LAST_WORKSPACE_KEY);
+          setRemoteConnection(null);
+          setWorkspaceMode(null);
+          setAutoConnectError(
+            t("remoteSetup.autoConnectFailed", "Não foi possível conectar automaticamente ao último servidor.")
+          );
+        });
+    }
+  }, [initialWorkspace.mode, initialWorkspace.connection, t]);
+
+  if (workspaceMode === "connecting") {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center bg-[#22272b] text-white">
+        <Loader2 size={48} className="animate-spin text-orange-500 mb-4" />
+        <h2 className="text-lg font-bold">{t("remoteSetup.connecting", "Conectando ao servidor remoto...")}</h2>
+        <p className="text-xs text-gray-500 mt-2">
+          {initialWorkspace.connection?.username}@{initialWorkspace.connection?.host}
+        </p>
+      </main>
+    );
+  }
 
   if (workspaceMode === null) {
     return (
@@ -120,13 +162,17 @@ function App() {
           setRemoteConnection(connection);
           setWorkspaceMode("remote");
         }}
+        initialError={autoConnectError}
       />
     );
   }
 
   return (
     <LocalWorkspaceApp
-      onChangeWorkspace={() => setWorkspaceMode(null)}
+      onChangeWorkspace={() => {
+        window.localStorage.removeItem(LAST_WORKSPACE_KEY);
+        setWorkspaceMode(null);
+      }}
       remoteConnection={workspaceMode === "remote" ? remoteConnection : null}
     />
   );
@@ -740,6 +786,27 @@ function LocalWorkspaceApp({
     }
   }
 
+  async function deleteMod(mod: ZomboidMod) {
+    try {
+      await invokeTauri("delete_zomboid_mod_command", {
+        packagePath: mod.packagePath,
+        connection: remoteConnection,
+      });
+      addNotification({
+        tone: "success",
+        title: t("mods.deleteSuccessTitle", "Mod Excluído"),
+        message: t("mods.deleteSuccessMessage", "O mod foi excluído com sucesso do workspace."),
+      });
+      await loadMods();
+    } catch (err) {
+      addNotification({
+        tone: "error",
+        title: t("mods.deleteErrorTitle", "Falha ao Excluir"),
+        message: t("mods.deleteErrorMessage", "Não foi possível excluir o mod: {{error}}", { error: getErrorMessage(err) }),
+      });
+    }
+  }
+
   async function scanData() {
     if (isRemoteWorkspace) {
       await loadServers();
@@ -771,8 +838,37 @@ function LocalWorkspaceApp({
 
   async function loadInitialData() {
     if (isRemoteWorkspace) {
-      await loadServers();
-      void loadModsInBackground();
+      if (!remoteConnection) return;
+      setIsLoadingServers(true);
+      setServersError(null);
+      try {
+        const foundServers = await invokeTauri<ZomboidServer[]>(
+          "list_remote_zomboid_servers",
+          {
+            connection: remoteConnection,
+          },
+        );
+        const nextServers = applyServers(foundServers);
+        setSelectedServer((current) =>
+          current
+            ? (nextServers.find((server) => server.id === current.id) ?? null)
+            : null,
+        );
+        void loadModsInBackground();
+      } catch (error) {
+        window.localStorage.removeItem(LAST_WORKSPACE_KEY);
+        setWorkspaceMode(null);
+        setRemoteConnection(null);
+        addNotification({
+          tone: "error",
+          title: t("remoteSetup.errorHeader", "Falha na Conexão"),
+          message: t("remoteSetup.connectionFailedNotice", {
+            defaultValue: "Não foi possível estabelecer contato com a VM remota. Retornando ao seletor.",
+          }),
+        });
+      } finally {
+        setIsLoadingServers(false);
+      }
       return;
     }
 
@@ -1119,7 +1215,7 @@ function LocalWorkspaceApp({
     await checkRemoteServerFirewall(server);
   }
 
-  function openRemoteServerConsole(server: ZomboidServer) {
+  async function openRemoteServerConsole(server: ZomboidServer) {
     if (server.status !== "online") {
       return;
     }
@@ -1143,6 +1239,20 @@ function LocalWorkspaceApp({
             t("remoteStart.commandsQueued"),
           ],
     );
+
+    try {
+      if (isRemoteWorkspace && remoteConnection) {
+        await invokeTauri<RemoteServerActionResult>(
+          "stream_remote_zomboid_server_logs",
+          {
+            connection: remoteConnection,
+            serverId: server.id,
+          }
+        );
+      }
+    } catch (err) {
+      console.error("Could not stream remote server logs:", err);
+    }
   }
 
   async function killPortConflictsAndContinue(server: ZomboidServer) {
@@ -1186,6 +1296,36 @@ function LocalWorkspaceApp({
       ].slice(0, 30),
     );
   }
+
+  const uploadLocalModToRemote = async (mod: ZomboidMod) => {
+    if (!isRemoteWorkspace || !remoteConnection) {
+      addNotification({
+        title: t("remoteSetup.errorHeader", "Erro"),
+        message: t("remoteSetup.noActiveConnection", "Nenhuma conexão remota ativa."),
+        tone: "error",
+      });
+      return;
+    }
+    try {
+      await invokeTauri("upload_local_mod_to_remote", {
+        connection: remoteConnection,
+        modId: mod.id,
+        localModPath: mod.packagePath,
+      });
+      addNotification({
+        title: t("mods.uploadSuccessHeader", "Mod Enviado"),
+        message: t("mods.uploadSuccess", "Mod enviado com sucesso!"),
+        tone: "success",
+      });
+    } catch (err) {
+      addNotification({
+        title: t("mods.uploadErrorHeader", "Falha no Envio"),
+        message: t("mods.uploadError", { error: String(err) }),
+        tone: "error",
+      });
+      throw err;
+    }
+  };
 
   function handleNotificationClick(notification: AppNotification) {
     setNotifications((currentNotifications) =>
@@ -1631,6 +1771,8 @@ function LocalWorkspaceApp({
               onOpenSettings={() => setActiveTab("settings")}
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
+              remoteConnection={remoteConnection}
+              onDelete={deleteMod}
               isReadOnly={false}
             />
           )}

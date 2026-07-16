@@ -83,8 +83,138 @@ fn hydrate_server_statuses(servers: &mut [ZomboidServer]) {
             .is_some_and(|port| active_ports.contains(&port))
         {
             server.status = "online".to_string();
+            server.ping_ms = Some(1); // Localhost ping is always < 1 ms
+            server.connected_players = Some(0);
+
+            if let Ok(state_path) = server_controller_state_path(&server.id) {
+                if state_path.is_file() {
+                    let _ = queue_players_status_query(&server.id);
+                    if let Ok(state_content) = fs::read_to_string(&state_path) {
+                        if let Some(log_path) =
+                            state_value(&state_content, "logPath").map(PathBuf::from)
+                        {
+                            if log_path.is_file() {
+                                if let Some(connected_players) = parse_connected_players(&log_path)
+                                {
+                                    server.connected_players = Some(connected_players);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            server.status = "offline".to_string();
+            server.ping_ms = None;
+            server.connected_players = None;
         }
     }
+}
+
+fn safe_server_id(server_id: &str) -> String {
+    let safe_id = server_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+
+    if safe_id.trim().is_empty() {
+        "server".to_string()
+    } else {
+        safe_id
+    }
+}
+
+fn state_value(content: &str, key: &str) -> Option<String> {
+    content.lines().find_map(|line| {
+        let (current_key, value) = line.split_once('=')?;
+        if current_key.trim() == key {
+            Some(value.trim().to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn server_controller_state_path(server_id: &str) -> Result<PathBuf, String> {
+    Ok(app_config_dir()?
+        .join("server-controllers")
+        .join(format!("{}.state", safe_server_id(server_id))))
+}
+
+fn server_command_queue_dir(server_id: &str) -> Result<PathBuf, String> {
+    Ok(app_config_dir()?
+        .join("server-command-queues")
+        .join(safe_server_id(server_id)))
+}
+
+fn queue_players_status_query(server_id: &str) -> Result<(), String> {
+    const PLAYERS_QUERY_INTERVAL_MS: u128 = 10_000;
+
+    let command_dir = server_command_queue_dir(server_id)?;
+    fs::create_dir_all(&command_dir)
+        .map_err(|error| format!("Could not create server command queue: {error}"))?;
+
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default();
+    let marker_path = command_dir.join(".players-last-query");
+
+    if let Ok(last_query) = fs::read_to_string(&marker_path) {
+        if let Ok(last_query_ms) = last_query.trim().parse::<u128>() {
+            if now_ms.saturating_sub(last_query_ms) < PLAYERS_QUERY_INTERVAL_MS {
+                return Ok(());
+            }
+        }
+    }
+
+    fs::write(&marker_path, now_ms.to_string())
+        .map_err(|error| format!("Could not update players query marker: {error}"))?;
+    fs::write(command_dir.join(format!("{now_ms}-players.cmd")), "players")
+        .map_err(|error| format!("Could not queue players command: {error}"))
+}
+
+fn parse_connected_players(log_path: &Path) -> Option<u32> {
+    use std::io::BufRead;
+    let file = fs::File::open(log_path).ok()?;
+    let reader = std::io::BufReader::new(file);
+    let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
+    let max_lines_to_check = 200;
+    let start_index = lines.len().saturating_sub(max_lines_to_check);
+
+    for line in lines[start_index..].iter().rev() {
+        if let Some(count) = parse_players_line(line) {
+            return Some(count);
+        }
+    }
+    None
+}
+
+fn parse_players_line(line: &str) -> Option<u32> {
+    if let Some(idx) = line.find("Players: (") {
+        let sub = &line[idx + "Players: (".len()..];
+        let end_char = if sub.contains('/') { '/' } else { ')' };
+        if let Some(end) = sub.find(end_char) {
+            if let Ok(count) = sub[..end].trim().parse::<u32>() {
+                return Some(count);
+            }
+        }
+    }
+    if let Some(idx) = line.find("Players connected (") {
+        let sub = &line[idx + "Players connected (".len()..];
+        if let Some(end) = sub.find(')') {
+            if let Ok(count) = sub[..end].trim().parse::<u32>() {
+                return Some(count);
+            }
+        }
+    }
+    None
 }
 #[tauri::command]
 pub(crate) fn open_zomboid_server_file(server_id: String) -> Result<(), String> {
@@ -294,6 +424,8 @@ fn read_zomboid_server_from_path(path: &Path) -> Result<ZomboidServer, String> {
         active_mod_ids,
         status: "offline".to_string(),
         game_build,
+        connected_players: None,
+        ping_ms: None,
     })
 }
 

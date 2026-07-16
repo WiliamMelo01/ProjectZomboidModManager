@@ -16,6 +16,8 @@ pub(crate) struct ZomboidServer {
     pub(crate) active_mod_ids: Vec<String>,
     pub(crate) status: String,
     pub(crate) game_build: String,
+    pub(crate) connected_players: Option<u32>,
+    pub(crate) ping_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

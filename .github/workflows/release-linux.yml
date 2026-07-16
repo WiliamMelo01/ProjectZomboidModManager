@@ -26,6 +26,7 @@ jobs:
             libgtk-3-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
+            libsoup-3.0-dev \
             patchelf
 
       - name: Setup Node.js
@@ -40,22 +41,15 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build frontend
-        run: npm run build
-
-      - name: Build Linux helper
-        working-directory: src-tauri
-        run: cargo build --release --bin pzmm-helper-linux-x86_64
-
-      - name: Build Linux app executable
-        working-directory: src-tauri
-        run: cargo build --release --bin zomboid_server_mod_manager
+      - name: Build Linux app and helper bundle
+        run: npm run tauri:build
 
       - name: Stage Linux assets
         run: |
           mkdir -p release-assets
           cp src-tauri/target/release/pzmm-helper-linux-x86_64 release-assets/pzmm-helper-linux-x86_64
           cp src-tauri/target/release/zomboid_server_mod_manager release-assets/pz-manager-linux-x86_64
+          cp src-tauri/target/release/bundle/deb/*.deb release-assets/
           chmod 0755 release-assets/pzmm-helper-linux-x86_64 release-assets/pz-manager-linux-x86_64
 
       - name: Upload Linux workflow artifacts

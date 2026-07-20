@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next"
 import { MissingDependencyModal } from "@/components/MissingDependencyModal"
 import { ModCard } from "@/components/mods/ModCard"
 import { UploadLocalModsModal } from "@/components/server/UploadLocalModsModal"
+import { ServerModDetailsModal } from "@/components/server/ServerModDetailsModal"
 import { getModImageSrc } from "@/lib/modImages"
 import { buildInstallDependencyPlan, isLocalMod } from "@/lib/modDependencies"
 import type { ZomboidMod } from "@/types/mod"
@@ -24,6 +25,8 @@ type ModsListProps = {
   remoteConnection?: RemoteConnectionDraft | null
   onDelete?: (mod: ZomboidMod) => Promise<void> | void
   isReadOnly?: boolean
+  workshopMappings?: Record<string, string>
+  onSaveWorkshopMapping?: (modId: string, workshopId: string) => Promise<void>
 }
 
 const MODS_PER_PAGE = 30
@@ -42,6 +45,8 @@ export function ModsList({
   remoteConnection,
   onDelete,
   isReadOnly = false,
+  workshopMappings = {},
+  onSaveWorkshopMapping,
 }: ModsListProps) {
   const { t } = useTranslation()
   const [filterStatus, setFilterStatus] = useState<"all" | "local" | "steam">("all")
@@ -52,6 +57,7 @@ export function ModsList({
   const [pendingInstall, setPendingInstall] = useState<{ mod: ZomboidMod; dependencies: ZomboidMod[] } | null>(null)
   const [missingDependency, setMissingDependency] = useState<{ mod: ZomboidMod; dependencyId: string } | null>(null)
   const [pendingDeleteMod, setPendingDeleteMod] = useState<ZomboidMod | null>(null)
+  const [selectedModForDetails, setSelectedModForDetails] = useState<ZomboidMod | null>(null)
   const deferredSearchQuery = useDeferredValue(searchQuery)
   const steamCount = useMemo(() => mods.filter((mod) => !isLocalMod(mod)).length, [mods])
 
@@ -234,6 +240,8 @@ export function ModsList({
               onInstall={isReadOnly ? undefined : () => handleInstallClick(mod)}
               onDelete={onDelete && !isReadOnly ? () => setPendingDeleteMod(mod) : undefined}
               isReadOnly={isReadOnly}
+              onSelect={setSelectedModForDetails}
+              workshopMappings={workshopMappings}
             />
           ))}
 
@@ -389,6 +397,15 @@ export function ModsList({
             </div>
           </div>
         </div>
+      )}
+
+      {selectedModForDetails && (
+        <ServerModDetailsModal
+          mod={selectedModForDetails}
+          onClose={() => setSelectedModForDetails(null)}
+          workshopMappings={workshopMappings}
+          onSaveWorkshopMapping={onSaveWorkshopMapping}
+        />
       )}
     </div>
   )

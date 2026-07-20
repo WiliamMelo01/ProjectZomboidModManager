@@ -4,20 +4,39 @@ import { useTranslation } from "react-i18next"
 
 import { getModImageSrc } from "@/lib/modImages"
 import { isLocalMod } from "@/lib/modDependencies"
+import { isModInCloud } from "@/lib/serverMods"
 import { invokeTauri } from "@/lib/tauri"
 import type { ZomboidMod } from "@/types/mod"
 
 type ServerModDetailsModalProps = {
   mod: ZomboidMod
   onClose: () => void
+  workshopMappings?: Record<string, string>
+  onSaveWorkshopMapping?: (modId: string, workshopId: string) => Promise<void>
 }
 
-export function ServerModDetailsModal({ mod, onClose }: ServerModDetailsModalProps) {
+export function ServerModDetailsModal({
+  mod,
+  onClose,
+  workshopMappings = {},
+  onSaveWorkshopMapping,
+}: ServerModDetailsModalProps) {
   const { t } = useTranslation()
   const dependencies = mod.dependencies ?? []
   const mapNames = mod.mapNames ?? []
   const imageSrc = getModImageSrc(mod.imageUrl)
   const [resolvedSize, setResolvedSize] = useState(mod.size || "-")
+
+  const [isEditing, setIsEditing] = useState(false)
+  const resolvedWorkshopId = mod.workshopId?.trim() || workshopMappings[mod.id] || workshopMappings[mod.id.toLowerCase()] || ""
+  const [tempWorkshopId, setTempWorkshopId] = useState(resolvedWorkshopId)
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  // Sincroniza o ID se ele for carregado após a montagem
+  useEffect(() => {
+    setTempWorkshopId(resolvedWorkshopId)
+  }, [resolvedWorkshopId])
 
   useEffect(() => {
     let isCancelled = false
@@ -114,7 +133,89 @@ export function ServerModDetailsModal({ mod, onClose }: ServerModDetailsModalPro
             <Detail label={t("mods.version")} value={mod.version || "-"} />
             <Detail label={t("mods.size")} value={resolvedSize} />
             <Detail label={t("mods.source")} value={mod.source || "-"} />
-            <Detail label="Workshop ID" value={mod.workshopId || "-"} icon={<Hash size={14} />} />
+            
+            {isEditing ? (
+              <div className="min-w-0 rounded-xl border border-orange-400/25 bg-[#1e2327] p-3 col-span-1 sm:col-span-2">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-orange-400">Workshop ID (Editando)</p>
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={tempWorkshopId}
+                    onChange={(e) => setTempWorkshopId(e.target.value.replace(/\D/g, ""))}
+                    placeholder="Digite o ID da Workshop"
+                    disabled={isSaving}
+                    className="flex-1 bg-black/35 border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white font-mono focus:outline-none focus:border-orange-400/50"
+                  />
+                  <button
+                    onClick={async () => {
+                      setSaveError(null)
+                      const cleanId = tempWorkshopId.trim()
+                      if (cleanId && !/^\d+$/.test(cleanId)) {
+                        setSaveError("Apenas números são válidos")
+                        return
+                      }
+                      setIsSaving(true)
+                      try {
+                        if (onSaveWorkshopMapping) {
+                          await onSaveWorkshopMapping(mod.id, cleanId)
+                        }
+                        setIsEditing(false)
+                      } catch (err) {
+                        setSaveError("Erro ao salvar")
+                      } finally {
+                        setIsSaving(false)
+                      }
+                    }}
+                    disabled={isSaving}
+                    className="rounded-lg bg-orange-400 px-3 py-1 text-xs font-bold text-black hover:bg-orange-300 disabled:opacity-50 transition-colors"
+                  >
+                    {isSaving ? "Salvando..." : "Salvar"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setTempWorkshopId(resolvedWorkshopId)
+                      setIsEditing(false)
+                      setSaveError(null)
+                    }}
+                    disabled={isSaving}
+                    className="rounded-lg bg-[#2b3238] border border-white/5 px-2.5 py-1 text-xs font-bold text-gray-300 hover:bg-[#353c42] transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+                {saveError && <p className="mt-1 text-[10px] text-red-400">{saveError}</p>}
+              </div>
+            ) : (
+              <div className="min-w-0 rounded-xl border border-white/5 bg-[#1e2327] p-3 flex flex-col justify-between">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">Workshop ID</p>
+                  <p className="mt-1 flex items-center gap-1.5 break-all font-mono text-xs text-gray-300">
+                    <Hash size={14} className="text-orange-400 shrink-0" />
+                    {resolvedWorkshopId || <span className="text-gray-500 italic">Não associado</span>}
+                  </p>
+                  <div className="mt-2">
+                    {isModInCloud(mod, workshopMappings) ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-sky-300 bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded-full">
+                        ☁ Found in Cloud Database
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
+                        ⚠ Not found in cloud database
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {onSaveWorkshopMapping && (
+                  <button
+                    onClick={() => setIsEditing(true)}
+                    className="mt-2 text-left text-[10px] font-bold text-orange-400/80 hover:text-orange-400 hover:underline transition-colors"
+                  >
+                    {resolvedWorkshopId ? "Editar ID" : "Vincular ID"}
+                  </button>
+                )}
+              </div>
+            )}
+
             <Detail label="Mod ID" value={mod.id} icon={<PackageCheck size={14} />} />
             <Detail label={t("mods.path")} value={mod.path || "-"} icon={<FolderOpen size={14} />} />
           </div>

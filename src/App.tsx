@@ -45,6 +45,7 @@ import { readServerDetailModsCache, writeServerDetailModsCache } from "@/lib/ser
 import {
   getActiveDependencyChain,
   getWorkshopIdsForModIds,
+  isModInCloud,
 } from "@/lib/serverMods";
 import { readServersCache, writeServersCache } from "@/lib/serversCache";
 import { invokeTauri } from "@/lib/tauri";
@@ -252,6 +253,44 @@ function LocalWorkspaceApp({
     useState<ZomboidServer | null>(null);
   const activeStartServerRef = useRef<ZomboidServer | null>(null);
   const confirmedOnlineServerIdsRef = useRef<Set<string>>(new Set());
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [workshopMappings, setWorkshopMappings] = useState<Record<string, string>>({});
+  const autoUploadedModIdsRef = useRef<Set<string>>(new Set());
+
+  async function loadWorkshopMappings() {
+    try {
+      const mappings = await invokeTauri<Record<string, string>>("get_workshop_mappings");
+      setWorkshopMappings(mappings || {});
+    } catch (err) {
+      console.error("Falha ao carregar mapeamentos locais:", err);
+    }
+  }
+
+  // Carrega mapeamentos locais em cache imediatamente na montagem do app
+  useEffect(() => {
+    void loadWorkshopMappings();
+  }, []);
+
+  useEffect(() => {
+    async function syncWorkshopMappings() {
+      setSyncError(null);
+      try {
+        const response = await fetch("http://52.67.72.177:8080/mappings");
+        if (!response.ok) {
+          throw new Error(`HTTP error status: ${response.status}`);
+        }
+        const data = await response.json();
+        await invokeTauri("save_workshop_mappings", { mappings: data });
+        await loadWorkshopMappings();
+      } catch (err) {
+        console.error("Falha ao sincronizar mapeamentos do workshop:", err);
+        setSyncError("Falha ao sincronizar o banco de dados de mapeamentos da workshop.");
+        await loadWorkshopMappings();
+      }
+    }
+    void syncWorkshopMappings();
+  }, [workspaceCacheId]);
+
   const { t } = useTranslation();
   const {
     mods,
@@ -284,6 +323,64 @@ function LocalWorkspaceApp({
     useCache: true,
     cacheKey: modsCacheKey,
   });
+
+  // Background Auto-Upload: Se houver mods carregados com Workshop ID que ainda NÃO estão na nuvem, envia em segundo plano sem criar loop
+  useEffect(() => {
+    if (!hasLoadedMods || mods.length === 0) return;
+
+    const unmappedPairs: { modId: string; workshopId: string }[] = [];
+
+    for (const mod of mods) {
+      if (autoUploadedModIdsRef.current.has(mod.id)) continue;
+
+      const cleanWorkshopId = mod.workshopId?.trim();
+      if (cleanWorkshopId && /^\d+$/.test(cleanWorkshopId)) {
+        const isMappedInCloud = isModInCloud(mod, workshopMappings);
+        if (!isMappedInCloud) {
+          unmappedPairs.push({
+            modId: mod.id,
+            workshopId: cleanWorkshopId,
+          });
+        }
+      }
+    }
+
+    if (unmappedPairs.length > 0) {
+      for (const item of unmappedPairs) {
+        autoUploadedModIdsRef.current.add(item.modId);
+      }
+
+      console.log(
+        `[Background Auto-Upload] Encontrados ${unmappedPairs.length} mods com Workshop ID não cadastrados na nuvem. Enviando...`,
+      );
+
+      fetch("http://52.67.72.177:8080/mappings/bulk", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          mappings: unmappedPairs,
+        }),
+      })
+        .then(async (res) => {
+          if (res.ok) {
+            console.log(
+              `[Background Auto-Upload] ${unmappedPairs.length} mods sincronizados com a nuvem com sucesso!`,
+            );
+            const newMappingsObj: Record<string, string> = {};
+            for (const item of unmappedPairs) {
+              newMappingsObj[item.modId] = item.workshopId;
+            }
+            await invokeTauri("save_workshop_mappings", { mappings: newMappingsObj });
+            setWorkshopMappings((prev) => ({ ...prev, ...newMappingsObj }));
+          }
+        })
+        .catch((err) => {
+          console.error("Falha na sincronização em segundo plano dos mods:", err);
+        });
+    }
+  }, [hasLoadedMods, mods, workshopMappings]);
   const navItems = useMemo(
     () => [
       { id: "dashboard", label: t("nav.servers"), icon: Server },
@@ -438,6 +535,35 @@ function LocalWorkspaceApp({
     }
   }
 
+  async function saveWorkshopMappingAndSync(modId: string, workshopId: string) {
+    try {
+      await invokeTauri("save_workshop_mapping", { modId, workshopId });
+      await loadWorkshopMappings();
+      
+      fetch("http://52.67.72.177:8080/mappings/bulk", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          mappings: [{ modId, workshopId }],
+        }),
+      }).catch((err) => {
+        console.error("Falha ao sincronizar mapeamento para a nuvem:", err);
+      });
+
+      if (selectedServer) {
+        const currentServer = servers.find((s) => s.id === selectedServer.id);
+        if (currentServer) {
+          await updateServerMods(currentServer, currentServer.modIds);
+        }
+      }
+    } catch (err) {
+      console.error("Falha ao associar ID da workshop ao mod:", err);
+      throw err;
+    }
+  }
+
   async function updateServerMods(
     server: ZomboidServer,
     activeModIds: string[],
@@ -447,6 +573,7 @@ function LocalWorkspaceApp({
       activeModIds,
       mods,
       server.gameBuild,
+      workshopMappings,
     );
 
     await invokeTauri<void>(
@@ -623,6 +750,7 @@ function LocalWorkspaceApp({
       resolvedModIds,
       mods,
       data.gameBuild,
+      workshopMappings,
     );
     const createdServer = await invokeTauri<ZomboidServer>(
       isRemoteWorkspace && remoteConnection
@@ -1680,6 +1808,21 @@ function LocalWorkspaceApp({
           onSearchChange={setSearchQuery}
         />
 
+        {syncError && (
+          <div className="flex items-center justify-between gap-2 px-6 py-2 bg-amber-500/10 border-b border-amber-500/20 text-xs text-amber-300 animate-in fade-in duration-300">
+            <div className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
+              <span>{syncError}</span>
+            </div>
+            <button
+              onClick={() => setSyncError(null)}
+              className="text-amber-300/60 hover:text-amber-300 font-bold transition-colors"
+            >
+              Fechar
+            </button>
+          </div>
+        )}
+
         <div className="flex-1 overflow-hidden relative">
           {activeTab === "dashboard" &&
             (selectedServer ? (
@@ -1695,6 +1838,9 @@ function LocalWorkspaceApp({
                   allMods={serverDetailMods ?? []}
                   onBack={() => setSelectedServer(null)}
                   onInstallMods={installMods}
+                  workshopMappings={workshopMappings}
+                  onSaveWorkshopMapping={saveWorkshopMappingAndSync}
+                  onUpdateServerMods={updateServerMods}
                   onActivateMods={(modsToActivate) =>
                     activateServerMods(selectedServer, modsToActivate)
                   }
@@ -1763,6 +1909,8 @@ function LocalWorkspaceApp({
               isLoading={isLoadingMods}
               error={modsError}
               onRefresh={loadMods}
+              workshopMappings={workshopMappings}
+              onSaveWorkshopMapping={saveWorkshopMappingAndSync}
               onInstall={async (modsToInstall) => {
                 await installMods(modsToInstall);
               }}

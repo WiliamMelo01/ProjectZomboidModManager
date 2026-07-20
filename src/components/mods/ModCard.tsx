@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 
 import { getModImageSrc } from "@/lib/modImages"
 import { isLocalMod } from "@/lib/modDependencies"
+import { isModInCloud } from "@/lib/serverMods"
 import type { ZomboidMod } from "@/types/mod"
 
 type ModCardProps = {
@@ -11,18 +12,31 @@ type ModCardProps = {
   onInstall?: () => void
   onDelete?: () => void
   isReadOnly?: boolean
+  onSelect?: (mod: ZomboidMod) => void
+  workshopMappings?: Record<string, string>
 }
 
-export function ModCard({ mod, onInstall, onDelete, isReadOnly = false }: ModCardProps) {
+export function ModCard({
+  mod,
+  onInstall,
+  onDelete,
+  isReadOnly = false,
+  onSelect,
+  workshopMappings = {},
+}: ModCardProps) {
   const { t } = useTranslation()
   const isLocal = isLocalMod(mod)
   const sourceBadge = getSourceBadge(mod)
-  const displayWorkshopId = mod.workshopId || "-"
+  const resolvedWorkshopId = mod.workshopId?.trim() || workshopMappings[mod.id] || workshopMappings[mod.id.toLowerCase()] || "-"
+  const isFoundInCloud = isModInCloud(mod, workshopMappings)
   const hasDependencies = mod.dependencies && mod.dependencies.length > 0
   const imageSrc = getModImageSrc(mod.imageUrl)
 
   return (
-    <div className="group bg-[#2b3238] border border-white/5 rounded-2xl flex flex-col transition-all duration-300 hover:border-orange-400/30 hover:bg-[#353c42] hover:shadow-[0_10px_30px_rgba(0,0,0,0.2)] overflow-hidden">
+    <div
+      onClick={() => onSelect?.(mod)}
+      className="group bg-[#2b3238] border border-white/5 rounded-2xl flex flex-col transition-all duration-300 hover:border-orange-400/30 hover:bg-[#353c42] hover:shadow-[0_10px_30px_rgba(0,0,0,0.2)] overflow-hidden cursor-pointer"
+    >
       <div className="relative h-40 w-full bg-[#1e2327] overflow-hidden shrink-0">
         {imageSrc ? (
           <img
@@ -86,17 +100,30 @@ export function ModCard({ mod, onInstall, onDelete, isReadOnly = false }: ModCar
 
         <p className="text-xs text-gray-400 line-clamp-2 mb-6 h-8">{mod.description}</p>
         <div className="grid grid-cols-2 gap-3 mb-3">
-          <div className="bg-[#22272b] p-2 rounded-lg border border-white/5">
-            <p className="text-[10px] text-gray-500 uppercase font-bold tracking-tighter">Workshop ID</p>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <Hash size={12} className="text-orange-400" />
-              <span className="text-xs font-mono text-gray-300 truncate">{displayWorkshopId}</span>
+          <div className="bg-[#22272b] p-2 rounded-lg border border-white/5 flex flex-col justify-between">
+            <div>
+              <p className="text-[10px] text-gray-500 uppercase font-bold tracking-tighter">Workshop ID</p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <Hash size={12} className="text-orange-400 shrink-0" />
+                <span className="text-xs font-mono text-gray-300 truncate">{resolvedWorkshopId}</span>
+              </div>
+            </div>
+            <div className="mt-1.5">
+              {isFoundInCloud ? (
+                <span className="inline-flex items-center gap-1 text-[9px] font-bold text-sky-300 bg-sky-500/10 border border-sky-500/20 px-1.5 py-0.5 rounded">
+                  ☁ Found in Cloud Database
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-[9px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded">
+                  ⚠ Not found in cloud database
+                </span>
+              )}
             </div>
           </div>
           <div className="bg-[#22272b] p-2 rounded-lg border border-white/5">
             <p className="text-[10px] text-gray-500 uppercase font-bold tracking-tighter">Mod ID</p>
             <div className="flex items-center gap-1.5 mt-0.5">
-              <PackageCheck size={12} className="text-orange-400" />
+              <PackageCheck size={12} className="text-orange-400 shrink-0" />
               <span className="text-xs font-mono text-gray-300 truncate">{mod.id}</span>
             </div>
           </div>
@@ -110,7 +137,10 @@ export function ModCard({ mod, onInstall, onDelete, isReadOnly = false }: ModCar
         <div className="flex gap-2 mt-auto">
           <button
             disabled={isLocal || isReadOnly}
-            onClick={onInstall}
+            onClick={(e) => {
+              e.stopPropagation()
+              onInstall?.()
+            }}
             className={`flex-1 py-3 rounded-xl font-bold text-sm transition-all duration-300 flex items-center justify-center gap-2 ${
               isLocal || isReadOnly
                 ? "bg-white/5 text-gray-500 cursor-not-allowed border border-white/5"

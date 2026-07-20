@@ -96,6 +96,32 @@ export function useModsLibrary({
         }
       }
 
+      // Envia os mapeamentos descobertos para a API central de forma assíncrona
+      const mappingsToSend = modsToMove
+        .filter((mod) => mod.id && mod.workshopId && mod.workshopId.trim() !== "")
+        .map((mod) => ({
+          modId: mod.id,
+          workshopId: mod.workshopId.trim(),
+        }))
+
+      if (mappingsToSend.length > 0) {
+        // Salva os mapeamentos localmente no banco de dados local para consistência offline
+        for (const mapping of mappingsToSend) {
+          invokeTauri("save_workshop_mapping", { modId: mapping.modId, workshopId: mapping.workshopId })
+            .catch((err) => console.error("Falha ao salvar mapeamento local pós-instalação:", err));
+        }
+
+        fetch("http://52.67.72.177:8080/mappings/bulk", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ mappings: mappingsToSend }),
+        }).catch((err) => {
+          console.error("Erro ao reportar mapeamentos para a API:", err)
+        })
+      }
+
       if (clearCacheCommand) {
         await invokeTauri<void>(clearCacheCommand, clearCacheArgs)
       }

@@ -50,13 +50,22 @@ export function getActiveDependencyChain(
   return orderedModIds
 }
 
-export function getWorkshopIdsForModIds(modIds: string[], mods: ZomboidMod[], gameBuild: GameBuild) {
+export function getWorkshopIdsForModIds(
+  modIds: string[],
+  mods: ZomboidMod[],
+  gameBuild: GameBuild,
+  workshopMappings?: Record<string, string>
+) {
   const selectedModIds = new Set(modIds.map(normalizeModId))
   const seenWorkshopIds = new Set<string>()
 
   return modIds.flatMap((modId) => {
     const mod = findModForServerId(mods, modId, gameBuild)
-    const workshopId = mod?.workshopId?.trim()
+    let workshopId = mod?.workshopId?.trim()
+
+    if (!workshopId && workshopMappings) {
+      workshopId = workshopMappings[modId] || workshopMappings[modId.toLowerCase()]
+    }
 
     if (!workshopId) {
       return []
@@ -71,4 +80,16 @@ export function getWorkshopIdsForModIds(modIds: string[], mods: ZomboidMod[], ga
     seenWorkshopIds.add(normalizedWorkshopId)
     return [workshopId]
   })
+}
+
+export function isModInCloud(mod: ZomboidMod, workshopMappings?: Record<string, string>): boolean {
+  if (!workshopMappings) return false
+  if (workshopMappings[mod.id] || workshopMappings[mod.id.toLowerCase()]) {
+    return true
+  }
+  const cleanWsId = mod.workshopId?.trim()
+  if (cleanWsId && /^\d+$/.test(cleanWsId)) {
+    return Object.values(workshopMappings).includes(cleanWsId)
+  }
+  return false
 }

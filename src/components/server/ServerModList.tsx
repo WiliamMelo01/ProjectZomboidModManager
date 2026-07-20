@@ -20,6 +20,7 @@ type ServerModListProps = {
   incompatibleModIds?: Set<string>
   paginate?: boolean
   paginationResetKey?: string
+  workshopMappings?: Record<string, string>
 }
 
 const MODS_PER_PAGE = 30
@@ -38,6 +39,7 @@ export function ServerModList({
   incompatibleModIds = new Set(),
   paginate = false,
   paginationResetKey = "",
+  workshopMappings = {},
 }: ServerModListProps) {
   const { t } = useTranslation()
   const isActiveList = action === "deactivate"
@@ -136,6 +138,12 @@ export function ServerModList({
                   {mod.source === "missing" && (
                     <span className="rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[9px] font-black uppercase text-red-300">
                       {t("mods.missing")}
+                    </span>
+                  )}
+                  {mod.source !== "local" && !mod.workshopId && !workshopMappings[mod.id] && !workshopMappings[mod.id.toLowerCase()] && (
+                    <span className="flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[9px] font-black uppercase text-amber-300">
+                      <AlertTriangle size={10} />
+                      Sem Workshop ID
                     </span>
                   )}
                 </div>

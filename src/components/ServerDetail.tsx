@@ -1,4 +1,4 @@
-import { ArrowLeft, FilePenLine, Play, RefreshCw, Search, Server, Settings, Square, Terminal } from "lucide-react"
+import { ArrowLeft, FilePenLine, FileText, Hash, PackageCheck, Play, RefreshCw, Search, Server, Settings, Square, Terminal, Wand2 } from "lucide-react"
 import { useDeferredValue, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -14,6 +14,8 @@ import {
   type MoveModRequest,
   type PendingActivation,
 } from "@/components/server/ServerDetailModals"
+import { FixWorkshopIdsModal } from "@/components/server/FixWorkshopIdsModal"
+import { ServerLogsModal } from "@/components/server/ServerLogsModal"
 import { ServerModContextMenu } from "@/components/server/ServerModContextMenu"
 import { ServerModDetailsModal } from "@/components/server/ServerModDetailsModal"
 import { ServerModList } from "@/components/server/ServerModList"
@@ -26,10 +28,12 @@ import type { ZomboidMod } from "@/types/mod"
 import type { ZomboidServer } from "@/types/server"
 
 type ServerFilePreview = {
-  serverId: string
-  fileName: string
-  path: string
-  content: string
+  serverId?: string
+  server_id?: string
+  fileName?: string
+  file_name?: string
+  path?: string
+  content?: string
 }
 
 type ServerDetailProps = {
@@ -56,6 +60,9 @@ type ServerDetailProps = {
   onStartRemoteServer: (server: ZomboidServer) => void
   onOpenRemoteConsole?: (server: ZomboidServer) => void
   onStopRemoteServer?: (server: ZomboidServer) => void
+  workshopMappings?: Record<string, string>
+  onSaveWorkshopMapping?: (modId: string, workshopId: string) => Promise<void>
+  onUpdateServerMods?: (server: ZomboidServer, activeModIds: string[]) => Promise<void>
 }
 
 const MOVE_MOD_WARNING_KEY = "pzmm_move_mod_warning_modal_seen"
@@ -70,6 +77,82 @@ function matchesSearch(mod: ZomboidMod, search: string) {
   return (
     String(mod.name ?? "").toLowerCase().includes(normalizedSearch) ||
     String(mod.id ?? "").toLowerCase().includes(normalizedSearch)
+  )
+}
+
+function IniContentRenderer({ content = "" }: { content?: string }) {
+  const lines = useMemo(() => (content ?? "").split("\n"), [content])
+
+  if (!content || content.trim().length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-12 text-gray-400 italic text-xs font-mono bg-[#181c20]">
+        O arquivo do servidor está vazio ou não possui conteúdo.
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-0 flex-1 overflow-auto p-6 font-mono text-xs leading-relaxed custom-scrollbar bg-[#181c20]">
+      {lines.map((line, index) => {
+        const trimmed = (line ?? "").trim()
+
+        // 1. Linha de Título / Comentário (# ou [)
+        if (trimmed.startsWith("#") || trimmed.startsWith("[")) {
+          return (
+            <div key={index} className="flex items-start py-0.5 hover:bg-white/[0.02] rounded px-1 transition-colors">
+              <span className="w-10 text-[10px] text-gray-600 select-none text-right pr-3 shrink-0 pt-0.5">
+                {index + 1}
+              </span>
+              <span className="font-semibold text-orange-400/90 break-all">
+                {line}
+              </span>
+            </div>
+          )
+        }
+
+        // 2. Linha Vazia
+        if (!trimmed) {
+          return <div key={index} className="h-1.5" />
+        }
+
+        // 3. Linha de Configuração (Chave = Valor)
+        const equalsIndex = line.indexOf("=")
+        if (equalsIndex !== -1) {
+          const key = line.slice(0, equalsIndex).trim()
+          const value = line.slice(equalsIndex + 1)
+          const elementId = key === "Mods" ? "ini-line-mods" : key === "WorkshopItems" ? "ini-line-workshop" : undefined
+
+          return (
+            <div
+              key={index}
+              id={elementId}
+              className="flex items-start py-0.5 hover:bg-white/[0.02] rounded px-1 transition-colors"
+            >
+              <span className="w-10 text-[10px] text-gray-600 select-none text-right pr-3 shrink-0 pt-0.5">
+                {index + 1}
+              </span>
+              <div className="flex-1 min-w-0 break-all">
+                <span className={`font-semibold ${elementId ? "text-orange-300 font-bold" : "text-sky-300"}`}>
+                  {key}
+                </span>
+                <span className="text-gray-500 font-bold mx-1">=</span>
+                <span className="text-gray-200">{value}</span>
+              </div>
+            </div>
+          )
+        }
+
+        // 4. Outras linhas
+        return (
+          <div key={index} className="flex items-start py-0.5 hover:bg-white/[0.02] rounded px-1 transition-colors">
+            <span className="w-10 text-[10px] text-gray-600 select-none text-right pr-3 shrink-0 pt-0.5">
+              {index + 1}
+            </span>
+            <span className="text-gray-400 flex-1 min-w-0 break-all">{line}</span>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
@@ -97,12 +180,17 @@ export function ServerDetail({
   onStartRemoteServer,
   onOpenRemoteConsole,
   onStopRemoteServer,
+  workshopMappings = {},
+  onSaveWorkshopMapping,
+  onUpdateServerMods,
 }: ServerDetailProps) {
   const { t } = useTranslation()
   const [search, setSearch] = useState("")
   const [confirmDelete, setConfirmDelete] = useState<ZomboidMod | null>(null)
   const [dependencyWarning, setDependencyWarning] = useState<{ mod: ZomboidMod; dependents: ZomboidMod[] } | null>(null)
   const [missingDependency, setMissingDependency] = useState<{ mod: ZomboidMod; dependencyId: string } | null>(null)
+  const [showFixWorkshopIdsModal, setShowFixWorkshopIdsModal] = useState(false)
+  const [showLogsModal, setShowLogsModal] = useState(false)
   const [pendingActivation, setPendingActivation] = useState<PendingActivation | null>(null)
   const [isConfirmingPendingActivation, setIsConfirmingPendingActivation] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ mod: ZomboidMod; x: number; y: number } | null>(null)
@@ -361,6 +449,7 @@ export function ServerDetail({
   }
 
   const openServerFile = async () => {
+    if (!server) return
     setServerFileOpenError(null)
     setIsOpeningServerFile(true)
 
@@ -372,9 +461,10 @@ export function ServerDetail({
         })
         setServerFilePreview(file)
       } else {
-        await invokeTauri("open_zomboid_server_file", {
+        const file = await invokeTauri<ServerFilePreview>("read_zomboid_server_file", {
           serverId: server.id,
         })
+        setServerFilePreview(file)
       }
     } catch (error) {
       setServerFileOpenError(getErrorMessage(error))
@@ -547,15 +637,39 @@ export function ServerDetail({
       </div>
 
       {/* Search & Filter bar */}
-      <div className="relative group max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-orange-400 transition-colors" size={18} />
-        <input
-          type="text"
-          placeholder={t("serverDetail.filter")}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full bg-[#2b3238] border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-orange-400/50 transition-all placeholder:text-gray-600"
-        />
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="relative group max-w-md flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-orange-400 transition-colors" size={18} />
+          <input
+            type="text"
+            placeholder={t("serverDetail.filter")}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full bg-[#2b3238] border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-orange-400/50 transition-all placeholder:text-gray-600"
+          />
+        </div>
+
+        {server && (
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowLogsModal(true)}
+              className="flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2.5 text-xs font-bold text-cyan-200 transition-all hover:bg-cyan-500/20 hover:border-cyan-500/50 shadow-md shadow-cyan-950/20"
+            >
+              <FileText size={16} className="text-cyan-400" />
+              <span>Ver Logs do Servidor</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowFixWorkshopIdsModal(true)}
+              className="flex items-center gap-2 rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-2.5 text-xs font-bold text-orange-200 transition-all hover:bg-orange-500/20 hover:border-orange-500/50 shadow-md shadow-orange-950/20"
+            >
+              <Wand2 size={16} className="text-orange-400" />
+              <span>Organizar Workshop IDs</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Lists */}
@@ -596,6 +710,7 @@ export function ServerDetail({
           onSelect={setSelectedMod}
           onContextMenu={handleActiveModContextMenu}
           incompatibleModIds={incompatibleActiveIdSet}
+          workshopMappings={workshopMappings}
         />
 
         <ServerModList
@@ -610,6 +725,7 @@ export function ServerDetail({
           onInstallMap={setPendingMapInstall}
           paginate
           paginationResetKey={`${server.id}:${server.gameBuild}:${search}`}
+          workshopMappings={workshopMappings}
         />
       </div>
 
@@ -625,29 +741,109 @@ export function ServerDetail({
       )}
 
       {selectedMod && (
-        <ServerModDetailsModal mod={selectedMod} onClose={() => setSelectedMod(null)} />
+        <ServerModDetailsModal
+          mod={selectedMod}
+          onClose={() => setSelectedMod(null)}
+          workshopMappings={workshopMappings}
+          onSaveWorkshopMapping={onSaveWorkshopMapping}
+        />
+      )}
+
+      {showFixWorkshopIdsModal && server && (
+        <FixWorkshopIdsModal
+          server={server}
+          allMods={allMods}
+          workshopMappings={workshopMappings}
+          onClose={() => setShowFixWorkshopIdsModal(false)}
+          onSaveWorkshopMapping={onSaveWorkshopMapping || (async () => {})}
+          onApplyServerMods={async (srv, activeModIds) => {
+            if (onUpdateServerMods) {
+              await onUpdateServerMods(srv, activeModIds)
+            }
+          }}
+        />
+      )}
+
+      {showLogsModal && server && (
+        <ServerLogsModal
+          server={server}
+          remoteConnection={remoteConnection}
+          onClose={() => setShowLogsModal(false)}
+        />
       )}
 
       {serverFilePreview && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-          <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#22272b] shadow-2xl">
-            <div className="flex items-start justify-between gap-4 border-b border-white/10 bg-[#2b3238] px-6 py-5">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-md animate-in fade-in duration-200"
+          onClick={() => {
+            setServerFilePreview(null)
+            setActiveScrollTarget(null)
+          }}
+        >
+          <div
+            className="flex h-[85vh] max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#22272b] shadow-2xl animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-4 border-b border-white/10 bg-[#2b3238] px-6 py-4">
               <div className="min-w-0">
-                <p className="text-xs font-black uppercase tracking-[0.25em] text-orange-300">server.ini</p>
-                <h3 className="mt-1 truncate text-2xl font-black text-white">{serverFilePreview.fileName}</h3>
-                <p className="mt-1 break-all font-mono text-xs text-gray-400">{serverFilePreview.path}</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-orange-400">server.ini</p>
+                  <span className="text-white/20">•</span>
+                  <span className="text-xs font-mono text-gray-300 truncate">
+                    {serverFilePreview.fileName || serverFilePreview.file_name || server?.fileName || ""}
+                  </span>
+                </div>
+                <p className="mt-0.5 truncate font-mono text-[10px] text-gray-500">{serverFilePreview.path || ""}</p>
               </div>
-              <button
-                type="button"
-                onClick={() => setServerFilePreview(null)}
-                className="rounded-xl border border-white/10 bg-[#22272b] px-4 py-2 text-sm font-black text-gray-300 transition-colors hover:border-orange-400/30 hover:text-orange-300"
-              >
-                Fechar
-              </button>
+
+              {/* Botões de Navegação Rápida */}
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const el = document.getElementById("ini-line-mods")
+                    if (el) {
+                      el.scrollIntoView({ behavior: "smooth", block: "center" })
+                      el.classList.remove("highlight-subtle")
+                      void el.offsetWidth
+                      el.classList.add("highlight-subtle")
+                    }
+                  }}
+                  className="flex items-center gap-1.5 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs font-bold text-sky-200 transition-all hover:bg-sky-500/20 hover:border-sky-500/50 shadow-sm"
+                >
+                  <PackageCheck size={14} className="text-sky-400" />
+                  <span>Mods</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const el = document.getElementById("ini-line-workshop")
+                    if (el) {
+                      el.scrollIntoView({ behavior: "smooth", block: "center" })
+                      el.classList.remove("highlight-subtle")
+                      void el.offsetWidth
+                      el.classList.add("highlight-subtle")
+                    }
+                  }}
+                  className="flex items-center gap-1.5 rounded-xl border border-orange-500/30 bg-orange-500/10 px-3 py-1.5 text-xs font-bold text-orange-200 transition-all hover:bg-orange-500/20 hover:border-orange-500/50 shadow-sm"
+                >
+                  <Hash size={14} className="text-orange-400" />
+                  <span>Workshop IDs</span>
+                </button>
+
+                <div className="h-4 w-[1px] bg-white/10 mx-1" />
+
+                <button
+                  type="button"
+                  onClick={() => setServerFilePreview(null)}
+                  className="rounded-xl border border-white/10 bg-[#22272b] px-3.5 py-1.5 text-xs font-bold text-gray-300 transition-colors hover:border-orange-400/30 hover:text-orange-300"
+                >
+                  Fechar
+                </button>
+              </div>
             </div>
-            <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-6 font-mono text-xs leading-relaxed text-gray-200 custom-scrollbar">
-              {serverFilePreview.content}
-            </pre>
+            <IniContentRenderer content={serverFilePreview.content || ""} />
           </div>
         </div>
       )}

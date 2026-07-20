@@ -240,6 +240,7 @@ where
     let mut last_port_probe = Instant::now();
     let mut last_output_at = Instant::now();
     let mut last_wait_message_at = Instant::now();
+    let mut port_activity_detected = false;
 
     loop {
         while let Ok(line) = receiver.try_recv() {
@@ -252,6 +253,11 @@ where
         }
 
         if server_started {
+            thread::sleep(Duration::from_millis(1000));
+            while let Ok(line) = receiver.try_recv() {
+                on_line(&line);
+                log_lines.push(line);
+            }
             break;
         }
 
@@ -263,11 +269,11 @@ where
             break;
         }
 
-        if last_port_probe.elapsed() >= Duration::from_secs(2) {
+        if !port_activity_detected && last_port_probe.elapsed() >= Duration::from_secs(2) {
             last_port_probe = Instant::now();
             if let Ok(usages) = find_port_usages(&server_ports) {
                 if !usages.is_empty() {
-                    server_started = true;
+                    port_activity_detected = true;
                     let ports = usages
                         .iter()
                         .map(|usage| format!("{} {} PID {}", usage.protocol, usage.port, usage.pid))
@@ -277,7 +283,6 @@ where
                         format!("[INFO] Detected Project Zomboid server port activity: {ports}.");
                     on_line(&line);
                     log_lines.push(line);
-                    break;
                 }
             }
         }

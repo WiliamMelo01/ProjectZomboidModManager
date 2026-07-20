@@ -1525,7 +1525,7 @@ fn is_remote_server_started_line(line: &str) -> bool {
     normalized_line.contains("*** server started")
         || normalized_line.contains("server is listening on port")
         || normalized_line.contains("raknet.startup() return code: 0")
-        || normalized_line.contains("luanet: initialization [done]")
+        || normalized_line.contains("server started")
 }
 fn remote_startup_memory_failure_message(logs: &[String]) -> Option<String> {
     let combined = logs.join("\n").to_lowercase();

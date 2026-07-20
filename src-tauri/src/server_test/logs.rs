@@ -76,11 +76,12 @@ pub(super) fn summarize_known_server_error(log_lines: &[String]) -> Option<Strin
     None
 }
 
-pub(super) fn is_server_started_line(normalized_line: &str) -> bool {
-    normalized_line.contains("*** server started")
-        || normalized_line.contains("server is listening on port")
-        || normalized_line.contains("raknet.startup() return code: 0")
-        || normalized_line.contains("luanet: initialization [done]")
+pub(super) fn is_server_started_line(line: &str) -> bool {
+    let lower = line.to_lowercase();
+    lower.contains("*** server started")
+        || lower.contains("server is listening on port")
+        || lower.contains("raknet.startup() return code: 0")
+        || lower.contains("server started")
 }
 
 pub(super) fn count_warning_server_lines(log_lines: &[String]) -> usize {
@@ -105,9 +106,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recognizes_b42_luanet_initialization_as_server_started() {
+    fn recognizes_server_started_line() {
         assert!(is_server_started_line(
-            "log  : lua > luanet: initialization [done], triggering events for 'luanet.oninitadd'."
+            "*** SERVER STARTED ***"
+        ));
+        assert!(is_server_started_line(
+            "LOG  : Network     > RakNet.startup() return code: 0"
         ));
     }
 }

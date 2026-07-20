@@ -216,6 +216,119 @@ fn parse_players_line(line: &str) -> Option<u32> {
     }
     None
 }
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AvailableLogFile {
+    pub name: String,
+    pub path: String,
+    pub size_bytes: u64,
+    pub last_modified: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LocalServerFilePreview {
+    pub server_id: String,
+    pub file_name: String,
+    pub path: String,
+    pub content: String,
+}
+
+fn zomboid_logs_dir() -> Result<PathBuf, String> {
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .ok_or_else(|| "Nao foi possivel encontrar a pasta do usuario.".to_string())?;
+
+    Ok(PathBuf::from(home).join("Zomboid").join("Logs"))
+}
+
+#[tauri::command]
+pub(crate) fn list_zomboid_server_logs(_server_id: String) -> Result<Vec<AvailableLogFile>, String> {
+    let logs_dir = zomboid_logs_dir()?;
+    let mut log_files = Vec::new();
+
+    if logs_dir.exists() && logs_dir.is_dir() {
+        if let Ok(entries) = fs::read_dir(&logs_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    let file_name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if file_name.ends_with(".txt") || file_name.ends_with(".log") {
+                        let metadata = fs::metadata(&path).ok();
+                        let size_bytes = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+                        let last_modified = metadata
+                            .as_ref()
+                            .and_then(|m| m.modified().ok())
+                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+
+                        log_files.push(AvailableLogFile {
+                            name: file_name,
+                            path: path.to_string_lossy().to_string(),
+                            size_bytes,
+                            last_modified,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    log_files.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
+    Ok(log_files)
+}
+
+#[tauri::command]
+pub(crate) fn read_zomboid_server_log_file(server_id: String, log_name: String) -> Result<LocalServerFilePreview, String> {
+    let logs_dir = zomboid_logs_dir()?;
+    let clean_log_name = Path::new(&log_name)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .ok_or_else(|| "Nome de log invalido.".to_string())?;
+
+    let log_path = logs_dir.join(&clean_log_name);
+
+    if !log_path.exists() || !log_path.is_file() {
+        return Err(format!("Arquivo de log nao encontrado: {}", log_path.display()));
+    }
+
+    let content = read_text_lossy(&log_path)?;
+
+    Ok(LocalServerFilePreview {
+        server_id,
+        file_name: clean_log_name,
+        path: log_path.to_string_lossy().to_string(),
+        content,
+    })
+}
+
+#[tauri::command]
+pub(crate) fn read_zomboid_server_file(server_id: String) -> Result<LocalServerFilePreview, String> {
+    let server_path = canonical_zomboid_server_path(&server_id)?;
+    let content = std::fs::read_to_string(&server_path)
+        .map_err(|e| format!("{}: {}", text("Failed to read server file", "Falha ao ler o arquivo do servidor"), e))?;
+
+    let file_name = server_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| format!("{server_id}.ini"));
+
+    let path_str = server_path.to_string_lossy().to_string();
+
+    Ok(LocalServerFilePreview {
+        server_id,
+        file_name,
+        path: path_str,
+        content,
+    })
+}
+
 #[tauri::command]
 pub(crate) fn open_zomboid_server_file(server_id: String) -> Result<(), String> {
     open_file_external(&canonical_zomboid_server_path(&server_id)?)

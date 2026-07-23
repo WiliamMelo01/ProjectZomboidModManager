@@ -97,6 +97,25 @@ function getInitialWorkspace() {
   return { mode: null, connection: null };
 }
 
+function normalizeWorkshopMappings(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const mappings: Record<string, string> = {};
+
+  for (const [modId, workshopId] of Object.entries(value)) {
+    const cleanModId = modId.trim();
+    const cleanWorkshopId = String(workshopId ?? "").trim();
+
+    if (cleanModId && /^\d+$/.test(cleanWorkshopId)) {
+      mappings[cleanModId] = cleanWorkshopId;
+    }
+  }
+
+  return mappings;
+}
+
 function App() {
   if (window.location.hash.startsWith("#/workshop")) {
     return <WorkshopWindow />;
@@ -279,11 +298,14 @@ function LocalWorkspaceApp({
         if (!response.ok) {
           throw new Error(`HTTP error status: ${response.status}`);
         }
-        const data = await response.json();
-        await invokeTauri("save_workshop_mappings", { mappings: data });
-        await loadWorkshopMappings();
+        const remoteMappings = normalizeWorkshopMappings(await response.json());
+        const localMappings = await invokeTauri<Record<string, string>>("get_workshop_mappings");
+        const mergedMappings = { ...(localMappings || {}), ...remoteMappings };
+
+        await invokeTauri("save_workshop_mappings", { mappings: mergedMappings });
+        setWorkshopMappings(mergedMappings);
       } catch (err) {
-        console.error("Falha ao sincronizar mapeamentos do workshop:", err);
+        console.warn("Sincronizacao remota de mapeamentos indisponivel. Usando cache local:", err);
         setSyncError("Falha ao sincronizar o banco de dados de mapeamentos da workshop.");
         await loadWorkshopMappings();
       }
@@ -372,8 +394,9 @@ function LocalWorkspaceApp({
             for (const item of unmappedPairs) {
               newMappingsObj[item.modId] = item.workshopId;
             }
-            await invokeTauri("save_workshop_mappings", { mappings: newMappingsObj });
-            setWorkshopMappings((prev) => ({ ...prev, ...newMappingsObj }));
+            const updatedMappings = { ...workshopMappings, ...newMappingsObj };
+            await invokeTauri("save_workshop_mappings", { mappings: updatedMappings });
+            setWorkshopMappings(updatedMappings);
           }
         })
         .catch((err) => {

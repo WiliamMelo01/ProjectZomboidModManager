@@ -1,69 +1,67 @@
 # Changelog
 
-Histórico das principais mudanças do **PZ Manager / Project Zomboid Mod Manager**.
+Update history for **PZ Manager / Project Zomboid Mod Manager**.
 
-As datas seguem o formato `AAAA-MM-DD`. Este arquivo resume o que foi adicionado,
-melhorado e corrigido em cada release pública.
+Dates use the `YYYY-MM-DD` format. This file summarizes what was added,
+improved, and fixed in each public release.
 
 ## [Unreleased]
 
-- Nenhuma mudança registrada ainda.
+- No changes recorded yet.
 
 ## [0.5.0] - 2026-07-20
 
-Release focada em operação real de servidores, principalmente servidores Linux
-remotos e listas grandes de mods da Workshop.
+Release focused on real server operations, especially remote Linux servers and
+large Steam Workshop mod lists.
 
-### Adicionado
+### Added
 
-- Banco comunitário de mapeamentos `Mod ID -> Workshop ID`.
-- Sincronização dos mapeamentos da Workshop com cache local.
-- Upload automático, em segundo plano, de mapeamentos descobertos localmente.
-- Erro visual quando a sincronização do banco de mapeamentos falha.
-- Ferramentas para editar Workshop ID direto nos detalhes do mod.
-- Assistente para corrigir Workshop IDs ausentes em mods ativos do servidor.
-- Modal remoto de inicialização com dois botões:
+- Community `Mod ID -> Workshop ID` mapping database.
+- Workshop mapping sync with local cache support.
+- Automatic background upload of locally discovered mappings.
+- Visible sync error when the Workshop mapping database fails to synchronize.
+- Tools to edit Workshop IDs directly from mod details.
+- Assistant for fixing missing Workshop IDs in active server mods.
+- Remote startup modal with two buttons:
   - `Start server`;
   - `Start -nosteam`.
-- Suporte remoto à flag `-nosteam` no helper Linux.
-- Logs claros indicando quando o servidor foi iniciado com `-nosteam`.
-- Testes unitários para geração de scripts de start normal e `-nosteam`.
-- Visualizador de logs do servidor dentro do app.
-- Preview de logs locais e remotos.
-- Filtros e ações para copiar/atualizar logs.
-- Controle remoto de startup com stream de saída em tempo real.
-- Canal remoto para envio de comandos ao servidor via FIFO.
-- Stop remoto com fluxo de `save` e `quit`.
-- Upload de mods locais selecionados para servidor remoto.
-- Deploy de perfil local para servidor Linux remoto com seus mods ativos.
+- Remote `-nosteam` support in the Linux helper.
+- Clear logs when a server is started with `-nosteam`.
+- Unit tests for normal and `-nosteam` startup script generation.
+- In-app server log viewer.
+- Local and remote log previews.
+- Log filtering plus copy/refresh actions.
+- Remote startup control with real-time output streaming.
+- Remote command channel for sending server commands through FIFO.
+- Remote stop flow using `save` and `quit`.
+- Upload of selected local mods to a remote server.
+- Deployment of a local server profile to a remote Linux server with its active mods.
 
-### Melhorado
+### Improved
 
-- Mapeamentos remotos e locais agora são mesclados em vez de substituir dados bons
-  por respostas parciais.
-- O app continua usando o cache local quando o serviço de mapeamentos está fora do ar.
-- `Mods=` e `WorkshopItems=` ficaram mais seguros para listas ativas com IDs
-  corrigidos.
-- Preflight de testes ficou mais rigoroso para dependências, ordem de carregamento,
-  compatibilidade B41/B42 e conflitos de porta.
-- Fluxo remoto reaproveita firewall, logs, status, comandos e parada entre start
-  normal e start `-nosteam`.
-- CSP do Tauri foi ajustada para permitir o serviço HTTP configurado de
-  mapeamentos da Workshop.
-- Documentação principal, documentação em português e resumo do projeto foram
-  atualizados para refletir a versão `0.5.0`.
+- Remote and local Workshop mappings are merged instead of replacing good local
+  data with partial remote responses.
+- The app keeps using the local cache when the mapping service is unavailable.
+- `Mods=` and `WorkshopItems=` handling is safer for active lists with repaired IDs.
+- Server test preflight is stricter for dependencies, load order, B41/B42
+  compatibility, and port conflicts.
+- Remote startup reuses the same firewall, logs, status, command, and stop flow
+  for both normal and `-nosteam` starts.
+- Tauri CSP was updated to allow the configured HTTP Workshop mapping service.
+- Main documentation, Brazilian Portuguese documentation, and project summary
+  were updated for version `0.5.0`.
 
-### Corrigido
+### Fixed
 
-- Falha visual falsa ao sincronizar IDs da Workshop quando o endpoint retornava
-  dados válidos em formato não tratado pelo app.
-- Perda de mapeamentos locais quando o app fazia upload automático de itens ainda
-  não cadastrados na API.
-- Duplicação da flag `-nosteam` quando o launcher original já continha a opção.
-- Warning do `cargo clippy` relacionado à ordenação de logs.
-- Dependência de runtime desnecessária no pacote npm de produção.
+- False visual failure during Workshop ID sync when the endpoint returned valid
+  data in a shape the app did not handle.
+- Loss of local mappings when the app automatically uploaded items that were not
+  registered in the API yet.
+- Duplicate `-nosteam` flag when the original launcher already contained it.
+- `cargo clippy` warning related to log sorting.
+- Unnecessary runtime npm dependency in the production package.
 
-### Validação
+### Validation
 
 - `npm run build`
 - `npm audit --omit=dev`
@@ -72,127 +70,121 @@ remotos e listas grandes de mods da Workshop.
 
 ## [0.4.0] - 2026-07-05
 
-Release focada em workspaces remotos Linux, compatibilidade multiplataforma e
-preparação de builds para Windows e Linux.
+Release focused on Linux remote workspaces, cross-platform compatibility, and
+Windows/Linux release build preparation.
 
-### Adicionado
+### Added
 
-- Seletor de workspace ao abrir o app.
-- Workspace local para o fluxo Windows existente.
-- Workspace remoto para servidores Linux via SSH.
-- Perfis de conexão SSH salvos.
-- Teste de conectividade antes de entrar no workspace remoto.
-- Helper Linux para executar operações remotas.
-- Telas de setup remoto.
-- Suporte inicial a ciclo de vida remoto do servidor.
-- Envio de comandos para servidor remoto em execução.
-- Stream de logs de servidores remotos.
-- Cache de mods e servidores remotos.
-- Suporte a builds Linux desktop.
-- Workflows de release no GitHub Actions para gerar assets Windows e Linux.
-- Bundle do helper Linux `pzmm-helper-linux-x86_64`.
-- Localização completa das telas de workspace, SSH e guias de OpenSSH.
-- Exclusão segura de mods locais ou remotos pela biblioteca.
-- Métricas de dashboard para servidores remotos, incluindo ping e jogadores no
-  formato `X/Y`.
+- Workspace selector when opening the app.
+- Local workspace for the existing Windows flow.
+- Remote workspace for Linux servers over SSH.
+- Saved SSH connection profiles.
+- Connectivity test before entering a remote workspace.
+- Linux helper for remote operations.
+- Remote setup screens.
+- Initial support for remote server lifecycle control.
+- Command sending to a running remote server.
+- Remote server log streaming.
+- Remote mod and server caches.
+- Linux desktop build support.
+- GitHub Actions release workflows for Windows and Linux assets.
+- Linux helper bundle `pzmm-helper-linux-x86_64`.
+- Full localization for workspace, SSH, and OpenSSH guide screens.
+- Safe deletion of local or remote mods from the library.
+- Remote dashboard metrics, including ping and connected players formatted as `X/Y`.
 
-### Melhorado
+### Improved
 
-- Erros de SSH passaram a mostrar mensagens amigáveis e traduzidas.
-- A varredura de pastas foi otimizada para respeitar caminhos configurados.
-- Workspaces locais não exibem métricas remotas desnecessárias.
-- O dashboard remoto passou a exibir contadores e ícones mais claros.
-- Compatibilidade entre runners Windows e Linux no CI foi ampliada.
+- SSH errors now show friendly translated messages.
+- Folder scanning was optimized to respect configured paths.
+- Local workspaces no longer show unnecessary remote metrics.
+- Remote dashboard counters and icons were clarified.
+- CI compatibility across Windows and Linux runners was improved.
 
-### Observações
+### Notes
 
-- O suporte remoto Linux ainda era experimental nesta versão.
-- O foco inicial era Ubuntu/Debian com `systemd`.
-- Servidores Windows remotos deveriam ser acessados via RDP, executando o app
-  localmente dentro da VM.
+- Linux remote support was still experimental in this version.
+- The initial remote target was Ubuntu/Debian with `systemd`.
+- Remote Windows servers should be accessed through RDP, running the app locally
+  inside the VM.
 
 ## [0.3.0] - 2026-06-16
 
-Release focada em performance da biblioteca de mods e redução de varreduras
-repetidas.
+Release focused on mod library performance and reducing repeated scans.
 
-### Adicionado
+### Added
 
-- Cache persistente de backend para a biblioteca de mods.
-- Reuso da biblioteca em cache durante validações de preflight.
-- Ação de rescan completo da biblioteca, limpando cache frontend e backend.
-- Revalidação rápida do cache baseada em arquivos relevantes dos pacotes.
+- Persistent backend cache for the mod library.
+- Reuse of the cached library during preflight validation.
+- Full library rescan action that clears frontend and backend caches.
+- Fast cache revalidation based on relevant mod package files.
 
-### Melhorado
+### Improved
 
-- A listagem de mods ficou mais rápida em bibliotecas grandes.
-- A tela de Configurações passou a hidratar dados a partir das últimas
-  configurações conhecidas, reduzindo flicker.
-- Imagens locais de mods passaram a carregar corretamente pelo protocolo de assets
-  do Tauri.
-- Compatibilidade dos checks de `cargo clippy` no CI foi melhorada.
-- Metadados de release e changelog foram preparados para a versão `0.3.0`.
+- Mod listing is faster for large libraries.
+- The Settings screen hydrates from the last known settings, reducing flicker.
+- Local mod images load correctly through Tauri's asset protocol.
+- CI compatibility for `cargo clippy` checks was improved.
+- Release metadata and changelog were prepared for version `0.3.0`.
 
-### Corrigido
+### Fixed
 
-- Exibição incorreta da quantidade de downloads simultâneos do SteamCMD nas
-  Configurações.
-- Carregamento de imagens locais que havia quebrado após otimizações na listagem
-  de mods.
+- Incorrect SteamCMD simultaneous download count displayed in Settings.
+- Local mod images that stopped loading after mod listing optimizations.
 
 ## [0.2.0] - 2026-06-14
 
-Release focada em edição de configuração de servidor dentro do app.
+Release focused on editing server configuration from inside the app.
 
-### Adicionado
+### Added
 
-- Modal de configuração de servidor.
-- Edição de opções comuns do arquivo `.ini`.
-- Edição de `SandboxVars.lua` em aba dedicada.
-- Opções legíveis para valores de Sandbox, evitando edição por números brutos.
-- Badge visual para indicar valor padrão de opções Sandbox.
-- Agrupamento de configurações Sandbox por seções do jogo base e seções de mods.
-- Melhor suporte ao manuseio de arquivos `.lua` relacionados ao perfil.
+- Server configuration modal.
+- Editing for common `.ini` options.
+- `SandboxVars.lua` editing in a dedicated tab.
+- Readable options for Sandbox values instead of raw numeric editing.
+- Visual badge for default Sandbox option values.
+- Grouping for Sandbox settings by base-game sections and mod sections.
+- Better handling for `.lua` files related to the server profile.
 
-### Melhorado
+### Improved
 
-- Interface de criação de servidor foi renovada.
-- Fluxo de configuração ficou menos dependente de edição manual de arquivos.
-- Perfil de servidor passou a ser mais fácil de revisar antes dos testes.
+- Server creation interface was refreshed.
+- Configuration flow became less dependent on manual file editing.
+- Server profiles became easier to review before tests.
 
-### Mantido
+### Kept
 
-- Criação e gerenciamento de perfis.
-- Suporte a Build 41 e Build 42.
-- Ativação, desativação e reordenação de mods.
-- Atualização automática de `.ini`.
-- Detecção de dependências ausentes e ordem inválida.
-- Downloads via SteamCMD.
-- Diagnóstico de startup com logs em tempo real.
-- Seleção de idioma entre inglês, português brasileiro e automático.
+- Server profile creation and management.
+- Build 41 and Build 42 support.
+- Mod activation, deactivation, and reordering.
+- Automatic `.ini` updates.
+- Missing dependency and invalid order detection.
+- SteamCMD downloads.
+- Startup diagnostics with real-time logs.
+- Language selection between English, Brazilian Portuguese, and automatic detection.
 
 ## [0.1.0] - 2026-06-01
 
-Primeira release pública do PZ Manager.
+First public release of PZ Manager.
 
-### Adicionado
+### Added
 
-- Criação e gerenciamento de perfis de servidores Project Zomboid.
-- Suporte inicial a Build 41 e Build 42.
-- Ativação, desativação e reordenação de mods ativos.
-- Escrita automática do arquivo `.ini` do servidor.
-- Detecção de dependências ausentes.
-- Validação de ordem de carregamento.
-- Leitura de mods em pastas locais, Steam Workshop e diretórios personalizados.
-- Downloads de itens individuais ou coleções públicas da Workshop via SteamCMD.
-- Diagnóstico de inicialização do servidor com logs em tempo real.
-- Checagem de portas configuradas antes de testar servidor.
-- Idiomas inglês, português brasileiro e detecção automática.
+- Project Zomboid server profile creation and management.
+- Initial Build 41 and Build 42 support.
+- Active mod activation, deactivation, and reordering.
+- Automatic server `.ini` writing.
+- Missing dependency detection.
+- Load order validation.
+- Mod reading from local folders, Steam Workshop folders, and custom directories.
+- Workshop item and public collection downloads through SteamCMD.
+- Server startup diagnostics with real-time logs.
+- Configured port checks before server tests.
+- English, Brazilian Portuguese, and automatic language detection.
 
-### Observações
+### Notes
 
-- O projeto era focado principalmente em Windows.
-- Algumas funcionalidades ainda estavam em fase inicial e sujeitas a mudanças.
+- The project was mainly focused on Windows.
+- Some features were still early and subject to change.
 
 ## Links
 

@@ -80,7 +80,6 @@ pub(super) fn is_server_started_line(line: &str) -> bool {
     let lower = line.to_lowercase();
     lower.contains("*** server started")
         || lower.contains("server is listening on port")
-        || lower.contains("raknet.startup() return code: 0")
         || lower.contains("server started")
 }
 
@@ -107,10 +106,11 @@ mod tests {
 
     #[test]
     fn recognizes_server_started_line() {
+        assert!(is_server_started_line("*** SERVER STARTED ***"));
         assert!(is_server_started_line(
-            "*** SERVER STARTED ***"
+            "LOG  : Network     > Server is listening on port 16261"
         ));
-        assert!(is_server_started_line(
+        assert!(!is_server_started_line(
             "LOG  : Network     > RakNet.startup() return code: 0"
         ));
     }

@@ -175,21 +175,21 @@ fn build_unix_server_launch_script_content(
     launcher_path: &str,
     server_id: &str,
     options: ServerLaunchOptions,
-    _launcher_has_no_steam: bool,
+    launcher_has_no_steam: bool,
 ) -> String {
-    let no_steam_env = if options.no_steam {
-        "export Dnosteam=1\n"
+    let no_steam_arg = if options.no_steam && !launcher_has_no_steam {
+        " -nosteam"
     } else {
         ""
     };
 
     format!(
-        "#!/usr/bin/env sh\nset -eu\ncd {}\n{}exec {} -servername {} -adminpassword {}\n",
+        "#!/usr/bin/env sh\nset -eu\ncd {}\nexec {} -servername {} -adminpassword {}{}\n",
         shell_quote(game_dir.to_string()),
-        no_steam_env,
         shell_quote(launcher_path.to_string()),
         shell_quote(server_id.to_string()),
-        shell_quote(SERVER_TEST_ADMIN_PASSWORD.to_string())
+        shell_quote(SERVER_TEST_ADMIN_PASSWORD.to_string()),
+        no_steam_arg
     )
 }
 
@@ -352,7 +352,7 @@ mod tests {
         assert!(script.contains("exec '/opt/pz/start-server.sh'"));
         assert!(script.contains("-servername 'servertest'"));
         assert!(script.contains("-adminpassword 'admin'"));
-        assert!(script.contains("export Dnosteam=1"));
+        assert!(script.contains("-nosteam"));
     }
 
     #[test]
@@ -365,7 +365,7 @@ mod tests {
             true,
         );
 
-        assert_eq!(script.matches("Dnosteam=1").count(), 1);
+        assert_eq!(script.matches("-nosteam").count(), 0);
         assert!(!script.contains("-nosteam"));
     }
 

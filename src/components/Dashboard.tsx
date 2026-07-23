@@ -17,7 +17,7 @@ type DashboardProps = {
   isReadOnly?: boolean
   canCreateServer?: boolean
   onTestServer: (server: ZomboidServer) => void
-  onStartServer: (server: ZomboidServer) => void
+  onStartServer?: (server: ZomboidServer) => void
   onOpenRemoteConsole?: (server: ZomboidServer) => void
   onStopRemoteServer?: (server: ZomboidServer) => void
   onDeployLocalServer?: () => void
@@ -242,6 +242,7 @@ export function Dashboard({
             isFavorite={favoriteServerIds.has(server.id)}
             onOpenRemoteConsole={isReadOnly ? onOpenRemoteConsole : undefined}
             onStopRemoteServer={isReadOnly ? onStopRemoteServer : undefined}
+            onStartServer={onStartServer}
           />
         ))}
 
@@ -278,6 +279,7 @@ export function Dashboard({
                 isFavorite={favoriteServerIds.has(server.id)}
                 onOpenRemoteConsole={isReadOnly ? onOpenRemoteConsole : undefined}
                 onStopRemoteServer={isReadOnly ? onStopRemoteServer : undefined}
+                onStartServer={onStartServer}
               />
             ))}
           </div>
@@ -325,8 +327,8 @@ export function Dashboard({
             className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-orange-500/10 hover:text-orange-300"
           >
             <Terminal size={16} />
-            {t("serverDetail.test")}
-          </button>
+                {t("serverDetail.test")}
+              </button>
           {isReadOnly && (
             <>
               <button
@@ -356,7 +358,7 @@ export function Dashboard({
               )}
               <button
                 onClick={() => {
-                  onStartServer(contextMenu.server)
+                  onStartServer?.(contextMenu.server)
                   setContextMenu(null)
                 }}
                 className="flex w-full items-center gap-3 px-4 py-2 text-sm font-medium text-emerald-300 transition-colors hover:bg-emerald-500/10 hover:text-emerald-200"
@@ -470,6 +472,7 @@ function ServerCard({
   isFavorite,
   onOpenRemoteConsole,
   onStopRemoteServer,
+  onStartServer,
 }: {
   server: ZomboidServer;
   onClick: () => void;
@@ -478,10 +481,11 @@ function ServerCard({
   isFavorite?: boolean
   onOpenRemoteConsole?: (server: ZomboidServer) => void
   onStopRemoteServer?: (server: ZomboidServer) => void
+  onStartServer?: (server: ZomboidServer) => void
 }) {
   const { t } = useTranslation()
   const isOnline = server.status === "online"
-  const hasRemoteActions = Boolean(onOpenRemoteConsole || onStopRemoteServer)
+  const hasActions = Boolean(onStartServer || onOpenRemoteConsole || onStopRemoteServer)
 
   return (
     <div
@@ -541,7 +545,7 @@ function ServerCard({
           <span className="font-mono text-xs text-gray-300">{server.port}</span>
         </div>
  
-        {hasRemoteActions && server.pingMs !== undefined && (
+        {(onOpenRemoteConsole || onStopRemoteServer) && server.pingMs !== undefined && (
           <div className="flex items-center justify-between text-sm">
             <div className="flex items-center gap-2 text-gray-400">
               <Activity size={16} className="text-cyan-400" />
@@ -562,26 +566,41 @@ function ServerCard({
         </div>
       </div>
 
-      {hasRemoteActions && (
+      {hasActions && (
         <div className="mt-5 flex flex-wrap gap-2 border-t border-white/5 pt-4">
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation()
-              if (isOnline) onOpenRemoteConsole?.(server)
-            }}
-            disabled={!isOnline}
-            className="flex items-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs font-black text-cyan-300 transition-colors hover:bg-cyan-500 hover:text-[#071014] disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <Terminal size={15} />
-            Console
-          </button>
-          {isOnline && (
+          {!isOnline && onStartServer && (
             <button
               type="button"
               onClick={(event) => {
                 event.stopPropagation()
-                onStopRemoteServer?.(server)
+                onStartServer(server)
+              }}
+              className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-300 transition-colors hover:bg-emerald-500 hover:text-[#071014]"
+            >
+              <Play size={15} />
+              {t("serverDetail.start")}
+            </button>
+          )}
+          {onOpenRemoteConsole && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                if (isOnline) onOpenRemoteConsole(server)
+              }}
+              disabled={!isOnline}
+              className="flex items-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs font-black text-cyan-300 transition-colors hover:bg-cyan-500 hover:text-[#071014] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Terminal size={15} />
+              Console
+            </button>
+          )}
+          {isOnline && onStopRemoteServer && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                onStopRemoteServer(server)
               }}
               className="flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-black text-red-300 transition-colors hover:bg-red-500 hover:text-white"
             >

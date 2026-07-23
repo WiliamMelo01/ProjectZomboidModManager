@@ -1099,6 +1099,12 @@ function LocalWorkspaceApp({
     }
   }
 
+  function startServer(server: ZomboidServer) {
+    if (remoteConnection) {
+      void openRemoteServerStart(server);
+    }
+  }
+
   async function cancelServerTest(serverId: string) {
     try {
       await invokeTauri<void>(
@@ -1678,6 +1684,7 @@ function LocalWorkspaceApp({
       unlisten?.();
     };
   }, []);
+
   useEffect(() => {
     if (
       !remoteConnection ||
@@ -1903,7 +1910,7 @@ function LocalWorkspaceApp({
                   isConfiguringRemoteFirewall={isConfiguringRemoteFirewall}
                   isStartingRemoteServer={isStartingRemoteServer}
                   onTestServer={testServer}
-                  onStartRemoteServer={openRemoteServerStart}
+                  onStartRemoteServer={startServer}
                   onOpenRemoteConsole={openRemoteServerConsole}
                   onStopRemoteServer={stopRemoteServer}
                 />
@@ -1928,7 +1935,7 @@ function LocalWorkspaceApp({
                   void ensureModsLoaded();
                 }}
                 onTestServer={testServer}
-                onStartServer={openRemoteServerStart}
+                onStartServer={isRemoteWorkspace ? startServer : undefined}
                 onOpenRemoteConsole={openRemoteServerConsole}
                 onStopRemoteServer={stopRemoteServer}
                 onDeployLocalServer={() => setIsDeployLocalModalOpen(true)}

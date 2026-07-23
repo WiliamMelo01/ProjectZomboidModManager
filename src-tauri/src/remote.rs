@@ -3627,7 +3627,7 @@ fn setup_remote_helper_impl(
     }
 
     validate_authentication(connection)?;
-    let local_helper_path = local_helper_binary_path()?;
+    let local_helper_path = local_helper_binary_path_for_setup()?;
     let remote_path = REMOTE_LINUX_HELPER_PATH.to_string();
     let home_dir = if connection.username.trim() == "root" {
         "/root".to_string()
@@ -3716,6 +3716,15 @@ fn local_helper_binary_path() -> Result<PathBuf, String> {
         return local_dev_helper_binary_path();
     }
 
+    download_release_helper_binary()
+}
+
+fn local_helper_binary_path_for_setup() -> Result<PathBuf, String> {
+    if pzmm_dev_mode_enabled() {
+        return local_dev_helper_binary_path();
+    }
+
+    remove_cached_release_helper_binary()?;
     download_release_helper_binary()
 }
 
@@ -3873,9 +3882,7 @@ fn env_truthy(value: &str) -> bool {
 }
 
 fn download_release_helper_binary() -> Result<PathBuf, String> {
-    let helper_dir = app_config_dir()?
-        .join("helpers")
-        .join(format!("v{}", env!("CARGO_PKG_VERSION")));
+    let helper_dir = release_helper_cache_dir()?;
     fs::create_dir_all(&helper_dir).map_err(|error| {
         format!(
             "Could not create helper cache folder {}: {error}",
@@ -3962,6 +3969,42 @@ fn download_release_helper_binary() -> Result<PathBuf, String> {
         release_helper_asset_names().join(", "),
         errors.join("\n")
     ))
+}
+
+fn release_helper_cache_dir() -> Result<PathBuf, String> {
+    Ok(app_config_dir()?
+        .join("helpers")
+        .join(format!("v{}", env!("CARGO_PKG_VERSION"))))
+}
+
+fn remove_cached_release_helper_binary() -> Result<(), String> {
+    let helper_dir = release_helper_cache_dir()?;
+
+    for file_name in ["pzmm-helper", "pzmm-helper.download"] {
+        let path = helper_dir.join(file_name);
+        if path.exists() {
+            fs::remove_file(&path).map_err(|error| {
+                format!(
+                    "Could not remove cached helper {} before refresh: {error}",
+                    path.display()
+                )
+            })?;
+        }
+    }
+
+    for asset_name in release_helper_asset_names() {
+        let path = helper_dir.join(format!("{asset_name}.download"));
+        if path.exists() {
+            fs::remove_file(&path).map_err(|error| {
+                format!(
+                    "Could not remove cached helper download {} before refresh: {error}",
+                    path.display()
+                )
+            })?;
+        }
+    }
+
+    Ok(())
 }
 
 fn release_helper_asset_names() -> Vec<&'static str> {

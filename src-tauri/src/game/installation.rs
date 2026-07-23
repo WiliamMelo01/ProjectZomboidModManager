@@ -31,14 +31,7 @@ pub(super) fn scan_zomboid_installation_impl(
         .into_iter()
         .find(|path| path.exists())
         .unwrap_or_else(default_steam_zomboid_game_dir);
-    let configured_executable = game_executable_path
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
-        .map(PathBuf::from);
-    let detected_executable = configured_executable
-        .as_ref()
-        .filter(|path| path.exists() && path.is_file())
-        .cloned()
+    let detected_executable = resolve_zomboid_executable_path(game_executable_path)
         .or_else(|| find_zomboid_executable_in_dir(&default_game_dir));
     let config_dir = detected_executable
         .as_deref()
@@ -64,6 +57,19 @@ pub(super) fn scan_zomboid_installation_impl(
             .iter()
             .any(|path| path.exists() && path.is_file()),
     })
+}
+
+pub(crate) fn resolve_zomboid_executable_path(game_executable_path: Option<&str>) -> Option<PathBuf> {
+    game_executable_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .filter(|path| path.exists() && path.is_file())
+        .or_else(|| {
+            steam_zomboid_game_dirs()
+                .into_iter()
+                .find_map(|game_dir| find_zomboid_executable_in_dir(&game_dir))
+        })
 }
 
 pub(crate) fn steam_zomboid_game_dirs() -> Vec<PathBuf> {

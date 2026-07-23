@@ -1,6 +1,9 @@
 #[cfg(not(windows))]
 use crate::app_config_dir;
-use crate::game::{apply_performance_settings, normalize_ram_gb, validate_game_executable_path};
+use crate::game::{
+    apply_performance_settings, normalize_ram_gb, resolve_zomboid_executable_path,
+    validate_game_executable_path,
+};
 use crate::i18n::{mod_location_label, text, validate_language_preference, LANGUAGE_AUTO};
 use crate::models::{AppSettings, ModLocation};
 #[cfg(windows)]
@@ -159,7 +162,9 @@ fn load_app_settings() -> Result<AppSettings, String> {
     let configured_path = read_config_value("steamcmd_path")?.unwrap_or_default();
     let resolved_steamcmd_path = resolve_steamcmd_path();
     let is_steamcmd_configured = resolved_steamcmd_path.is_some();
-    let game_executable_path = read_config_value("game_executable_path")?.unwrap_or_default();
+    let saved_game_executable_path = read_config_value("game_executable_path")?.unwrap_or_default();
+    let game_executable_path =
+        resolve_game_executable_setting_value(&saved_game_executable_path).unwrap_or_default();
     let client_ram = read_config_value("client_ram")?.unwrap_or_else(|| "4.00".to_string());
     let server_ram = read_config_value("server_ram")?.unwrap_or_else(|| "4.00".to_string());
     let max_concurrent_downloads = read_max_concurrent_downloads()?;
@@ -175,6 +180,11 @@ fn load_app_settings() -> Result<AppSettings, String> {
         max_concurrent_downloads,
         language_preference,
     })
+}
+
+fn resolve_game_executable_setting_value(saved_path: &str) -> Option<String> {
+    resolve_zomboid_executable_path(Some(saved_path))
+        .map(|path| path.display().to_string())
 }
 
 fn get_mod_locations_impl() -> Result<Vec<ModLocation>, String> {

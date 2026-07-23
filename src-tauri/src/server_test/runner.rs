@@ -35,6 +35,48 @@ where
     test_zomboid_server_impl_with_line_callback_and_cancel(server_id, on_line, || false)
 }
 
+fn resolve_server_launch_context() -> Result<(PathBuf, PathBuf), String> {
+    let configured_launch_path = read_config_value("server_launch_path")?
+        .filter(|path| !path.trim().is_empty())
+        .map(PathBuf::from);
+
+    if let Some(launch_path) = configured_launch_path {
+        if launch_path.is_dir() {
+            let launcher_path = launch_path.join(default_server_launcher_name());
+            if launcher_path.exists() && launcher_path.is_file() {
+                return Ok((launch_path, launcher_path));
+            }
+        } else if launch_path.exists() && launch_path.is_file() {
+            let Some(parent) = launch_path
+                .parent()
+                .filter(|path| path.exists() && path.is_dir())
+            else {
+                return Err(format!(
+                    "{}: {}.",
+                    text(
+                        "Configured server launcher folder was not found",
+                        "A pasta configurada do inicializador do servidor nao foi encontrada"
+                    ),
+                    launch_path.display()
+                ));
+            };
+
+            return Ok((parent.to_path_buf(), launch_path));
+        }
+    }
+
+    let Some(game_dir) = resolve_zomboid_game_dir()? else {
+        return Err(text(
+            "Project Zomboid folder not found. Configure the game executable in settings.",
+            "Pasta do Project Zomboid nao encontrada. Configure o executavel do jogo nas configuracoes.",
+        )
+        .to_string());
+    };
+
+    let launcher_path = game_dir.join(default_server_launcher_name());
+    Ok((game_dir, launcher_path))
+}
+
 pub(crate) fn test_zomboid_server_impl_with_line_callback_and_cancel<F, C>(
     server_id: &str,
     mut on_line: F,
@@ -80,68 +122,16 @@ where
         return Ok(dependency_result);
     }
 
-    let configured_launch_path = read_config_value("server_launch_path")?
-        .filter(|path| !path.trim().is_empty())
-        .map(PathBuf::from);
-    let (game_dir, launcher_path) = if let Some(launch_path) = configured_launch_path {
-        if launch_path.is_dir() {
-            let launcher_path = launch_path.join(default_server_launcher_name());
-            let Some(parent) = launcher_path
-                .parent()
-                .filter(|path| path.exists() && path.is_dir())
-            else {
-                return Ok(server_test_setup_error(
-                    &format!(
-                        "{}: {}.",
-                        text(
-                            "Configured server launcher folder was not found",
-                            "A pasta configurada do inicializador do servidor nao foi encontrada"
-                        ),
-                        launch_path.display()
-                    ),
-                    &launcher_path,
-                    "",
-                    0,
-                ));
-            };
-            (parent.to_path_buf(), launcher_path)
-        } else {
-            let Some(parent) = launch_path
-                .parent()
-                .filter(|path| path.exists() && path.is_dir())
-            else {
-                return Ok(server_test_setup_error(
-                    &format!(
-                        "{}: {}.",
-                        text(
-                            "Configured server launcher folder was not found",
-                            "A pasta configurada do inicializador do servidor nao foi encontrada"
-                        ),
-                        launch_path.display()
-                    ),
-                    &launch_path,
-                    "",
-                    0,
-                ));
-            };
-
-            (parent.to_path_buf(), launch_path)
-        }
-    } else {
-        let Some(game_dir) = resolve_zomboid_game_dir()? else {
+    let (game_dir, launcher_path) = match resolve_server_launch_context() {
+        Ok(context) => context,
+        Err(message) => {
             return Ok(server_test_setup_error(
-                &text(
-                    "Project Zomboid folder not found. Configure the game executable in settings.",
-                    "Pasta do Project Zomboid nao encontrada. Configure o executavel do jogo nas configuracoes.",
-                ),
+                &message,
                 Path::new(default_server_launcher_name()),
                 "",
                 0,
             ));
-        };
-
-        let launcher_path = game_dir.join(default_server_launcher_name());
-        (game_dir, launcher_path)
+        }
     };
     let mut command = if cfg!(windows) {
         format!(

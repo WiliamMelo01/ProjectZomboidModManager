@@ -6,7 +6,7 @@ mod paths;
 mod performance;
 mod system;
 
-pub(crate) use installation::steam_zomboid_game_dirs;
+pub(crate) use installation::resolve_zomboid_executable_path;
 use installation::{open_steam_zomboid_folder_impl, scan_zomboid_installation_impl};
 pub(crate) use performance::{
     apply_performance_settings, normalize_ram_gb, validate_game_executable_path,

@@ -1,5 +1,5 @@
 use super::logs::tail_log_lines;
-use crate::game::steam_zomboid_game_dirs;
+use crate::game::resolve_zomboid_executable_path;
 use crate::i18n::text;
 use crate::models::{ServerTestResult, ZomboidMod, ZomboidModVariant};
 use crate::mods::{list_zomboid_mods_impl, parse_server_mod_ids};
@@ -13,19 +13,10 @@ use std::{
 };
 
 pub(crate) fn resolve_zomboid_game_dir() -> Result<Option<PathBuf>, String> {
-    if let Some(game_executable_path) = read_config_value("game_executable_path")? {
-        let executable = PathBuf::from(game_executable_path);
+    let configured_path = read_config_value("game_executable_path")?;
 
-        if let Some(game_dir) = executable.parent() {
-            if game_dir.exists() && game_dir.is_dir() {
-                return Ok(Some(game_dir.to_path_buf()));
-            }
-        }
-    }
-
-    Ok(steam_zomboid_game_dirs()
-        .into_iter()
-        .find(|path| path.exists() && path.is_dir()))
+    Ok(resolve_zomboid_executable_path(configured_path.as_deref())
+        .and_then(|executable| executable.parent().map(Path::to_path_buf)))
 }
 
 pub(crate) fn validate_server_mod_dependencies(

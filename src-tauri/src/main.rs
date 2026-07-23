@@ -34,9 +34,9 @@ use i18n::{
 };
 use models::*;
 use mods::{
-    clear_zomboid_mods_cache, count_zomboid_mods, get_zomboid_mod_package_size,
-    install_zomboid_mod, list_zomboid_mods, get_workshop_mappings, save_workshop_mapping,
-    save_workshop_mappings, delete_workshop_mapping,
+    clear_zomboid_mods_cache, count_zomboid_mods, delete_workshop_mapping, get_workshop_mappings,
+    get_zomboid_mod_package_size, install_zomboid_mod, list_zomboid_mods, save_workshop_mapping,
+    save_workshop_mappings,
 };
 use remote::{
     add_remote_mod_location, cancel_remote_steam_workshop_download,
@@ -68,9 +68,8 @@ use servers::{
     create_zomboid_server, delete_zomboid_server, get_zomboid_server_lua_settings,
     get_zomboid_server_settings, install_zomboid_server_map, list_zomboid_server_logs,
     list_zomboid_servers, open_zomboid_server_file, read_zomboid_server_file,
-    read_zomboid_server_log_file, update_zomboid_server_build,
-    update_zomboid_server_lua_settings, update_zomboid_server_mods,
-    update_zomboid_server_settings,
+    read_zomboid_server_log_file, update_zomboid_server_build, update_zomboid_server_lua_settings,
+    update_zomboid_server_mods, update_zomboid_server_settings,
 };
 use settings::{
     add_mod_location, get_app_settings, get_mod_locations, install_linux_steamcmd,

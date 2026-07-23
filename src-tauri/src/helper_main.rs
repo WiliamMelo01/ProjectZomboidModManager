@@ -15,6 +15,8 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use server_test::ServerLaunchOptions;
+
 mod game;
 mod models;
 mod mods;
@@ -80,6 +82,7 @@ struct TestServerRequest {
 struct ServerControlRequest {
     server_id: String,
     server_launch_path: Option<String>,
+    no_steam: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -237,7 +240,12 @@ fn run() -> Result<(), String> {
             {
                 let _ = HELPER_SERVER_LAUNCH_PATH.set(server_launch_path.to_string());
             }
-            print_json(&start_server(request.server_id)?)
+            print_json(&start_server(
+                request.server_id,
+                ServerLaunchOptions {
+                    no_steam: request.no_steam.unwrap_or(false),
+                },
+            )?)
         }
         "start-server-streaming" => {
             let request = read_request::<ServerControlRequest>()?;
@@ -249,7 +257,12 @@ fn run() -> Result<(), String> {
             {
                 let _ = HELPER_SERVER_LAUNCH_PATH.set(server_launch_path.to_string());
             }
-            run_server_start_streaming(request.server_id)
+            run_server_start_streaming(
+                request.server_id,
+                ServerLaunchOptions {
+                    no_steam: request.no_steam.unwrap_or(false),
+                },
+            )
         }
         "stream-server-logs" => {
             let request = read_request::<ServerControlRequest>()?;
@@ -742,7 +755,10 @@ fn emit_server_start_line(line: impl Into<String>) -> Result<(), String> {
     emit_server_start_event("line", Some(line.into()), None, None)
 }
 
-fn run_server_start_streaming(server_id: String) -> Result<(), String> {
+fn run_server_start_streaming(
+    server_id: String,
+    options: ServerLaunchOptions,
+) -> Result<(), String> {
     let server_id = server_id.trim().to_string();
     let launch_path = configured_server_launch_path()?;
 
@@ -756,7 +772,7 @@ fn run_server_start_streaming(server_id: String) -> Result<(), String> {
     emit_server_start_event("started", None, None, None)?;
 
     // Start background daemon controller
-    let start_result = start_server(server_id.clone())?;
+    let start_result = start_server(server_id.clone(), options)?;
     if !start_result.success {
         return Err(start_result.message);
     }
@@ -895,7 +911,10 @@ fn run_server_logs_streaming(server_id: String) -> Result<(), String> {
     Ok(())
 }
 
-fn start_server(server_id: String) -> Result<models::RemoteServerActionResult, String> {
+fn start_server(
+    server_id: String,
+    options: ServerLaunchOptions,
+) -> Result<models::RemoteServerActionResult, String> {
     let server_id = server_id.trim().to_string();
     let launch_path = configured_server_launch_path()?;
 
@@ -909,12 +928,14 @@ fn start_server(server_id: String) -> Result<models::RemoteServerActionResult, S
     let helper_path = env::current_exe()
         .map_err(|error| format!("Could not resolve helper executable path: {error}"))?;
     let log_path = next_server_start_log_path(&server_id)?;
+    let no_steam_arg = if options.no_steam { " --nosteam" } else { "" };
     let command_line = format!(
-        "\"{}\" run-server-controller {} \"{}\" \"{}\"",
+        "\"{}\" run-server-controller {} \"{}\" \"{}\"{}",
         helper_path.display(),
         server_id,
         launch_path.display(),
-        log_path.display()
+        log_path.display(),
+        no_steam_arg
     );
 
     let mut command = Command::new(&helper_path);
@@ -923,6 +944,7 @@ fn start_server(server_id: String) -> Result<models::RemoteServerActionResult, S
         .arg(&server_id)
         .arg(&launch_path)
         .arg(&log_path)
+        .args(options.no_steam.then_some("--nosteam"))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -1042,8 +1064,11 @@ fn run_server_controller_from_args() -> Result<(), String> {
         .next()
         .map(PathBuf::from)
         .ok_or_else(|| "Missing log path for server controller.".to_string())?;
+    let options = ServerLaunchOptions {
+        no_steam: args.any(|arg| arg.eq_ignore_ascii_case("--nosteam")),
+    };
 
-    run_server_controller(&server_id, &launch_path, &log_path)
+    run_server_controller(&server_id, &launch_path, &log_path, options)
 }
 
 fn clean_bom_from_bat_files(dir: &Path, log_path: &Path) {
@@ -1086,6 +1111,7 @@ fn run_server_controller(
     server_id: &str,
     launch_path: &Path,
     log_path: &Path,
+    options: ServerLaunchOptions,
 ) -> Result<(), String> {
     let working_dir = launch_path
         .parent()
@@ -1115,7 +1141,11 @@ fn run_server_controller(
         log_path,
         &format!("[PZMM] Command queue: {}", command_dir.display()),
     );
-    let test_bat_path = server_test::create_server_test_batch(working_dir, launch_path, server_id)?;
+    if options.no_steam {
+        append_controller_log(log_path, "[PZMM] Launch options: -nosteam enabled");
+    }
+    let test_bat_path =
+        server_test::create_server_launch_batch(working_dir, launch_path, server_id, options)?;
 
     append_controller_log(
         log_path,

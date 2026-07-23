@@ -286,6 +286,7 @@ pub(crate) fn start_remote_zomboid_server(
     app: tauri::AppHandle,
     connection: RemoteServerConnectionRequest,
     server_id: String,
+    no_steam: Option<bool>,
 ) -> Result<RemoteServerActionResult, String> {
     let server_id = server_id.trim().to_string();
 
@@ -315,6 +316,7 @@ pub(crate) fn start_remote_zomboid_server(
         &server_launch_path,
     )?;
     let event_server_id = server_id.clone();
+    let no_steam = no_steam.unwrap_or(false);
 
     thread::spawn(move || {
         if let Err(error) = run_remote_zomboid_server_start_streaming(
@@ -322,6 +324,7 @@ pub(crate) fn start_remote_zomboid_server(
             &connection,
             &event_server_id,
             &server_launch_path,
+            no_steam,
         ) {
             let _ = app.emit(
                 "remote-server-start-event",
@@ -3024,6 +3027,7 @@ struct RemoteServerTestRequest<'a> {
     server_id: &'a str,
     server_launch_path: Option<&'a str>,
     server_profile_path: Option<&'a str>,
+    no_steam: bool,
 }
 
 #[derive(Deserialize)]
@@ -3041,12 +3045,14 @@ fn run_remote_zomboid_server_start_streaming(
     connection: &RemoteServerConnectionRequest,
     server_id: &str,
     server_launch_path: &str,
+    no_steam: bool,
 ) -> Result<(), String> {
     let helper_path = ensure_cached_remote_helper(connection)?;
     let payload = RemoteServerTestRequest {
         server_id,
         server_launch_path: Some(server_launch_path),
         server_profile_path: None,
+        no_steam,
     };
     let json = serde_json::to_vec(&payload)
         .map_err(|error| format!("Could not serialize remote server start payload: {error}"))?;
@@ -3079,6 +3085,7 @@ fn run_remote_zomboid_server_logs_streaming(
         server_id,
         server_launch_path: None,
         server_profile_path: None,
+        no_steam: false,
     };
     let json = serde_json::to_vec(&payload)
         .map_err(|error| format!("Could not serialize remote server logs payload: {error}"))?;
@@ -3113,6 +3120,7 @@ fn run_remote_zomboid_server_test_streaming(
         server_id,
         server_launch_path: Some(server_launch_path),
         server_profile_path: (!server_profile_path.is_empty()).then_some(server_profile_path),
+        no_steam: false,
     };
     let json = serde_json::to_vec(&payload)
         .map_err(|error| format!("Could not serialize remote server test payload: {error}"))?;

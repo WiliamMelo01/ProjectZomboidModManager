@@ -13,6 +13,7 @@
     "security": {
       "csp": {
         "default-src": ["'self'", "ipc:", "http://ipc.localhost"],
+        "connect-src": ["'self'", "ipc:", "http://ipc.localhost", "http://ec2-52-67-72-177.sa-east-1.compute.amazonaws.com:8080"],
         "img-src": ["'self'", "asset:", "http://asset.localhost"],
         "style-src": ["'self'", "'unsafe-inline'"],
         "script-src": ["'self'"]

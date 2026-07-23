@@ -63,6 +63,9 @@ type DeleteServerResult = {
   backupPath: string;
 };
 
+const WORKSHOP_MAPPINGS_API_URL =
+  "http://ec2-52-67-72-177.sa-east-1.compute.amazonaws.com:8080";
+
 function isRemoteSetupComplete(config: RemoteWorkspaceConfig | null) {
   const completedStep = Math.min(
     Math.max(config?.remoteSetupCompletedStep ?? 0, 0),
@@ -294,7 +297,7 @@ function LocalWorkspaceApp({
     async function syncWorkshopMappings() {
       setSyncError(null);
       try {
-        const response = await fetch("http://52.67.72.177:8080/mappings");
+        const response = await fetch(`${WORKSHOP_MAPPINGS_API_URL}/mappings`);
         if (!response.ok) {
           throw new Error(`HTTP error status: ${response.status}`);
         }
@@ -376,7 +379,7 @@ function LocalWorkspaceApp({
         `[Background Auto-Upload] Encontrados ${unmappedPairs.length} mods com Workshop ID não cadastrados na nuvem. Enviando...`,
       );
 
-      fetch("http://52.67.72.177:8080/mappings/bulk", {
+      fetch(`${WORKSHOP_MAPPINGS_API_URL}/mappings/bulk`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -563,7 +566,7 @@ function LocalWorkspaceApp({
       await invokeTauri("save_workshop_mapping", { modId, workshopId });
       await loadWorkshopMappings();
       
-      fetch("http://52.67.72.177:8080/mappings/bulk", {
+      fetch(`${WORKSHOP_MAPPINGS_API_URL}/mappings/bulk`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1230,7 +1233,10 @@ function LocalWorkspaceApp({
     }
   }
 
-  async function startRemoteServer(server: ZomboidServer) {
+  async function startRemoteServer(
+    server: ZomboidServer,
+    options: { noSteam: boolean },
+  ) {
     if (!remoteConnection || !server) {
       return;
     }
@@ -1280,6 +1286,7 @@ function LocalWorkspaceApp({
 
       appendRemoteStartLogs([
         t("remoteStart.startingServer"),
+        ...(options.noSteam ? ["Launch option enabled: -nosteam"] : []),
         t("remoteStart.streamingStartup"),
       ]);
 
@@ -1288,6 +1295,7 @@ function LocalWorkspaceApp({
         {
           connection: remoteConnection,
           serverId: server.id,
+          noSteam: options.noSteam,
         },
       );
       setRemoteStartResult(result);
@@ -1997,7 +2005,9 @@ function LocalWorkspaceApp({
           onConfigureFirewall={() =>
             void configureRemoteServerFirewall(activeStartServer)
           }
-          onStartServer={() => void startRemoteServer(activeStartServer)}
+          onStartServer={(noSteam) =>
+            void startRemoteServer(activeStartServer, { noSteam })
+          }
           onSendCommand={(command) =>
             sendRemoteServerCommand(activeStartServer, command)
           }

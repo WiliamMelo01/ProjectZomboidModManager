@@ -38,7 +38,7 @@ type RemoteServerStartModalProps = {
   onClose: () => void
   onRecheck: () => void
   onConfigureFirewall: () => void
-  onStartServer: () => void
+  onStartServer: (noSteam: boolean) => void
   onSendCommand: (command: string) => Promise<void>
   onStopServer: () => Promise<void>
 }
@@ -274,12 +274,21 @@ export function RemoteServerStartModal({
               )}
               <button
                 type="button"
-                onClick={onStartServer}
+                onClick={() => onStartServer(false)}
                 disabled={!canStartServer || Boolean(startResult?.success)}
                 className="flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 text-sm font-black text-emerald-200 transition-colors hover:bg-emerald-400 hover:text-[#071014] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isStarting ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
                 <span>Start server</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onStartServer(true)}
+                disabled={!canStartServer || Boolean(startResult?.success)}
+                className="flex items-center gap-2 rounded-xl border border-orange-400/30 bg-orange-400/10 px-4 py-2 text-sm font-black text-orange-200 transition-colors hover:bg-orange-400 hover:text-[#140d05] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isStarting ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
+                <span>Start -nosteam</span>
               </button>
             </div>
           </div>

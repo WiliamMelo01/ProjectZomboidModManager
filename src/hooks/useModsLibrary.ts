@@ -18,6 +18,9 @@ type UseModsLibraryOptions = {
   cacheKey?: string
 }
 
+const WORKSHOP_MAPPINGS_API_URL =
+  "http://ec2-52-67-72-177.sa-east-1.compute.amazonaws.com:8080"
+
 export function useModsLibrary({
   listCommand = "list_zomboid_mods",
   listArgs,
@@ -111,7 +114,7 @@ export function useModsLibrary({
             .catch((err) => console.error("Falha ao salvar mapeamento local pós-instalação:", err));
         }
 
-        fetch("http://52.67.72.177:8080/mappings/bulk", {
+        fetch(`${WORKSHOP_MAPPINGS_API_URL}/mappings/bulk`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

@@ -8,6 +8,11 @@ use std::{
 
 const SERVER_TEST_ADMIN_PASSWORD: &str = "admin";
 
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct ServerLaunchOptions {
+    pub(crate) no_steam: bool,
+}
+
 pub(crate) fn default_server_launcher_name() -> &'static str {
     if cfg!(windows) {
         "ProjectZomboidServer.bat"
@@ -22,6 +27,21 @@ pub(crate) fn create_server_test_batch(
     bat_path: &Path,
     server_id: &str,
 ) -> Result<PathBuf, String> {
+    create_server_launch_batch(
+        game_dir,
+        bat_path,
+        server_id,
+        ServerLaunchOptions::default(),
+    )
+}
+
+#[cfg(windows)]
+pub(crate) fn create_server_launch_batch(
+    game_dir: &Path,
+    bat_path: &Path,
+    server_id: &str,
+    options: ServerLaunchOptions,
+) -> Result<PathBuf, String> {
     if !server_id
         .chars()
         .all(|char| char.is_ascii_alphanumeric() || char == '_' || char == '-')
@@ -35,31 +55,8 @@ pub(crate) fn create_server_test_batch(
 
     let content = read_text_lossy(bat_path)?;
     let game_dir_text = game_dir.display().to_string();
-    let mut injected_server_name = false;
-    let updated_content = content
-        .lines()
-        .map(|line| {
-            if line.trim().eq_ignore_ascii_case("PAUSE") {
-                return "REM PAUSE disabled by PZMM server test".to_string();
-            }
-
-            let mut line = line.replace("%~dp0", &game_dir_text);
-
-            if line.contains("zombie.network.GameServer") {
-                line = replace_servername_argument(&line, server_id);
-                injected_server_name = true;
-            }
-
-            if line.contains("zombie.network.GameServer")
-                && !line.to_lowercase().contains("-adminpassword")
-            {
-                line.push_str(&format!(" -adminpassword {SERVER_TEST_ADMIN_PASSWORD}"));
-            }
-
-            line
-        })
-        .collect::<Vec<_>>()
-        .join("\r\n");
+    let (updated_content, injected_server_name) =
+        build_windows_server_launch_batch_content(&content, &game_dir_text, server_id, options);
 
     if !injected_server_name && !updated_content.contains("-servername") {
         return Err(text(
@@ -90,6 +87,21 @@ pub(crate) fn create_server_test_batch(
     launcher_path: &Path,
     server_id: &str,
 ) -> Result<PathBuf, String> {
+    create_server_launch_batch(
+        game_dir,
+        launcher_path,
+        server_id,
+        ServerLaunchOptions::default(),
+    )
+}
+
+#[cfg(not(windows))]
+pub(crate) fn create_server_launch_batch(
+    game_dir: &Path,
+    launcher_path: &Path,
+    server_id: &str,
+    options: ServerLaunchOptions,
+) -> Result<PathBuf, String> {
     if !server_id
         .chars()
         .all(|char| char.is_ascii_alphanumeric() || char == '_' || char == '-')
@@ -110,12 +122,12 @@ pub(crate) fn create_server_test_batch(
     }
 
     let test_script_path = env::temp_dir().join(format!("pzmm-test-{server_id}.sh"));
-    let updated_content = format!(
-        "#!/usr/bin/env sh\nset -eu\ncd {}\nexec {} -servername {} -adminpassword {}\n",
-        shell_quote(game_dir.display().to_string()),
-        shell_quote(launcher_path.display().to_string()),
-        shell_quote(server_id.to_string()),
-        shell_quote(SERVER_TEST_ADMIN_PASSWORD.to_string())
+    let updated_content = build_unix_server_launch_script_content(
+        &game_dir.display().to_string(),
+        &launcher_path.display().to_string(),
+        server_id,
+        options,
+        launcher_already_contains_no_steam(launcher_path),
     );
 
     fs::write(&test_script_path, updated_content).map_err(|error| {
@@ -157,6 +169,73 @@ pub(crate) fn create_server_test_batch(
     Ok(test_script_path)
 }
 
+#[cfg(any(not(windows), test))]
+fn build_unix_server_launch_script_content(
+    game_dir: &str,
+    launcher_path: &str,
+    server_id: &str,
+    options: ServerLaunchOptions,
+    launcher_has_no_steam: bool,
+) -> String {
+    let no_steam_arg = if options.no_steam && !launcher_has_no_steam {
+        " -nosteam"
+    } else {
+        ""
+    };
+
+    format!(
+        "#!/usr/bin/env sh\nset -eu\ncd {}\nexec {} -servername {} -adminpassword {}{}\n",
+        shell_quote(game_dir.to_string()),
+        shell_quote(launcher_path.to_string()),
+        shell_quote(server_id.to_string()),
+        shell_quote(SERVER_TEST_ADMIN_PASSWORD.to_string()),
+        no_steam_arg
+    )
+}
+
+#[cfg(windows)]
+fn build_windows_server_launch_batch_content(
+    content: &str,
+    game_dir_text: &str,
+    server_id: &str,
+    options: ServerLaunchOptions,
+) -> (String, bool) {
+    let mut injected_server_name = false;
+    let updated_content = content
+        .lines()
+        .map(|line| {
+            if line.trim().eq_ignore_ascii_case("PAUSE") {
+                return "REM PAUSE disabled by PZMM server test".to_string();
+            }
+
+            let mut line = line.replace("%~dp0", game_dir_text);
+
+            if line.contains("zombie.network.GameServer") {
+                line = replace_servername_argument(&line, server_id);
+                injected_server_name = true;
+            }
+
+            if line.contains("zombie.network.GameServer")
+                && !line.to_lowercase().contains("-adminpassword")
+            {
+                line.push_str(&format!(" -adminpassword {SERVER_TEST_ADMIN_PASSWORD}"));
+            }
+
+            if options.no_steam
+                && line.contains("zombie.network.GameServer")
+                && !line.to_lowercase().contains("-nosteam")
+            {
+                line.push_str(" -nosteam");
+            }
+
+            line
+        })
+        .collect::<Vec<_>>()
+        .join("\r\n");
+
+    (updated_content, injected_server_name)
+}
+
 #[cfg(windows)]
 fn replace_servername_argument(line: &str, server_id: &str) -> String {
     let lower_line = line.to_lowercase();
@@ -196,6 +275,111 @@ fn replace_servername_argument(line: &str, server_id: &str) -> String {
 }
 
 #[cfg(not(windows))]
+fn launcher_already_contains_no_steam(launcher_path: &Path) -> bool {
+    fs::read_to_string(launcher_path)
+        .map(|content| content.to_lowercase().contains("-nosteam"))
+        .unwrap_or(false)
+}
+
+#[cfg(any(not(windows), test))]
 fn shell_quote(value: String) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_launch_batch_adds_nosteam_when_requested() {
+        let content = r#"java -cp . zombie.network.GameServer -servername old"#;
+
+        let (updated, _) = build_windows_server_launch_batch_content(
+            content,
+            "C:\\PZ",
+            "servertest",
+            ServerLaunchOptions { no_steam: true },
+        );
+
+        assert!(updated.contains("-servername servertest"));
+        assert!(updated.contains("-adminpassword admin"));
+        assert!(updated.contains("-nosteam"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_launch_batch_does_not_duplicate_nosteam() {
+        let content = r#"java -cp . zombie.network.GameServer -servername old -nosteam"#;
+
+        let (updated, _) = build_windows_server_launch_batch_content(
+            content,
+            "C:\\PZ",
+            "servertest",
+            ServerLaunchOptions { no_steam: true },
+        );
+
+        assert_eq!(updated.to_lowercase().matches("-nosteam").count(), 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_launch_batch_omits_nosteam_by_default() {
+        let content = r#"java -cp . zombie.network.GameServer -servername old"#;
+
+        let (updated, _) = build_windows_server_launch_batch_content(
+            content,
+            "C:\\PZ",
+            "servertest",
+            ServerLaunchOptions { no_steam: false },
+        );
+
+        assert!(!updated.contains("-nosteam"));
+        assert!(updated.contains("-servername servertest"));
+        assert!(updated.contains("-adminpassword admin"));
+    }
+
+    #[test]
+    fn unix_launch_script_adds_nosteam_when_requested() {
+        let script = build_unix_server_launch_script_content(
+            "/opt/pz",
+            "/opt/pz/start-server.sh",
+            "servertest",
+            ServerLaunchOptions { no_steam: true },
+            false,
+        );
+
+        assert!(script.contains("exec '/opt/pz/start-server.sh'"));
+        assert!(script.contains("-servername 'servertest'"));
+        assert!(script.contains("-adminpassword 'admin'"));
+        assert!(script.contains("-nosteam"));
+    }
+
+    #[test]
+    fn unix_launch_script_does_not_duplicate_nosteam() {
+        let script = build_unix_server_launch_script_content(
+            "/opt/pz",
+            "/opt/pz/start-server.sh",
+            "servertest",
+            ServerLaunchOptions { no_steam: true },
+            true,
+        );
+
+        assert_eq!(script.matches("-nosteam").count(), 0);
+    }
+
+    #[test]
+    fn unix_launch_script_omits_nosteam_by_default() {
+        let script = build_unix_server_launch_script_content(
+            "/opt/pz",
+            "/opt/pz/start-server.sh",
+            "servertest",
+            ServerLaunchOptions { no_steam: false },
+            false,
+        );
+
+        assert!(!script.contains("-nosteam"));
+        assert!(script.contains("-servername 'servertest'"));
+        assert!(script.contains("-adminpassword 'admin'"));
+    }
 }

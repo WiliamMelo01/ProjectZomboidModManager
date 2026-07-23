@@ -245,7 +245,9 @@ fn zomboid_logs_dir() -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-pub(crate) fn list_zomboid_server_logs(_server_id: String) -> Result<Vec<AvailableLogFile>, String> {
+pub(crate) fn list_zomboid_server_logs(
+    _server_id: String,
+) -> Result<Vec<AvailableLogFile>, String> {
     let logs_dir = zomboid_logs_dir()?;
     let mut log_files = Vec::new();
 
@@ -280,12 +282,15 @@ pub(crate) fn list_zomboid_server_logs(_server_id: String) -> Result<Vec<Availab
         }
     }
 
-    log_files.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
+    log_files.sort_by_key(|file| std::cmp::Reverse(file.last_modified));
     Ok(log_files)
 }
 
 #[tauri::command]
-pub(crate) fn read_zomboid_server_log_file(server_id: String, log_name: String) -> Result<LocalServerFilePreview, String> {
+pub(crate) fn read_zomboid_server_log_file(
+    server_id: String,
+    log_name: String,
+) -> Result<LocalServerFilePreview, String> {
     let logs_dir = zomboid_logs_dir()?;
     let clean_log_name = Path::new(&log_name)
         .file_name()
@@ -295,7 +300,10 @@ pub(crate) fn read_zomboid_server_log_file(server_id: String, log_name: String) 
     let log_path = logs_dir.join(&clean_log_name);
 
     if !log_path.exists() || !log_path.is_file() {
-        return Err(format!("Arquivo de log nao encontrado: {}", log_path.display()));
+        return Err(format!(
+            "Arquivo de log nao encontrado: {}",
+            log_path.display()
+        ));
     }
 
     let content = read_text_lossy(&log_path)?;
@@ -309,10 +317,20 @@ pub(crate) fn read_zomboid_server_log_file(server_id: String, log_name: String) 
 }
 
 #[tauri::command]
-pub(crate) fn read_zomboid_server_file(server_id: String) -> Result<LocalServerFilePreview, String> {
+pub(crate) fn read_zomboid_server_file(
+    server_id: String,
+) -> Result<LocalServerFilePreview, String> {
     let server_path = canonical_zomboid_server_path(&server_id)?;
-    let content = std::fs::read_to_string(&server_path)
-        .map_err(|e| format!("{}: {}", text("Failed to read server file", "Falha ao ler o arquivo do servidor"), e))?;
+    let content = std::fs::read_to_string(&server_path).map_err(|e| {
+        format!(
+            "{}: {}",
+            text(
+                "Failed to read server file",
+                "Falha ao ler o arquivo do servidor"
+            ),
+            e
+        )
+    })?;
 
     let file_name = server_path
         .file_name()

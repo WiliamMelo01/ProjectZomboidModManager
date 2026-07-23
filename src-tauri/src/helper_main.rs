@@ -1180,16 +1180,8 @@ fn run_server_controller(
         .take()
         .ok_or_else(|| "Could not open remote server stdin.".to_string())?;
 
-    let mut last_players_query = std::time::Instant::now();
     loop {
         process_server_command_queue(&command_dir, log_path, &mut stdin)?;
-
-        if last_players_query.elapsed() >= std::time::Duration::from_secs(15) {
-            use std::io::Write;
-            let _ = writeln!(stdin, "players");
-            let _ = stdin.flush();
-            last_players_query = std::time::Instant::now();
-        }
 
         if let Some(status) = child
             .try_wait()

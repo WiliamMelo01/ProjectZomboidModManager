@@ -2564,33 +2564,40 @@ fn apply_remote_performance_settings(
     server_ram: &str,
 ) -> Result<(), String> {
     let server_mb = remote_ram_gb_to_mb(server_ram)?;
-    let server_dir = remote_unix_parent_path(server_path)
-        .unwrap_or_else(|| REMOTE_LINUX_ZOMBOID_SERVER_DIR.to_string());
-    let script = format!(
-        r#"set -e
-launcher={}
-server_dir={}
-ram={}
-if [ ! -f "$launcher" ]; then
-  launcher="$server_dir/start-server.sh"
-fi
-if [ ! -f "$launcher" ]; then
-  echo "Remote Project Zomboid Linux launcher not found: $launcher" >&2
-  exit 1
-fi
-sudo -n -u pzmm env HOME=/var/lib/pzmm PZMM_DATA_DIR=/var/lib/pzmm python3 - "$launcher" "$ram" <<'PY'
-import json, pathlib, re, sys
-path = pathlib.Path(sys.argv[1])
-ram = sys.argv[2]
-text = path.read_text(errors="replace")
-text, n1 = re.subn(r'-Xms\S+', '-Xms' + ram + 'm', text)
-text, n2 = re.subn(r'-Xmx\S+', '-Xmx' + ram + 'm', text)
-if n1 == 0 or n2 == 0:
-    text = text.replace(' zombie.network.GameServer', ' -Xms' + ram + 'm -Xmx' + ram + 'm zombie.network.GameServer', 1)
-path.write_text(text)
+    let script = build_remote_performance_settings_script(server_path, server_mb);
+    let result = run_ssh_capture(connection, &script)?;
 
-json_path = path.parent / "ProjectZomboid64.json"
-if json_path.is_file():
+    if result.success {
+        Ok(())
+    } else {
+        Err(join_command_output(&[
+            "Could not apply remote Linux performance settings.",
+            result.stdout.as_str(),
+            result.stderr.as_str(),
+        ]))
+    }
+}
+
+fn build_remote_performance_settings_script(server_path: &str, server_mb: u32) -> String {
+    let server_dirs = remote_zomboid_server_config_dirs(server_path);
+    let quoted_dirs = server_dirs
+        .iter()
+        .map(|path| linux_shell_quote(path))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    format!(
+        r#"set -e
+ram={}
+sudo -n -u pzmm env HOME=/var/lib/pzmm PZMM_DATA_DIR=/var/lib/pzmm python3 - "$ram" {} <<'PY'
+import json, pathlib, re, sys
+ram = sys.argv[1]
+server_dirs = [pathlib.Path(value) for value in sys.argv[2:]]
+json_names = ("ProjectZomboid64.json", "ProjectZomboid32.json")
+checked = []
+updated = []
+
+def update_json(json_path):
     data = json.loads(json_path.read_text(errors="replace"))
     vm_args = data.get("vmArgs")
 
@@ -2620,23 +2627,54 @@ if json_path.is_file():
         data["vmArgs"] = ["-Xms" + ram + "m", "-Xmx" + ram + "m"]
 
     json_path.write_text(json.dumps(data, indent=2) + "\n")
-PY
-printf 'PZMM_REMOTE_PERFORMANCE_UPDATED=%s\n' "$server_dir"
-"#,
-        linux_shell_quote(server_path),
-        linux_shell_quote(&server_dir),
-        server_mb,
-    );
-    let result = run_ssh_capture(connection, &script)?;
+    updated.append(str(json_path))
 
-    if result.success {
-        Ok(())
+for server_dir in server_dirs:
+    for json_name in json_names:
+        json_path = server_dir / json_name
+        checked.append(str(json_path))
+        if json_path.is_file():
+            update_json(json_path)
+
+if not updated:
+    raise SystemExit("Remote Project Zomboid JSON launcher config not found. Checked: " + ", ".join(checked))
+
+print("PZMM_REMOTE_PERFORMANCE_UPDATED=" + ",".join(updated))
+PY
+"#,
+        server_mb, quoted_dirs,
+    )
+}
+
+fn remote_zomboid_server_config_dirs(server_path: &str) -> Vec<String> {
+    let trimmed = server_path.trim().trim_end_matches('/');
+    let configured_dir = if trimmed.is_empty() {
+        REMOTE_LINUX_ZOMBOID_SERVER_DIR.to_string()
+    } else if looks_like_remote_zomboid_launcher_file(trimmed) {
+        remote_unix_parent_path(trimmed)
+            .unwrap_or_else(|| REMOTE_LINUX_ZOMBOID_SERVER_DIR.to_string())
     } else {
-        Err(join_command_output(&[
-            "Could not apply remote Linux performance settings.",
-            result.stdout.as_str(),
-            result.stderr.as_str(),
-        ]))
+        trimmed.to_string()
+    };
+
+    let mut dirs = Vec::new();
+    push_unique_string(&mut dirs, configured_dir);
+    push_unique_string(&mut dirs, REMOTE_LINUX_ZOMBOID_SERVER_DIR.to_string());
+    dirs
+}
+
+fn looks_like_remote_zomboid_launcher_file(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+
+    name.ends_with(".sh")
+        || name.ends_with(".json")
+        || name == "projectzomboid64"
+        || name == "projectzomboid32"
+}
+
+fn push_unique_string(values: &mut Vec<String>, value: String) {
+    if !values.iter().any(|existing| existing == &value) {
+        values.push(value);
     }
 }
 fn matching_active_mod_ids(
@@ -5598,4 +5636,37 @@ pub(crate) async fn delete_zomboid_mod_command(
         Ok(())
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remote_ram_config_dirs_include_default_fallback_for_legacy_launcher_path() {
+        let dirs = remote_zomboid_server_config_dirs("/opt/pzserver/start-server.sh");
+
+        assert_eq!(dirs[0], "/opt/pzserver");
+        assert!(dirs.contains(&REMOTE_LINUX_ZOMBOID_SERVER_DIR.to_string()));
+    }
+
+    #[test]
+    fn remote_ram_config_dirs_treat_directory_as_directory() {
+        let dirs = remote_zomboid_server_config_dirs("/var/lib/pzmm/zomboid-server");
+
+        assert_eq!(dirs, vec![REMOTE_LINUX_ZOMBOID_SERVER_DIR.to_string()]);
+    }
+
+    #[test]
+    fn remote_ram_script_updates_json_configs_without_writing_launcher_script() {
+        let script =
+            build_remote_performance_settings_script("/opt/pzserver/start-server.sh", 8192);
+
+        assert!(script.contains("ProjectZomboid64.json"));
+        assert!(script.contains("ProjectZomboid32.json"));
+        assert!(script.contains("-Xms\" + ram + \"m"));
+        assert!(script.contains("-Xmx\" + ram + \"m"));
+        assert!(!script.contains("path.write_text(text)"));
+        assert!(!script.contains("launcher="));
+    }
 }

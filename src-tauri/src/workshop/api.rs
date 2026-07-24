@@ -69,7 +69,7 @@ pub(crate) fn fetch_steam_workshop_collection_items(
     let collection_id = validate_workshop_id(collection_id, &text("collection", "colecao"))?;
     let response = run_steam_workshop_json_request(
         "https://api.steampowered.com/ISteamRemoteStorage/GetCollectionDetails/v1/",
-        &format!("collectioncount=1&publishedfileids[0]={collection_id}"),
+        &collection_details_request_body(&collection_id),
         &text("fetch the Steam collection", "consultar a colecao na Steam"),
     )?;
 
@@ -88,6 +88,10 @@ pub(crate) fn fetch_steam_workshop_collection_items(
     }
 
     Ok(workshop_ids)
+}
+
+fn collection_details_request_body(collection_id: &str) -> String {
+    format!("collectioncount = '1'; 'publishedfileids[0]' = '{collection_id}';")
 }
 
 fn collection_item_ids_from_api_response(response: &Value) -> Vec<String> {
@@ -344,6 +348,14 @@ mod tests {
         assert_eq!(
             collection_item_ids_from_html(html, "3073059898"),
             vec!["2694448564".to_string(), "2725216703".to_string()]
+        );
+    }
+
+    #[test]
+    fn builds_collection_request_body_as_powershell_hashtable_entries() {
+        assert_eq!(
+            collection_details_request_body("2869553644"),
+            "collectioncount = '1'; 'publishedfileids[0]' = '2869553644';"
         );
     }
 }

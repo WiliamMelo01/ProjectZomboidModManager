@@ -4353,24 +4353,18 @@ fn remote_helper_sudo_command_prefix(
         .as_ref()
         .map(|config| config.remote_zomboid_data_owner.as_str())
         .unwrap_or(REMOTE_LINUX_MANAGED_USER);
-    let data_owner = linux_sudo_user_arg(data_owner_value);
-    let cache_dir =
-        if remote_workspace_owner_or_default(data_owner_value) == REMOTE_LINUX_MANAGED_USER {
-            join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "cache")
-        } else {
-            join_remote_unix_path(&remote_zomboid_dir, ".pzmm-cache")
-        };
     format!(
-        "set -e; sudo -n -u {} mkdir -p {} {} {}; sudo -n -u {} env HOME={} PZMM_DATA_DIR={} PZMM_CACHE_DIR={} PZMM_SERVER_PROFILE_DIR={} PZMM_SERVER_LAUNCH_PATH={} PZMM_EXTRA_STEAM_WORKSHOP_DIRS={} {}",
-        data_owner,
-        linux_shell_quote(&cache_dir),
+        "set -e; server_profile_dir={}; remote_data_dir={}; remote_zomboid_dir={}; managed_zomboid_dir={}; data_owner={}; if [ \"$remote_zomboid_dir\" != \"$managed_zomboid_dir\" ] && [ ! -e \"$remote_zomboid_dir\" ]; then echo \"Remote Zomboid data folder not found: $remote_zomboid_dir\" >&2; exit 1; fi; if {{ [ -z \"$data_owner\" ] || [ \"$data_owner\" = {} ]; }} && [ \"$remote_zomboid_dir\" != \"$managed_zomboid_dir\" ] && [ -e \"$remote_zomboid_dir\" ]; then data_owner=$(sudo -n stat -c '%U' \"$remote_zomboid_dir\"); fi; case \"$data_owner\" in ''|UNKNOWN|-*|*[!A-Za-z0-9_-]*) echo \"Invalid Linux owner for $remote_zomboid_dir: $data_owner\" >&2; exit 1 ;; esac; sudo -n id -u \"$data_owner\" >/dev/null; if [ \"$data_owner\" = {} ]; then cache_dir={}; sudo -n install -d -o pzmm -g pzmm {} \"$cache_dir\" \"$managed_zomboid_dir\" {}; else if [ ! -d \"$remote_zomboid_dir\" ]; then echo \"Remote Zomboid data folder not found: $remote_zomboid_dir\" >&2; exit 1; fi; cache_dir=\"$remote_zomboid_dir/.pzmm-cache\"; sudo -n -u \"$data_owner\" mkdir -p \"$cache_dir\" \"$server_profile_dir\"; fi; sudo -n -u \"$data_owner\" env HOME=\"$remote_data_dir\" PZMM_DATA_DIR=\"$remote_data_dir\" PZMM_CACHE_DIR=\"$cache_dir\" PZMM_SERVER_PROFILE_DIR=\"$server_profile_dir\" PZMM_SERVER_LAUNCH_PATH={} PZMM_EXTRA_STEAM_WORKSHOP_DIRS={} {}",
+        linux_shell_quote(&server_profile_dir),
+        linux_shell_quote(&remote_data_dir),
         linux_shell_quote(&remote_zomboid_dir),
-        linux_shell_quote(&server_profile_dir),
-        data_owner,
-        linux_shell_quote(&remote_data_dir),
-        linux_shell_quote(&remote_data_dir),
-        linux_shell_quote(&cache_dir),
-        linux_shell_quote(&server_profile_dir),
+        linux_shell_quote(&join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "Zomboid")),
+        linux_sudo_user_arg(data_owner_value),
+        linux_shell_quote(REMOTE_LINUX_MANAGED_USER),
+        linux_shell_quote(REMOTE_LINUX_MANAGED_USER),
+        linux_shell_quote(&join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "cache")),
+        linux_shell_quote(REMOTE_LINUX_DATA_DIR),
+        linux_shell_quote(REMOTE_LINUX_SERVER_PROFILE_DIR),
         linux_shell_quote(REMOTE_LINUX_ZOMBOID_LAUNCHER),
         linux_shell_quote(&remote_extra_steam_workshop_dirs(connection)),
         linux_shell_quote(helper_path)

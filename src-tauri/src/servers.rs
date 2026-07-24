@@ -528,8 +528,18 @@ fn read_zomboid_server_from_path(path: &Path) -> Result<ZomboidServer, String> {
     let max_players = read_ini_value(&content, "MaxPlayers")
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(0);
-    let game_build = read_zomboid_server_build(&file_stem)?;
+    let mut game_build = read_zomboid_server_build(&file_stem)?;
     let configured_mods = read_ini_value(&content, "Mods").unwrap_or_default();
+
+    if game_build == BUILD_41 && (
+        configured_mods.starts_with('\\') || 
+        configured_mods.contains(";\\") || 
+        content.contains("AntiCheatProtectionType24=")
+    ) {
+        game_build = BUILD_42.to_string();
+        let _ = write_zomboid_server_build(&file_stem, &game_build);
+    }
+
     let active_mod_ids = parse_server_mod_ids(&configured_mods);
 
     if game_build == BUILD_42 {

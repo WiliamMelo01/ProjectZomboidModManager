@@ -28,8 +28,7 @@ pub(crate) use ports::server_ports_for_id;
 use process::kill_processes_by_pid_impl;
 pub(crate) use process::{kill_process_tree, spawn_output_reader};
 pub(crate) use runner::{
-    test_zomboid_server_impl,
-    test_zomboid_server_impl_with_line_callback_and_cancel,
+    test_zomboid_server_impl, test_zomboid_server_impl_with_line_callback_and_cancel,
 };
 
 static ACTIVE_SERVER_TESTS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();

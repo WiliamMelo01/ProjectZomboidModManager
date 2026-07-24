@@ -67,7 +67,7 @@ export function FixWorkshopIdsModal({
 
     const cleanId = inputWorkshopId.trim()
     if (!cleanId || !/^\d+$/.test(cleanId)) {
-      setErrorMessage("Por favor, digite um ID numérico válido.")
+      setErrorMessage(t("fixWorkshopIds.invalidId"))
       return
     }
 
@@ -85,7 +85,7 @@ export function FixWorkshopIdsModal({
         setIsFinished(true)
       }
     } catch (err) {
-      setErrorMessage("Erro ao salvar o ID. Tente novamente.")
+      setErrorMessage(t("fixWorkshopIds.saveIdError"))
     } finally {
       setIsSaving(false)
     }
@@ -127,7 +127,7 @@ export function FixWorkshopIdsModal({
       }
       onClose()
     } catch (err) {
-      setErrorMessage("Erro ao salvar a configuração no servidor.")
+      setErrorMessage(t("fixWorkshopIds.saveServerError"))
     } finally {
       setIsSaving(false)
     }
@@ -151,9 +151,9 @@ export function FixWorkshopIdsModal({
               <Wand2 size={20} />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-white">Organizar Workshop IDs</h3>
+              <h3 className="text-lg font-bold text-white">{t("fixWorkshopIds.title")}</h3>
               <p className="text-xs text-gray-400">
-                Alinha os IDs da Workshop na ordem exata dos Mod IDs no servidor
+                {t("fixWorkshopIds.subtitle")}
               </p>
             </div>
           </div>
@@ -174,20 +174,20 @@ export function FixWorkshopIdsModal({
               <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-500/20 text-green-400 border border-green-500/30">
                 <CheckCircle2 size={36} />
               </div>
-              <h4 className="text-xl font-bold text-white">Tudo Pronto!</h4>
+              <h4 className="text-xl font-bold text-white">{t("fixWorkshopIds.doneTitle")}</h4>
               <p className="mt-2 max-w-md text-xs text-gray-300 leading-relaxed">
                 {missingModsQueue.length === 0
-                  ? "Todos os mods ativos no servidor já possuem ID da Workshop associado. A ordem no arquivo .ini será alinhada perfeitamente!"
-                  : "Todos os mods da fila foram processados. Clique no botão abaixo para regravar o arquivo servertest.ini na ordem exata!"}
+                  ? t("fixWorkshopIds.doneAllMapped")
+                  : t("fixWorkshopIds.doneProcessed")}
               </p>
 
               <div className="mt-6 w-full rounded-2xl border border-white/5 bg-[#1e2327] p-4 text-left">
                 <div className="flex justify-between items-center text-xs text-gray-400 mb-2">
-                  <span>Total de Mods Ativos:</span>
+                  <span>{t("fixWorkshopIds.totalActive")}</span>
                   <span className="font-bold text-white">{activeModsList.length}</span>
                 </div>
                 <div className="flex justify-between items-center text-xs text-gray-400">
-                  <span>Mods Pulados sem Workshop ID:</span>
+                  <span>{t("fixWorkshopIds.skippedWithoutId")}</span>
                   <span className="font-bold text-amber-400">{skippedModIds.size}</span>
                 </div>
               </div>
@@ -199,7 +199,7 @@ export function FixWorkshopIdsModal({
                   disabled={isSaving}
                   className="flex-1 rounded-xl bg-orange-500 py-3 text-xs font-bold text-white shadow-lg shadow-orange-500/20 transition-all hover:bg-orange-600 disabled:opacity-50"
                 >
-                  {isSaving ? "Gravando no Servidor..." : "Aplicar e Salvar no Servidor"}
+                  {isSaving ? t("fixWorkshopIds.saving") : t("fixWorkshopIds.applySave")}
                 </button>
               </div>
             </div>
@@ -209,10 +209,10 @@ export function FixWorkshopIdsModal({
               {/* Indicador de Progresso */}
               <div className="mb-6 flex items-center justify-between">
                 <span className="text-xs font-bold uppercase tracking-wider text-orange-400">
-                  Mod {currentIndex + 1} de {missingModsQueue.length} sem ID
+                  {t("fixWorkshopIds.progress", { current: currentIndex + 1, total: missingModsQueue.length })}
                 </span>
                 <span className="text-xs text-gray-500">
-                  {Math.round(((currentIndex) / missingModsQueue.length) * 100)}% concluído
+                  {t("fixWorkshopIds.percentDone", { percent: Math.round((currentIndex / missingModsQueue.length) * 100) })}
                 </span>
               </div>
 
@@ -235,7 +235,7 @@ export function FixWorkshopIdsModal({
                 {/* Campo de Input para o Workshop ID */}
                 <div className="mt-4">
                   <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                    Digite o Workshop ID deste mod:
+                    {t("fixWorkshopIds.inputLabel")}
                   </label>
                   <div className="flex gap-2">
                     <div className="relative flex-1">
@@ -247,7 +247,7 @@ export function FixWorkshopIdsModal({
                         onKeyDown={(e) => {
                           if (e.key === "Enter") void handleSaveCurrentMod()
                         }}
-                        placeholder="Ex: 2460154815"
+                        placeholder={t("fixWorkshopIds.placeholder")}
                         disabled={isSaving}
                         autoFocus
                         className="w-full rounded-xl border border-white/10 bg-black/40 py-2.5 pl-9 pr-3 text-xs font-mono text-white placeholder-gray-600 focus:border-orange-400/50 focus:outline-none"
@@ -259,7 +259,7 @@ export function FixWorkshopIdsModal({
                       disabled={isSaving}
                       className="flex items-center gap-1 rounded-xl bg-orange-500 px-4 py-2.5 text-xs font-bold text-white transition-all hover:bg-orange-600 shadow-md shadow-orange-500/20 disabled:opacity-50"
                     >
-                      <span>{isSaving ? "Salvando..." : "Salvar"}</span>
+                      <span>{isSaving ? t("fixWorkshopIds.savingShort") : t("fixWorkshopIds.save")}</span>
                       <ChevronRight size={14} />
                     </button>
                   </div>
@@ -278,7 +278,7 @@ export function FixWorkshopIdsModal({
                   className="flex items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-[#2b3238] px-4 py-2.5 text-xs font-bold text-gray-300 transition-colors hover:bg-[#353c42] hover:text-white"
                 >
                   <SkipForward size={14} />
-                  <span>Pular este mod</span>
+                  <span>{t("fixWorkshopIds.skipCurrent")}</span>
                 </button>
 
                 <button
@@ -288,7 +288,7 @@ export function FixWorkshopIdsModal({
                   className="flex items-center justify-center gap-1.5 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-2.5 text-xs font-bold text-amber-300 transition-colors hover:bg-amber-500/20"
                 >
                   <SkipForward size={14} />
-                  <span>Pular todos os mods sem ID</span>
+                  <span>{t("fixWorkshopIds.skipAllMissing")}</span>
                 </button>
               </div>
             </div>

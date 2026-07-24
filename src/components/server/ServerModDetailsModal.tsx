@@ -136,13 +136,13 @@ export function ServerModDetailsModal({
             
             {isEditing ? (
               <div className="min-w-0 rounded-xl border border-orange-400/25 bg-[#1e2327] p-3 col-span-1 sm:col-span-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-orange-400">Workshop ID (Editando)</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-orange-400">{t("modDetails.workshopEditing")}</p>
                 <div className="mt-1 flex items-center gap-2">
                   <input
                     type="text"
                     value={tempWorkshopId}
                     onChange={(e) => setTempWorkshopId(e.target.value.replace(/\D/g, ""))}
-                    placeholder="Digite o ID da Workshop"
+                    placeholder={t("modDetails.workshopPlaceholder")}
                     disabled={isSaving}
                     className="flex-1 bg-black/35 border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white font-mono focus:outline-none focus:border-orange-400/50"
                   />
@@ -151,7 +151,7 @@ export function ServerModDetailsModal({
                       setSaveError(null)
                       const cleanId = tempWorkshopId.trim()
                       if (cleanId && !/^\d+$/.test(cleanId)) {
-                        setSaveError("Apenas números são válidos")
+                        setSaveError(t("modDetails.numbersOnly"))
                         return
                       }
                       setIsSaving(true)
@@ -161,7 +161,7 @@ export function ServerModDetailsModal({
                         }
                         setIsEditing(false)
                       } catch (err) {
-                        setSaveError("Erro ao salvar")
+                        setSaveError(t("modDetails.saveError"))
                       } finally {
                         setIsSaving(false)
                       }
@@ -169,7 +169,7 @@ export function ServerModDetailsModal({
                     disabled={isSaving}
                     className="rounded-lg bg-orange-400 px-3 py-1 text-xs font-bold text-black hover:bg-orange-300 disabled:opacity-50 transition-colors"
                   >
-                    {isSaving ? "Salvando..." : "Salvar"}
+                    {isSaving ? t("fixWorkshopIds.savingShort") : t("common.save")}
                   </button>
                   <button
                     onClick={() => {
@@ -180,7 +180,7 @@ export function ServerModDetailsModal({
                     disabled={isSaving}
                     className="rounded-lg bg-[#2b3238] border border-white/5 px-2.5 py-1 text-xs font-bold text-gray-300 hover:bg-[#353c42] transition-colors"
                   >
-                    Cancelar
+                    {t("common.cancel")}
                   </button>
                 </div>
                 {saveError && <p className="mt-1 text-[10px] text-red-400">{saveError}</p>}
@@ -191,16 +191,16 @@ export function ServerModDetailsModal({
                   <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">Workshop ID</p>
                   <p className="mt-1 flex items-center gap-1.5 break-all font-mono text-xs text-gray-300">
                     <Hash size={14} className="text-orange-400 shrink-0" />
-                    {resolvedWorkshopId || <span className="text-gray-500 italic">Não associado</span>}
+                    {resolvedWorkshopId || <span className="text-gray-500 italic">{t("modDetails.notAssociated")}</span>}
                   </p>
                   <div className="mt-2">
                     {isModInCloud(mod, workshopMappings) ? (
                       <span className="inline-flex items-center gap-1 text-[10px] font-bold text-sky-300 bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded-full">
-                        ☁ Found in Cloud Database
+                        {t("modDetails.foundCloud")}
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
-                        ⚠ Not found in cloud database
+                        {t("modDetails.notFoundCloud")}
                       </span>
                     )}
                   </div>
@@ -210,7 +210,7 @@ export function ServerModDetailsModal({
                     onClick={() => setIsEditing(true)}
                     className="mt-2 text-left text-[10px] font-bold text-orange-400/80 hover:text-orange-400 hover:underline transition-colors"
                   >
-                    {resolvedWorkshopId ? "Editar ID" : "Vincular ID"}
+                    {resolvedWorkshopId ? t("modDetails.editId") : t("modDetails.linkId")}
                   </button>
                 )}
               </div>

@@ -129,6 +129,7 @@ export function UploadLocalModsModal({
         await invokeTauri("upload_local_mod_to_remote", {
           connection,
           modId: mod.id,
+          workshopId: mod.workshopId,
           localModPath: mod.packagePath,
         })
         setCompletedCount((prev) => prev + 1)
@@ -172,7 +173,7 @@ export function UploadLocalModsModal({
               type="button"
               onClick={() => setIsMinimized(false)}
               className="rounded-lg bg-white/5 p-1.5 text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
-              title="Expandir"
+              title={t("common.expand")}
             >
               <Maximize2 size={12} />
             </button>
@@ -222,7 +223,7 @@ export function UploadLocalModsModal({
                 type="button"
                 onClick={() => setIsMinimized(true)}
                 className="rounded-full bg-white/5 p-2 text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
-                title="Minimizar"
+                title={t("common.minimize")}
               >
                 <Minus size={18} />
               </button>
@@ -405,7 +406,7 @@ export function UploadLocalModsModal({
                         )}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        {state.status === 'pending' && <span className="text-gray-500 font-bold uppercase tracking-wider text-[10px]">Pendente</span>}
+                        {state.status === 'pending' && <span className="text-gray-500 font-bold uppercase tracking-wider text-[10px]">{t("common.pending")}</span>}
                         {state.status === 'uploading' && (
                           <span className="text-orange-400 flex items-center gap-1 font-bold uppercase tracking-wider text-[10px]">
                             <Loader2 size={12} className="animate-spin" />
@@ -421,7 +422,7 @@ export function UploadLocalModsModal({
                         {state.status === 'failed' && (
                           <span className="text-red-400 flex items-center gap-1 font-bold uppercase tracking-wider text-[10px]">
                             <X size={12} />
-                            Erro
+                            {t("common.error")}
                           </span>
                         )}
                       </div>

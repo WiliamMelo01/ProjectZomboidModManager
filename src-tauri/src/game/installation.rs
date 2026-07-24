@@ -59,7 +59,9 @@ pub(super) fn scan_zomboid_installation_impl(
     })
 }
 
-pub(crate) fn resolve_zomboid_executable_path(game_executable_path: Option<&str>) -> Option<PathBuf> {
+pub(crate) fn resolve_zomboid_executable_path(
+    game_executable_path: Option<&str>,
+) -> Option<PathBuf> {
     game_executable_path
         .map(str::trim)
         .filter(|path| !path.is_empty())

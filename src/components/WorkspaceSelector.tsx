@@ -71,12 +71,8 @@ const initialRemoteConnection: RemoteConnectionDraft = {
   authMethod: "key",
   password: "",
   sshKeyPath: "",
-  serverPath: "/var/lib/pzmm/Zomboid/Server",
+  serverPath: "",
 };
-
-function remoteAppDataBase(_username: string) {
-  return "/var/lib/pzmm";
-}
 
 function isLegacyPzManagerPath(path?: string) {
   return Boolean(
@@ -115,7 +111,7 @@ export function remoteConfigToDraft(
     authMethod: "key",
     password: "",
     sshKeyPath: config.sshKeyPath ?? "",
-    serverPath: config.serverPath || "/var/lib/pzmm/Zomboid/Server",
+    serverPath: cleanLegacyPath(config.serverPath),
   };
 }
 
@@ -127,13 +123,12 @@ function defaultRemoteConfig(
     ...connection,
     password: "",
     sshKeyPath: connection.authMethod === "key" ? connection.sshKeyPath : "",
-    remoteSteamcmdDir:
-      cleanLegacyPath(existing?.remoteSteamcmdDir) ||
-      `${remoteAppDataBase(connection.username)}/steamcmd`,
+    serverPath:
+      cleanLegacyPath(existing?.serverPath) ||
+      cleanLegacyPath(connection.serverPath),
+    remoteSteamcmdDir: cleanLegacyPath(existing?.remoteSteamcmdDir),
     remoteSteamcmdPath: cleanLegacyPath(existing?.remoteSteamcmdPath),
-    remoteZomboidServerDir:
-      cleanLegacyPath(existing?.remoteZomboidServerDir) ||
-      `${remoteAppDataBase(connection.username)}/zomboid-server`,
+    remoteZomboidServerDir: cleanLegacyPath(existing?.remoteZomboidServerDir),
     remoteZomboidServerPath: cleanLegacyPath(existing?.remoteZomboidServerPath),
     remoteZomboidServerOwner: existing?.remoteZomboidServerOwner || "pzmm",
     remoteZomboidDataOwner: existing?.remoteZomboidDataOwner || "pzmm",
@@ -725,9 +720,13 @@ function RemoteWorkspaceSetup({
         "get_remote_workspace_config",
         { connection: connectedConnection },
       );
+      const mergedExistingConfig = {
+        ...(savedConfigToUse ?? {}),
+        ...(savedConfig ?? {}),
+      };
       const configToSave = defaultRemoteConfig(
         connectedConnection,
-        savedConfigToUse ?? savedConfig ?? undefined,
+        mergedExistingConfig,
       );
 
       const persistedConfig = await invokeTauri<RemoteWorkspaceConfig>(
@@ -744,12 +743,14 @@ function RemoteWorkspaceSetup({
               connectedConnection.authMethod === "key"
                 ? connectedConnection.sshKeyPath
                 : "",
-            serverPath: result.serverPath,
+            serverPath: configToSave.serverPath || result.serverPath,
           },
         },
       );
+      const persistedConnection = remoteConfigToDraft(persistedConfig);
       const nextConnections = upsertSavedRemoteConnection(savedConnections, persistedConfig);
       setSavedConnections(nextConnections);
+      setConnection(persistedConnection);
       setConnectionStatuses((currentStatuses) => ({
         ...currentStatuses,
         [remoteConnectionId(persistedConfig)]: {
@@ -761,7 +762,7 @@ function RemoteWorkspaceSetup({
         LAST_WORKSPACE_KEY,
         `remote:${remoteConnectionId(persistedConfig)}`,
       );
-      onConnected(connectedConnection);
+      onConnected(persistedConnection);
     } catch (error) {
       setStatus("error");
       setFeedback(formatConnectionError(getErrorMessage(error)));

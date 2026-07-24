@@ -40,14 +40,14 @@ export function AppSidebar({ activeTab, items, onTabChange, onChangeWorkspace }:
           type="button"
           onClick={onChangeWorkspace}
           className="mb-3 flex w-full items-center gap-3 rounded-xl border border-white/5 bg-[#171b1f]/70 px-3 py-2.5 text-left text-gray-300 transition-all hover:border-cyan-300/30 hover:bg-cyan-500/10 hover:text-cyan-100"
-          title="Trocar workspace"
+          title={t("workspace.switch")}
         >
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#22272b] text-cyan-200">
             <Network size={17} />
           </span>
           <span className="min-w-0">
-            <span className="block text-[9px] font-black uppercase tracking-widest text-gray-500">Workspace</span>
-            <span className="block truncate text-xs font-bold">Trocar workspace</span>
+            <span className="block text-[9px] font-black uppercase tracking-widest text-gray-500">{t("workspace.label")}</span>
+            <span className="block truncate text-xs font-bold">{t("workspace.switch")}</span>
           </span>
         </button>
 

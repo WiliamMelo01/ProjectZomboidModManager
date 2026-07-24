@@ -55,6 +55,7 @@ export function ModsList({
   const modsListRef = useRef<HTMLDivElement>(null)
   const [isUploadLocalModsModalOpen, setIsUploadLocalModsModalOpen] = useState(false)
   const [pendingInstall, setPendingInstall] = useState<{ mod: ZomboidMod; dependencies: ZomboidMod[] } | null>(null)
+  const [isConfirmingDependencyInstall, setIsConfirmingDependencyInstall] = useState(false)
   const [missingDependency, setMissingDependency] = useState<{ mod: ZomboidMod; dependencyId: string } | null>(null)
   const [pendingDeleteMod, setPendingDeleteMod] = useState<ZomboidMod | null>(null)
   const [selectedModForDetails, setSelectedModForDetails] = useState<ZomboidMod | null>(null)
@@ -119,8 +120,15 @@ export function ModsList({
 
   const confirmBulkInstall = async () => {
     if (pendingInstall) {
-      await onInstall([...pendingInstall.dependencies, pendingInstall.mod])
+      const modsToInstall = [...pendingInstall.dependencies, pendingInstall.mod]
+      setIsConfirmingDependencyInstall(true)
       setPendingInstall(null)
+
+      try {
+        await onInstall(modsToInstall)
+      } finally {
+        setIsConfirmingDependencyInstall(false)
+      }
     }
   }
 
@@ -329,15 +337,23 @@ export function ModsList({
 
               <div className="flex flex-col gap-3">
                 <button
+                  disabled={isConfirmingDependencyInstall}
                   onClick={confirmBulkInstall}
-                  className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl transition-all shadow-lg shadow-orange-500/20 flex items-center justify-center gap-2"
+                  className={`w-full py-3 text-white font-bold rounded-xl transition-all shadow-lg shadow-orange-500/20 flex items-center justify-center gap-2 ${
+                    isConfirmingDependencyInstall
+                      ? "bg-orange-500/60 cursor-not-allowed"
+                      : "bg-orange-500 hover:bg-orange-600"
+                  }`}
                 >
                   <CheckCircle2 size={18} />
-                  {t("library.bringAllLocal")}
+                  {isConfirmingDependencyInstall
+                    ? t("library.installingAllLocal")
+                    : t("library.bringAllLocal")}
                 </button>
                 <button
+                  disabled={isConfirmingDependencyInstall}
                   onClick={() => setPendingInstall(null)}
-                  className="w-full py-3 bg-transparent border border-white/10 text-gray-400 hover:text-white hover:bg-white/5 font-bold rounded-xl transition-all"
+                  className="w-full py-3 bg-transparent border border-white/10 text-gray-400 hover:text-white hover:bg-white/5 font-bold rounded-xl transition-all disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {t("common.cancel")}
                 </button>

@@ -62,7 +62,8 @@ pub(crate) fn install_zomboid_mod(
 }
 
 #[tauri::command]
-pub(crate) async fn get_workshop_mappings() -> Result<std::collections::HashMap<String, String>, String> {
+pub(crate) async fn get_workshop_mappings(
+) -> Result<std::collections::HashMap<String, String>, String> {
     let config_dir = crate::app_config_dir()?;
     let db_path = config_dir.join("workshop-mods-db.json");
     if !db_path.exists() {
@@ -70,13 +71,16 @@ pub(crate) async fn get_workshop_mappings() -> Result<std::collections::HashMap<
     }
     let content = std::fs::read_to_string(&db_path)
         .map_err(|e| format!("Falha ao ler banco de dados: {}", e))?;
-    let mappings: std::collections::HashMap<String, String> = serde_json::from_str(&content)
-        .unwrap_or_else(|_| std::collections::HashMap::new());
+    let mappings: std::collections::HashMap<String, String> =
+        serde_json::from_str(&content).unwrap_or_else(|_| std::collections::HashMap::new());
     Ok(mappings)
 }
 
 #[tauri::command]
-pub(crate) async fn save_workshop_mapping(mod_id: String, workshop_id: String) -> Result<(), String> {
+pub(crate) async fn save_workshop_mapping(
+    mod_id: String,
+    workshop_id: String,
+) -> Result<(), String> {
     let config_dir = crate::app_config_dir()?;
     let db_path = config_dir.join("workshop-mods-db.json");
     let mut mappings = if db_path.exists() {
@@ -98,13 +102,15 @@ pub(crate) async fn save_workshop_mapping(mod_id: String, workshop_id: String) -
 }
 
 #[tauri::command]
-pub(crate) async fn save_workshop_mappings(mappings: std::collections::HashMap<String, String>) -> Result<(), String> {
+pub(crate) async fn save_workshop_mappings(
+    mappings: std::collections::HashMap<String, String>,
+) -> Result<(), String> {
     let config_dir = crate::app_config_dir()?;
     let db_path = config_dir.join("workshop-mods-db.json");
-    
+
     let serialized = serde_json::to_string_pretty(&mappings)
         .map_err(|e| format!("Falha ao serializar dados: {}", e))?;
-        
+
     std::fs::create_dir_all(&config_dir)
         .map_err(|e| format!("Falha ao criar pasta de configuracoes: {}", e))?;
     std::fs::write(&db_path, serialized)
@@ -121,8 +127,8 @@ pub(crate) async fn delete_workshop_mapping(mod_id: String) -> Result<(), String
     }
     let content = std::fs::read_to_string(&db_path)
         .map_err(|e| format!("Falha ao ler banco de dados: {}", e))?;
-    let mut mappings: std::collections::HashMap<String, String> = serde_json::from_str(&content)
-        .unwrap_or_else(|_| std::collections::HashMap::new());
+    let mut mappings: std::collections::HashMap<String, String> =
+        serde_json::from_str(&content).unwrap_or_else(|_| std::collections::HashMap::new());
     mappings.remove(&mod_id);
     let serialized = serde_json::to_string_pretty(&mappings)
         .map_err(|e| format!("Falha ao salvar banco de dados: {}", e))?;

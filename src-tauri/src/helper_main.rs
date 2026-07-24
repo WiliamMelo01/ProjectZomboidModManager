@@ -60,6 +60,13 @@ struct ServerIdRequest {
     server_id: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ServerLogFileRequest {
+    server_id: String,
+    log_name: String,
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ServerFileContent {
@@ -67,6 +74,15 @@ struct ServerFileContent {
     file_name: String,
     path: String,
     content: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AvailableLogFile {
+    name: String,
+    path: String,
+    size_bytes: u64,
+    last_modified: u64,
 }
 
 #[derive(Deserialize)]
@@ -84,6 +100,7 @@ struct ServerControlRequest {
     server_launch_path: Option<String>,
     server_profile_path: Option<String>,
     no_steam: Option<bool>,
+    follow_from_end: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -198,6 +215,14 @@ fn run() -> Result<(), String> {
             let request = read_request::<ServerIdRequest>()?;
             print_json(&read_server_file(request.server_id)?)
         }
+        "list-server-logs" => {
+            let request = read_request::<ServerIdRequest>()?;
+            print_json(&list_server_logs(request.server_id)?)
+        }
+        "read-server-log-file" => {
+            let request = read_request::<ServerLogFileRequest>()?;
+            print_json(&read_server_log_file(request.server_id, request.log_name)?)
+        }
         "test-server" => {
             let request = read_request::<TestServerRequest>()?;
             if let Some(server_launch_path) = request
@@ -283,7 +308,7 @@ fn run() -> Result<(), String> {
         }
         "stream-server-logs" => {
             let request = read_request::<ServerControlRequest>()?;
-            run_server_logs_streaming(request.server_id)
+            run_server_logs_streaming(request.server_id, request.follow_from_end.unwrap_or(false))
         }
         "send-server-command" => {
             let request = read_request::<SendServerCommandRequest>()?;
@@ -429,6 +454,88 @@ fn read_server_file(server_id: String) -> Result<ServerFileContent, String> {
         file_name,
         path: path.display().to_string(),
         content,
+    })
+}
+
+fn zomboid_logs_dir() -> Result<PathBuf, String> {
+    if let Some(data_dir) = env::var_os("PZMM_DATA_DIR") {
+        return Ok(PathBuf::from(data_dir).join("Zomboid").join("Logs"));
+    }
+
+    if let Some(server_parent) = zomboid_server_dir()?.parent().map(Path::to_path_buf) {
+        return Ok(server_parent.join("Logs"));
+    }
+
+    Ok(user_home_dir()?.join("Zomboid").join("Logs"))
+}
+
+fn list_server_logs(_server_id: String) -> Result<Vec<AvailableLogFile>, String> {
+    let logs_dir = zomboid_logs_dir()?;
+    let mut log_files = Vec::new();
+
+    if logs_dir.is_dir() {
+        for entry in fs::read_dir(&logs_dir)
+            .map_err(|error| format!("Could not read server logs folder: {error}"))?
+            .flatten()
+        {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+
+            let file_name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if !file_name.ends_with(".txt") && !file_name.ends_with(".log") {
+                continue;
+            }
+
+            let metadata = fs::metadata(&path).ok();
+            let size_bytes = metadata
+                .as_ref()
+                .map(|metadata| metadata.len())
+                .unwrap_or(0);
+            let last_modified = metadata
+                .as_ref()
+                .and_then(|metadata| metadata.modified().ok())
+                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                .map(|duration| duration.as_secs())
+                .unwrap_or(0);
+
+            log_files.push(AvailableLogFile {
+                name: file_name,
+                path: path.display().to_string(),
+                size_bytes,
+                last_modified,
+            });
+        }
+    }
+
+    log_files.sort_by_key(|file| std::cmp::Reverse(file.last_modified));
+    Ok(log_files)
+}
+
+fn read_server_log_file(server_id: String, log_name: String) -> Result<ServerFileContent, String> {
+    let clean_log_name = Path::new(&log_name)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .ok_or_else(|| "Invalid server log name.".to_string())?;
+
+    if !clean_log_name.ends_with(".txt") && !clean_log_name.ends_with(".log") {
+        return Err("Invalid server log extension.".to_string());
+    }
+
+    let log_path = zomboid_logs_dir()?.join(&clean_log_name);
+    if !log_path.is_file() {
+        return Err(format!("Server log file not found: {}", log_path.display()));
+    }
+
+    Ok(ServerFileContent {
+        server_id,
+        file_name: clean_log_name,
+        path: log_path.display().to_string(),
+        content: util::read_text_lossy(&log_path)?,
     })
 }
 
@@ -871,12 +978,13 @@ fn run_server_start_streaming(
     Ok(())
 }
 
-fn run_server_logs_streaming(server_id: String) -> Result<(), String> {
+fn run_server_logs_streaming(server_id: String, follow_from_end: bool) -> Result<(), String> {
     let server_id = server_id.trim().to_string();
     let state_path = server_controller_state_path(&server_id)?;
 
     if !state_path.is_file() {
-        return Err(format!("No running server state found for {server_id}."));
+        emit_server_start_event("finished", None, None, None)?;
+        return Ok(());
     }
 
     let state_content = fs::read_to_string(&state_path)
@@ -892,7 +1000,11 @@ fn run_server_logs_streaming(server_id: String) -> Result<(), String> {
     emit_server_start_event("started", None, None, None)?;
 
     let initial_lines = read_start_log_lines(&log_path);
-    let mut seen_lines = initial_lines.len().saturating_sub(150);
+    let mut seen_lines = if follow_from_end {
+        initial_lines.len()
+    } else {
+        initial_lines.len().saturating_sub(150)
+    };
 
     loop {
         let current_lines = read_start_log_lines(&log_path);

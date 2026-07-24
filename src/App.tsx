@@ -275,6 +275,7 @@ function LocalWorkspaceApp({
     useState<ZomboidServer | null>(null);
   const activeStartServerRef = useRef<ZomboidServer | null>(null);
   const confirmedOnlineServerIdsRef = useRef<Set<string>>(new Set());
+  const remoteConsoleLogStreamsRef = useRef<Set<string>>(new Set());
   const [syncError, setSyncError] = useState<string | null>(null);
   const [workshopMappings, setWorkshopMappings] = useState<Record<string, string>>({});
   const autoUploadedModIdsRef = useRef<Set<string>>(new Set());
@@ -1010,9 +1011,7 @@ function LocalWorkspaceApp({
         );
         void loadModsInBackground();
       } catch (error) {
-        window.localStorage.removeItem(LAST_WORKSPACE_KEY);
-        setWorkspaceMode(null);
-        setRemoteConnection(null);
+        onChangeWorkspace();
         addNotification({
           tone: "error",
           title: t("remoteSetup.errorHeader", "Falha na Conexão"),
@@ -1184,6 +1183,30 @@ function LocalWorkspaceApp({
     });
   }
 
+  async function ensureRemoteConsoleLogStream(server: ZomboidServer) {
+    if (!remoteConnection) return;
+
+    const streamKey = `${remoteConnection.username}@${remoteConnection.host}:${remoteConnection.port}:${server.id}`;
+    if (remoteConsoleLogStreamsRef.current.has(streamKey)) {
+      return;
+    }
+
+    remoteConsoleLogStreamsRef.current.add(streamKey);
+    try {
+      await invokeTauri<RemoteServerActionResult>(
+        "stream_remote_zomboid_server_logs",
+        {
+          connection: remoteConnection,
+          serverId: server.id,
+          followFromEnd: true,
+        },
+      );
+    } catch (error) {
+      remoteConsoleLogStreamsRef.current.delete(streamKey);
+      console.error("Could not attach remote console log stream:", error);
+    }
+  }
+
   function isRemoteStartupPending(result: RemoteServerActionResult | null) {
     if (!result?.success) return false;
 
@@ -1328,6 +1351,7 @@ function LocalWorkspaceApp({
     appendRemoteStartLogs([`> ${command}`]);
 
     try {
+      await ensureRemoteConsoleLogStream(server);
       const result = await invokeTauri<RemoteServerActionResult>(
         "send_remote_zomboid_server_command",
         {
@@ -1348,6 +1372,19 @@ function LocalWorkspaceApp({
   }
 
   async function stopRemoteServer(server: ZomboidServer) {
+    if (remoteConnection) {
+      await invokeTauri<RemoteServerActionResult>(
+        "stream_remote_zomboid_server_logs",
+        {
+          connection: remoteConnection,
+          serverId: server.id,
+          followFromEnd: true,
+        },
+      ).catch((error) => {
+        console.error("Could not attach remote shutdown log stream:", error);
+      });
+    }
+
     await sendRemoteServerCommand(server, "quit");
     setRemoteStartResult({
       success: false,
@@ -1360,7 +1397,6 @@ function LocalWorkspaceApp({
       t("remoteStart.stopQueuedLog"),
     ]);
     window.setTimeout(() => {
-      updateServerStatus(server.id, "offline");
       void loadServers();
     }, 5000);
   }
@@ -1382,6 +1418,10 @@ function LocalWorkspaceApp({
 
   async function openRemoteServerConsole(server: ZomboidServer) {
     if (server.status !== "online") {
+      return;
+    }
+
+    if (remoteStartResult?.command === "quit") {
       return;
     }
 
@@ -1475,6 +1515,7 @@ function LocalWorkspaceApp({
       await invokeTauri("upload_local_mod_to_remote", {
         connection: remoteConnection,
         modId: mod.id,
+        workshopId: mod.workshopId,
         localModPath: mod.packagePath,
       });
       addNotification({
@@ -1649,6 +1690,11 @@ function LocalWorkspaceApp({
 
       if (payload.event === "finished") {
         updateServerStatus(payload.serverId, "offline");
+        for (const streamKey of Array.from(remoteConsoleLogStreamsRef.current)) {
+          if (streamKey.endsWith(`:${payload.serverId}`)) {
+            remoteConsoleLogStreamsRef.current.delete(streamKey);
+          }
+        }
         setIsStartingRemoteServer(false);
         setRemoteStartResult({
           success: false,

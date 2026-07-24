@@ -1,4 +1,4 @@
-import { Cpu, Folder, RefreshCw, Save } from "lucide-react";
+import { AlertTriangle, Cpu, Folder, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -20,6 +20,7 @@ import type {
 const SETTINGS_VIEW_CACHE_KEY = "pzmm:settings-view";
 const REMOTE_SETTINGS_VIEW_CACHE_PREFIX = "pzmm:settings-view:remote";
 const SETTINGS_VIEW_CACHE_VERSION = 3;
+const DELETE_ALL_CONFIRMATION = "DELETE ALL PZMM DATA";
 
 type SettingsViewCache = {
   version: number;
@@ -31,6 +32,13 @@ type SettingsViewCache = {
 type SettingsProps = {
   onRescanMods?: () => Promise<void>;
   remoteConnection?: RemoteConnectionDraft | null;
+};
+
+type DeleteAllRemoteDataResult = {
+  success: boolean;
+  message: string;
+  command: string;
+  logs: string[];
 };
 
 export function Settings({
@@ -81,6 +89,8 @@ export function Settings({
   const [isAddingFolder, setIsAddingFolder] = useState(false);
   const [isRescanningMods, setIsRescanningMods] = useState(false);
   const [isScanningZomboid, setIsScanningZomboid] = useState(false);
+  const [isDeleteAllEnabled, setIsDeleteAllEnabled] = useState(false);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [zomboidStatus, setZomboidStatus] =
     useState<ZomboidInstallationStatus | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -102,7 +112,7 @@ export function Settings({
               }),
               invokeTauri<number>("get_remote_system_ram", {
                 connection: remoteConnection,
-              }).catch(() => 16),
+              }),
             ])
           : await Promise.all([
               invokeTauri<AppSettings>("get_app_settings"),
@@ -123,6 +133,15 @@ export function Settings({
       setError(getErrorMessage(loadError));
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function loadDeleteAllFlag() {
+    try {
+      const enabled = await invokeTauri<boolean>("is_delete_all_enabled");
+      setIsDeleteAllEnabled(enabled);
+    } catch {
+      setIsDeleteAllEnabled(false);
     }
   }
 
@@ -169,6 +188,60 @@ export function Settings({
       setError(getErrorMessage(saveError));
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function deleteAllRemoteData() {
+    if (isDeletingAll) return;
+    if (!remoteConnection) {
+      setError(t("remoteSetup.noActiveConnection"));
+      return;
+    }
+
+    const confirmation = window.prompt(
+      t("settings.danger.confirmPrompt", {
+        phrase: DELETE_ALL_CONFIRMATION,
+      }),
+    );
+
+    if (confirmation !== DELETE_ALL_CONFIRMATION) {
+      setMessage(null);
+      setError(t("settings.danger.confirmMismatch"));
+      return;
+    }
+
+    setIsDeletingAll(true);
+    setMessage(null);
+    setError(null);
+
+    try {
+      const result = await invokeTauri<DeleteAllRemoteDataResult>(
+        "delete_all_remote_data",
+        {
+          connection: remoteConnection,
+          confirmation,
+        },
+      );
+      clearPzmmBrowserStorage();
+      setLoadedSettings(null);
+      setGameExecutablePath("");
+      setClientRam("4.00");
+      setServerRam("4.00");
+      setMaxConcurrentDownloads(1);
+      setModLocations([]);
+      setResolvedPath(null);
+      setIsConfigured(false);
+      setZomboidStatus(null);
+      setMessage(
+        result.message ||
+          t("settings.danger.deleted", {
+            count: result.logs.length,
+          }),
+      );
+    } catch (deleteError) {
+      setError(getErrorMessage(deleteError));
+    } finally {
+      setIsDeletingAll(false);
     }
   }
 
@@ -455,6 +528,10 @@ export function Settings({
   }, [cacheKey]);
 
   useEffect(() => {
+    void loadDeleteAllFlag();
+  }, []);
+
+  useEffect(() => {
     if (activeTab === "ram") {
       void scanZomboidInstallation();
     }
@@ -581,6 +658,38 @@ export function Settings({
                   </span>
                 </button>
               </div>
+
+              {isDeleteAllEnabled && isRemoteWorkspace && (
+                <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-5">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 text-red-300" size={22} />
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-sm font-black uppercase tracking-wide text-red-200">
+                        {t("settings.danger.title")}
+                      </h3>
+                      <p className="mt-1 text-sm text-red-100/80">
+                        {t("settings.danger.description")}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    disabled={isDeletingAll}
+                    onClick={() => void deleteAllRemoteData()}
+                    className="mt-4 flex items-center justify-center gap-2 rounded-2xl border border-red-400/40 bg-red-500/20 px-5 py-3 text-sm font-black uppercase italic tracking-wider text-red-100 transition-all hover:bg-red-500/30 disabled:opacity-60"
+                  >
+                    {isDeletingAll ? (
+                      <RefreshCw size={18} className="animate-spin" />
+                    ) : (
+                      <Trash2 size={18} />
+                    )}
+                    <span>
+                      {isDeletingAll
+                        ? t("settings.danger.deleting")
+                        : t("settings.danger.button")}
+                    </span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -590,6 +699,18 @@ export function Settings({
       </div>
     </div>
   );
+}
+
+function clearPzmmBrowserStorage() {
+  try {
+    for (const key of Object.keys(window.localStorage)) {
+      if (key.startsWith("pzmm:")) {
+        window.localStorage.removeItem(key);
+      }
+    }
+  } catch {
+    // Backend deletion already did the real cleanup.
+  }
 }
 
 function getErrorMessage(error: unknown) {

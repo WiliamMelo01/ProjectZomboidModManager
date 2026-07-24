@@ -81,12 +81,30 @@ export function useModsLibrary({
 
   async function installMods(modsToInstall: ZomboidMod[]) {
     setModsError(null)
+    const optimisticMods = modsToInstall.filter((mod) => !mod.isInstalled && mod.source !== "local")
+    let previousModsSnapshot: ZomboidMod[] | null = null
+
+    if (optimisticMods.length > 0) {
+      const optimisticModIds = new Set(optimisticMods.map((mod) => mod.id.toLowerCase()))
+
+      setMods((currentMods) => {
+        previousModsSnapshot = currentMods
+        const updatedMods = currentMods.map((mod) =>
+          optimisticModIds.has(mod.id.toLowerCase()) ? markModInstalled(mod) : mod,
+        )
+
+        if (useCache) {
+          void writeModsLibraryCache(updatedMods, cacheKey)
+        }
+        return updatedMods
+      })
+    }
 
     try {
-      const modsToMove = modsToInstall.filter((mod) => !mod.isInstalled && mod.source !== "local")
+      const modsToCopy = modsToInstall.filter((mod) => !mod.isInstalled && mod.source !== "local")
       const installResults = new Map<string, ZomboidModInstallResult>()
 
-      for (const mod of modsToMove) {
+      for (const mod of modsToCopy) {
         const result = await invokeTauri<ZomboidModInstallResult | null>(installCommand, {
           ...(installArgs ?? {}),
           packagePath: mod.packagePath,
@@ -100,7 +118,7 @@ export function useModsLibrary({
       }
 
       // Envia os mapeamentos descobertos para a API central de forma assíncrona
-      const mappingsToSend = modsToMove
+      const mappingsToSend = modsToCopy
         .filter((mod) => mod.id && mod.workshopId && mod.workshopId.trim() !== "")
         .map((mod) => ({
           modId: mod.id,
@@ -129,7 +147,7 @@ export function useModsLibrary({
         await invokeTauri<void>(clearCacheCommand, clearCacheArgs)
       }
 
-      const installedModIds = new Set(modsToMove.map((mod) => mod.id.toLowerCase()))
+      const installedModIds = new Set(modsToCopy.map((mod) => mod.id.toLowerCase()))
       const installedMods = modsToInstall.map((mod) => {
         const installKey = mod.id.toLowerCase()
         const installResult = installResults.get(installKey)
@@ -168,20 +186,25 @@ export function useModsLibrary({
 
       return installedMods
     } catch (error) {
+      if (previousModsSnapshot) {
+        setMods(previousModsSnapshot)
+        if (useCache) {
+          void writeModsLibraryCache(previousModsSnapshot, cacheKey)
+        }
+      }
       setModsError(getErrorMessage(error))
       throw error
     }
   }
 
-  function markModInstalled(mod: ZomboidMod, installResult?: ZomboidModInstallResult) {
+  function markModInstalled(mod: ZomboidMod, _installResult?: ZomboidModInstallResult) {
     return {
       ...mod,
       isInstalled: true,
-      source: mod.source === "steam" || mod.source === "steamcmd" ? "local" : mod.source,
-      path: installResult?.targetPath ?? mod.path,
+      path: mod.path,
       variants: mod.variants.map((variant) => ({
         ...variant,
-        path: installResult?.targetPath ?? variant.path,
+        path: variant.path,
       })),
     }
   }

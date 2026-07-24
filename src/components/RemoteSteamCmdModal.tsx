@@ -210,7 +210,7 @@ export function RemoteSteamCmdModal({
   const [zomboidStatus, setZomboidStatus] = useState<StepStatus>("idle");
   const [clientRam, setClientRam] = useState("4.00");
   const [serverRam, setServerRam] = useState("4.00");
-  const [remoteSystemRam, setRemoteSystemRam] = useState<number>(16);
+  const [remoteSystemRam, setRemoteSystemRam] = useState<number | null>(null);
   const [ramStatus, setRamStatus] = useState<StepStatus>("idle");
   const [isSavingRam, setIsSavingRam] = useState(false);
   const [uploadResult, setUploadResult] =
@@ -230,10 +230,16 @@ export function RemoteSteamCmdModal({
   const [zomboidElapsedSeconds, setZomboidElapsedSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const ramOptions = useMemo(() => {
-    return Array.from({ length: Math.ceil(remoteSystemRam * 4) }, (_, i) =>
+    const configuredRam = Math.max(
+      Number.parseFloat(clientRam) || 0,
+      Number.parseFloat(serverRam) || 0,
+      4,
+    );
+    const optionLimit = remoteSystemRam ?? configuredRam;
+    return Array.from({ length: Math.ceil(optionLimit * 4) }, (_, i) =>
       ((i + 1) * 0.25).toFixed(2),
     );
-  }, [remoteSystemRam]);
+  }, [clientRam, remoteSystemRam, serverRam]);
   const isRunning =
     helperStatus === "running" ||
     steamcmdStatus === "running" ||
@@ -463,7 +469,7 @@ export function RemoteSteamCmdModal({
       if (result.success) {
         try {
           const nextConfig = await refreshConfig();
-          const ramGb = await invokeTauri<number>("get_remote_system_ram", { connection }).catch(() => 16);
+          const ramGb = await invokeTauri<number>("get_remote_system_ram", { connection });
           setRemoteSystemRam(ramGb);
           if (!nextConfig?.remoteServerRam || nextConfig.remoteServerRam === "4.00") {
             setServerRam((ramGb * 0.70).toFixed(2));
@@ -762,6 +768,24 @@ export function RemoteSteamCmdModal({
       { connection },
     );
     setConfig(nextConfig);
+    if (nextConfig) {
+      const nextSteamcmdDir = cleanRemoteLinuxPath(nextConfig.remoteSteamcmdDir);
+      const nextSteamcmdPath = cleanRemoteLinuxPath(nextConfig.remoteSteamcmdPath);
+      const nextZomboidServerDir = cleanRemoteLinuxPath(
+        nextConfig.remoteZomboidServerDir,
+      );
+      const nextZomboidServerPath = cleanRemoteLinuxPath(
+        nextConfig.remoteZomboidServerPath,
+      );
+      const nextZomboidDataDir = remoteZomboidDataDirFromServerProfilePath(
+        nextConfig.serverPath,
+      );
+      if (nextSteamcmdDir) setSteamcmdDir(nextSteamcmdDir);
+      if (nextSteamcmdPath) setSteamcmdPath(nextSteamcmdPath);
+      if (nextZomboidServerDir) setZomboidServerDir(nextZomboidServerDir);
+      if (nextZomboidServerPath) setZomboidServerPath(nextZomboidServerPath);
+      if (nextZomboidDataDir) setZomboidDataDir(nextZomboidDataDir);
+    }
     return nextConfig;
   }
 
@@ -1170,12 +1194,20 @@ export function RemoteSteamCmdModal({
                 </div>
 
                 <div className="rounded-2xl border border-white/5 bg-[#1e2327] p-4 text-sm text-gray-400">
-                  <p>
-                    Memória total detectada no servidor: <strong className="text-white">{remoteSystemRam} GB</strong>
-                  </p>
-                  <p className="mt-1 text-xs text-gray-500">
-                    Recomendado (70%): <strong className="text-cyan-400">{(remoteSystemRam * 0.70).toFixed(2)} GB</strong>
-                  </p>
+                  {remoteSystemRam === null ? (
+                    <p>
+                      Memória total do servidor ainda não detectada.
+                    </p>
+                  ) : (
+                    <>
+                      <p>
+                        Memória total detectada no servidor: <strong className="text-white">{remoteSystemRam} GB</strong>
+                      </p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Recomendado (70%): <strong className="text-cyan-400">{(remoteSystemRam * 0.70).toFixed(2)} GB</strong>
+                      </p>
+                    </>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 gap-6 md:grid-cols-2">

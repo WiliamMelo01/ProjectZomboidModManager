@@ -52,11 +52,18 @@ export function ServerLogsModal({
     setError(null)
     try {
       if (remoteConnection) {
-        setLogFiles([
-          { name: "DebugLog-server.txt", path: "/home/ubuntu/Zomboid/Logs/DebugLog-server.txt", sizeBytes: 0, lastModified: Date.now() / 1000 },
-          { name: "coop-console.txt", path: "/home/ubuntu/Zomboid/Logs/coop-console.txt", sizeBytes: 0, lastModified: Date.now() / 1000 },
-        ])
-        setSelectedLogName("DebugLog-server.txt")
+        const list = await invokeTauri<AvailableLogFile[]>("list_remote_zomboid_server_logs", {
+          connection: remoteConnection,
+          serverId: server.id,
+        })
+        setLogFiles(list || [])
+        if (list && list.length > 0) {
+          setSelectedLogName(list[0].name)
+        } else {
+          setSelectedLogName("")
+          setLogContent("")
+          setLogPath("")
+        }
       } else {
         const list = await invokeTauri<AvailableLogFile[]>("list_zomboid_server_logs", {
           serverId: server.id,
@@ -64,11 +71,15 @@ export function ServerLogsModal({
         setLogFiles(list || [])
         if (list && list.length > 0) {
           setSelectedLogName(list[0].name)
+        } else {
+          setSelectedLogName("")
+          setLogContent("")
+          setLogPath("")
         }
       }
     } catch (err) {
       console.error("Erro ao listar logs:", err)
-      setError("Não foi possível carregar a lista de arquivos de log.")
+      setError(t("serverLogs.listError"))
     } finally {
       setIsLoadingList(false)
     }
@@ -81,9 +92,10 @@ export function ServerLogsModal({
     setError(null)
     try {
       if (remoteConnection) {
-        const preview = await invokeTauri<LogFilePreview>("read_remote_zomboid_server_file", {
+        const preview = await invokeTauri<LogFilePreview>("read_remote_zomboid_server_log_file", {
           connection: remoteConnection,
           serverId: server.id,
+          logName,
         })
         setLogContent(preview.content || "")
         setLogPath(preview.path || "")
@@ -97,7 +109,7 @@ export function ServerLogsModal({
       }
     } catch (err) {
       console.error("Erro ao ler log:", err)
-      setError("Não foi possível ler o arquivo de log selecionado.")
+      setError(t("serverLogs.readError"))
     } finally {
       setIsLoadingContent(false)
     }
@@ -105,13 +117,16 @@ export function ServerLogsModal({
 
   useEffect(() => {
     void loadLogFilesList()
-  }, [server.id])
+  }, [server.id, remoteConnection])
 
   useEffect(() => {
     if (selectedLogName) {
       void loadLogContent(selectedLogName)
+    } else {
+      setLogContent("")
+      setLogPath("")
     }
-  }, [selectedLogName])
+  }, [selectedLogName, remoteConnection])
 
   // Contagem e filtragem de categorias
   const lines = useMemo(() => (logContent ?? "").split("\n"), [logContent])
@@ -209,7 +224,7 @@ export function ServerLogsModal({
               <FileText size={20} />
             </div>
             <div className="min-w-0">
-              <h3 className="truncate text-lg font-bold text-white">Logs do Servidor</h3>
+              <h3 className="truncate text-lg font-bold text-white">{t("serverLogs.title")}</h3>
               <p className="truncate font-mono text-[10px] text-gray-400">{logPath || server.name}</p>
             </div>
           </div>
@@ -224,7 +239,7 @@ export function ServerLogsModal({
                 className="appearance-none rounded-xl border border-white/10 bg-black/40 py-2 pl-3 pr-8 text-xs font-mono text-cyan-300 focus:border-cyan-500/50 focus:outline-none disabled:opacity-50 cursor-pointer"
               >
                 {logFiles.length === 0 ? (
-                  <option value="">Sem arquivos de log</option>
+                  <option value="">{t("serverLogs.noFiles")}</option>
                 ) : (
                   logFiles.map((file) => (
                     <option key={file.name} value={file.name} className="bg-[#22272b] text-white">
@@ -240,7 +255,7 @@ export function ServerLogsModal({
               type="button"
               onClick={() => loadLogContent(selectedLogName)}
               disabled={isLoadingContent}
-              title="Atualizar Logs"
+              title={t("serverLogs.refreshTitle")}
               className="rounded-xl border border-white/10 bg-[#1e2327] p-2 text-gray-300 hover:text-white transition-colors disabled:opacity-50"
             >
               <RefreshCw size={16} className={isLoadingContent ? "animate-spin text-cyan-400" : ""} />
@@ -267,7 +282,7 @@ export function ServerLogsModal({
                 : "text-gray-400 hover:text-white hover:bg-white/5"
             }`}
           >
-            Todos ({categoryCounts.ALL})
+            {t("serverLogs.all")} ({categoryCounts.ALL})
           </button>
 
           <button
@@ -279,7 +294,7 @@ export function ServerLogsModal({
                 : "text-red-400/70 hover:text-red-300 hover:bg-red-500/10"
             }`}
           >
-            Errors ({categoryCounts.ERROR})
+            {t("serverLogs.errors")} ({categoryCounts.ERROR})
           </button>
 
           <button
@@ -291,7 +306,7 @@ export function ServerLogsModal({
                 : "text-amber-400/70 hover:text-amber-300 hover:bg-amber-500/10"
             }`}
           >
-            Warnings ({categoryCounts.WARN})
+            {t("serverLogs.warnings")} ({categoryCounts.WARN})
           </button>
 
           <button
@@ -303,7 +318,7 @@ export function ServerLogsModal({
                 : "text-sky-400/70 hover:text-sky-300 hover:bg-sky-500/10"
             }`}
           >
-            Lua & Mods ({categoryCounts.LUA})
+            {t("serverLogs.luaMods")} ({categoryCounts.LUA})
           </button>
 
           <button
@@ -315,7 +330,7 @@ export function ServerLogsModal({
                 : "text-green-400/70 hover:text-green-300 hover:bg-green-500/10"
             }`}
           >
-            Boot / Servidor ({categoryCounts.BOOT})
+            {t("serverLogs.bootServer")} ({categoryCounts.BOOT})
           </button>
 
           <button
@@ -327,7 +342,7 @@ export function ServerLogsModal({
                 : "text-gray-400 hover:text-gray-200 hover:bg-white/5"
             }`}
           >
-            Logs / Info ({categoryCounts.LOG})
+            {t("serverLogs.info")} ({categoryCounts.LOG})
           </button>
         </div>
 
@@ -337,7 +352,7 @@ export function ServerLogsModal({
             <Search className="absolute left-3 top-2.5 text-gray-500" size={14} />
             <input
               type="text"
-              placeholder="Filtrar por texto (ex: WARN, ERROR, mod...)"
+              placeholder={t("serverLogs.searchPlaceholder")}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full rounded-xl border border-white/10 bg-black/40 py-1.5 pl-8 pr-3 text-xs font-mono text-white placeholder-gray-600 focus:border-cyan-500/50 focus:outline-none"
@@ -346,7 +361,7 @@ export function ServerLogsModal({
 
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-mono text-gray-500">
-              Exibindo {filteredLines.length} de {lines.length} linha(s)
+              {t("serverLogs.showing", { visible: filteredLines.length, total: lines.length })}
             </span>
 
             <button
@@ -355,7 +370,7 @@ export function ServerLogsModal({
               className="flex items-center gap-1 rounded-xl border border-white/10 bg-[#2b3238] px-3 py-1.5 text-xs font-bold text-gray-300 hover:bg-white/5 hover:text-white transition-colors"
             >
               <ArrowDown size={14} />
-              <span>Rolar para Fim</span>
+              <span>{t("serverLogs.scrollBottom")}</span>
             </button>
 
             <button
@@ -364,7 +379,7 @@ export function ServerLogsModal({
               className="flex items-center gap-1 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-bold text-cyan-200 hover:bg-cyan-500/20 transition-all shadow-sm"
             >
               {isCopied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
-              <span>{isCopied ? "Copiado!" : "Copiar"}</span>
+              <span>{isCopied ? t("serverLogs.copied") : t("serverLogs.copy")}</span>
             </button>
           </div>
         </div>
@@ -382,11 +397,11 @@ export function ServerLogsModal({
           ) : isLoadingContent ? (
             <div className="flex flex-col items-center justify-center p-12 text-center text-gray-500">
               <RefreshCw size={24} className="animate-spin text-cyan-400 mb-2" />
-              <p className="text-xs font-mono">Carregando arquivo de log...</p>
+              <p className="text-xs font-mono">{t("serverLogs.loading")}</p>
             </div>
           ) : filteredLines.length === 0 ? (
             <div className="flex items-center justify-center p-12 text-gray-500 italic text-xs font-mono">
-              Nenhuma linha encontrada para o filtro ou categoria selecionada.
+              {t("serverLogs.empty")}
             </div>
           ) : (
             filteredLines.map((line, index) => {

@@ -192,11 +192,11 @@ export function ServerDetail({
   const [showFixWorkshopIdsModal, setShowFixWorkshopIdsModal] = useState(false)
   const [showLogsModal, setShowLogsModal] = useState(false)
   const [pendingActivation, setPendingActivation] = useState<PendingActivation | null>(null)
-  const [isConfirmingPendingActivation, setIsConfirmingPendingActivation] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ mod: ZomboidMod; x: number; y: number } | null>(null)
   const [showMoveWarning, setShowMoveWarning] = useState<MoveModRequest | null>(null)
   const [dontShowAgainMove, setDontShowAgainMove] = useState(false)
   const [mapInstallError, setMapInstallError] = useState<string | null>(null)
+  const [activationError, setActivationError] = useState<string | null>(null)
   const [serverFileOpenError, setServerFileOpenError] = useState<string | null>(null)
   const [serverFilePreview, setServerFilePreview] = useState<ServerFilePreview | null>(null)
   const [isOpeningServerFile, setIsOpeningServerFile] = useState(false)
@@ -363,7 +363,7 @@ export function ServerDetail({
   }
 
   const confirmActivationWithDependencies = async () => {
-    if (!pendingActivation || isConfirmingPendingActivation) {
+    if (!pendingActivation) {
       return
     }
 
@@ -379,42 +379,33 @@ export function ServerDetail({
 
     const activation = pendingActivation
 
-    setIsConfirmingPendingActivation(true)
     setPendingActivation(null)
-    try {
-      const modsToInstall = uniqueMods(
-        activation.modNeedsInstall
-          ? [...activation.dependenciesToInstall, activation.mod]
-          : activation.dependenciesToInstall,
-      )
-      const modsToActivate = uniqueMods([
-        ...activation.dependenciesToActivate,
-        activation.mod,
-      ])
+    setActivationError(null)
 
-      let installedMods: ZomboidMod[] = []
+    const modsToInstall = uniqueMods(
+      activation.modNeedsInstall
+        ? [...activation.dependenciesToInstall, activation.mod]
+        : activation.dependenciesToInstall,
+    )
+    const modsToActivate = uniqueMods([
+      ...activation.dependenciesToActivate,
+      activation.mod,
+    ])
 
-      if (modsToInstall.length > 0) {
-        installedMods = (await onInstallMods(modsToInstall)) ?? []
+    void (async () => {
+      try {
+        if (modsToInstall.length > 0) {
+          await onInstallMods(modsToInstall)
+        }
+
+        await onActivateMods(modsToActivate)
+      } catch (error) {
+        setActivationError(getErrorMessage(error))
+        if (onRefreshMods) {
+          await onRefreshMods()
+        }
       }
-
-      const installedModsById = new Map(
-        installedMods.flatMap((installedMod) => [
-          [normalizeModId(installedMod.id), installedMod] as const,
-          ...installedMod.variants.map((variant) => [
-            normalizeModId(variant.id),
-            { ...installedMod, id: variant.id, path: variant.path, dependencies: variant.dependencies, mapNames: variant.mapNames },
-          ] as const),
-        ]),
-      )
-      const optimisticModsToActivate = modsToActivate.map(
-        (mod) => installedModsById.get(normalizeModId(mod.id)) ?? mod,
-      )
-
-      await onActivateMods(optimisticModsToActivate)
-    } finally {
-      setIsConfirmingPendingActivation(false)
-    }
+    })()
   }
 
   const installMap = async (mod: ZomboidMod) => {
@@ -581,7 +572,7 @@ export function ServerDetail({
                   className="flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold text-gray-400 hover:text-cyan-400 disabled:cursor-not-allowed disabled:opacity-50 transition-all"
                 >
                   <Terminal size={14} />
-                  <span>Console</span>
+                  <span>{t("serverDetail.console")}</span>
                 </button>
                 <div className="h-4 w-[1px] bg-white/10" />
                 {isServerOnline ? (
@@ -591,7 +582,7 @@ export function ServerDetail({
                     className="flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold text-red-400 hover:text-red-300 transition-all"
                   >
                     <Square size={12} />
-                    <span>Parar</span>
+                    <span>{t("serverDetail.stop")}</span>
                   </button>
                 ) : (
                   <button
@@ -611,7 +602,7 @@ export function ServerDetail({
                     ) : (
                       <Play size={14} />
                     )}
-                    <span>Iniciar</span>
+                    <span>{t("serverDetail.start")}</span>
                   </button>
                 )}
               </div>
@@ -657,7 +648,7 @@ export function ServerDetail({
               className="flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2.5 text-xs font-bold text-cyan-200 transition-all hover:bg-cyan-500/20 hover:border-cyan-500/50 shadow-md shadow-cyan-950/20"
             >
               <FileText size={16} className="text-cyan-400" />
-              <span>Ver Logs do Servidor</span>
+              <span>{t("serverDetail.viewLogs")}</span>
             </button>
 
             <button
@@ -666,7 +657,7 @@ export function ServerDetail({
               className="flex items-center gap-2 rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-2.5 text-xs font-bold text-orange-200 transition-all hover:bg-orange-500/20 hover:border-orange-500/50 shadow-md shadow-orange-950/20"
             >
               <Wand2 size={16} className="text-orange-400" />
-              <span>Organizar Workshop IDs</span>
+              <span>{t("serverDetail.organizeWorkshopIds")}</span>
             </button>
           </div>
         )}
@@ -677,6 +668,12 @@ export function ServerDetail({
         {mapInstallError && (
           <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-5 py-4 text-sm text-red-300">
             {mapInstallError}
+          </div>
+        )}
+
+        {activationError && (
+          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-5 py-4 text-sm text-red-300">
+            {activationError}
           </div>
         )}
 
@@ -873,9 +870,8 @@ export function ServerDetail({
       {pendingActivation && (
         <PendingActivationModal
           activation={pendingActivation}
-          isConfirming={isConfirmingPendingActivation}
           onCancel={() => {
-            if (!isConfirmingPendingActivation) setPendingActivation(null)
+            setPendingActivation(null)
           }}
           onConfirm={() => void confirmActivationWithDependencies()}
         />

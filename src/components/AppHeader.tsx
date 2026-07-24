@@ -105,7 +105,7 @@ export function AppHeader({
               onClick={onOpenRemoteTerminal}
             >
               <SquareTerminal size={20} />
-              <span>Terminal</span>
+              <span>{t("remoteTerminal.title")}</span>
             </button>
           </>
         )}

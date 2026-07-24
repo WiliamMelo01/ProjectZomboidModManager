@@ -86,6 +86,11 @@ pub(crate) async fn open_mod_location(path: String) -> Result<(), String> {
     run_blocking(move || open_mod_location_impl(&path)).await
 }
 
+#[tauri::command]
+pub(crate) async fn is_delete_all_enabled() -> Result<bool, String> {
+    run_blocking(|| Ok(delete_all_enabled())).await
+}
+
 #[cfg(windows)]
 fn install_linux_steamcmd_impl() -> Result<AppSettings, String> {
     Err("A instalacao automatica do SteamCMD pelo app esta disponivel apenas no Linux.".to_string())
@@ -183,8 +188,7 @@ fn load_app_settings() -> Result<AppSettings, String> {
 }
 
 fn resolve_game_executable_setting_value(saved_path: &str) -> Option<String> {
-    resolve_zomboid_executable_path(Some(saved_path))
-        .map(|path| path.display().to_string())
+    resolve_zomboid_executable_path(Some(saved_path)).map(|path| path.display().to_string())
 }
 
 fn get_mod_locations_impl() -> Result<Vec<ModLocation>, String> {
@@ -465,6 +469,16 @@ fn save_app_settings_impl(
     )?;
 
     load_app_settings()
+}
+
+fn delete_all_enabled() -> bool {
+    env::var("PZMM_DELETEALL_ENABLED")
+        .ok()
+        .map(|value| {
+            let normalized = value.trim().to_ascii_lowercase();
+            !normalized.is_empty() && !matches!(normalized.as_str(), "0" | "false" | "no" | "off")
+        })
+        .unwrap_or(false)
 }
 
 fn add_mod_location_impl(path: &str) -> Result<Vec<ModLocation>, String> {

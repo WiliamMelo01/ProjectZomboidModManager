@@ -1,5 +1,6 @@
 import { CheckCircle2, Play, RefreshCw, Send, ShieldAlert, ShieldCheck, Square, Terminal, X, XCircle } from "lucide-react"
 import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useTranslation } from "react-i18next"
 
 import type { ZomboidServer } from "@/types/server"
 
@@ -60,6 +61,7 @@ export function RemoteServerStartModal({
   onSendCommand,
   onStopServer,
 }: RemoteServerStartModalProps) {
+  const { t } = useTranslation()
   const [commandText, setCommandText] = useState("")
   const [isSendingCommand, setIsSendingCommand] = useState(false)
   const [isStoppingServer, setIsStoppingServer] = useState(false)
@@ -119,9 +121,9 @@ export function RemoteServerStartModal({
               {firewallCheck?.isConfigured ? <ShieldCheck size={20} /> : <ShieldAlert size={20} />}
             </div>
             <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-300">Server startup</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-300">{t("remoteStart.title")}</p>
               <h3 className="mt-1 text-lg font-black text-white">{server.name}</h3>
-              <p className="mt-1 text-xs text-gray-400">Close only hides this window; it does not stop the server.</p>
+              <p className="mt-1 text-xs text-gray-400">{t("remoteStart.closeHint")}</p>
             </div>
           </div>
           <button
@@ -136,15 +138,15 @@ export function RemoteServerStartModal({
         <div className="grid min-h-0 flex-1 gap-4 overflow-hidden p-5 lg:grid-cols-[260px_minmax(0,1fr)]">
           <div className="min-h-0 space-y-3 overflow-auto pr-1 custom-scrollbar">
             <div className="rounded-xl border border-white/10 bg-[#20262b] p-4">
-              <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Firewall</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">{t("remoteStart.firewall")}</p>
               {isChecking ? (
-                <StatusLine icon={<RefreshCw size={16} className="animate-spin" />} text="Checking rules" tone="muted" />
+                <StatusLine icon={<RefreshCw size={16} className="animate-spin" />} text={t("remoteStart.checkingRules")} tone="muted" />
               ) : firewallCheck?.isConfigured ? (
-                <StatusLine icon={<CheckCircle2 size={16} />} text="Ready" tone="success" />
+                <StatusLine icon={<CheckCircle2 size={16} />} text={t("remoteStart.ready")} tone="success" />
               ) : firewallCheck ? (
-                <StatusLine icon={<ShieldAlert size={16} />} text={`${firewallCheck.missingRules.length} missing setup item(s)`} tone="warning" />
+                <StatusLine icon={<ShieldAlert size={16} />} text={t("remoteStart.missingSetupItems", { count: firewallCheck.missingRules.length })} tone="warning" />
               ) : (
-                <StatusLine icon={<RefreshCw size={16} />} text="Pending" tone="muted" />
+                <StatusLine icon={<RefreshCw size={16} />} text={t("remoteStart.pending")} tone="muted" />
               )}
               <div className="mt-3 flex flex-wrap gap-2">
                 {(firewallCheck?.ports.length ? firewallCheck.ports : [Number(server.port || 16261)]).map((port) => (
@@ -156,28 +158,28 @@ export function RemoteServerStartModal({
             </div>
 
             <div className="rounded-xl border border-white/10 bg-[#20262b] p-4">
-              <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Server</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">{t("remoteStart.server")}</p>
               {isStarting ? (
-                <StatusLine icon={<RefreshCw size={16} className="animate-spin" />} text="Starting" tone="muted" />
+                <StatusLine icon={<RefreshCw size={16} className="animate-spin" />} text={t("remoteStart.starting")} tone="muted" />
               ) : isServerOnline ? (
-                <StatusLine icon={<CheckCircle2 size={16} />} text="Running" tone="success" />
+                <StatusLine icon={<CheckCircle2 size={16} />} text={t("remoteStart.running")} tone="success" />
               ) : startResult?.success ? (
-                <StatusLine icon={<RefreshCw size={16} />} text="Waiting for running signal" tone="muted" />
+                <StatusLine icon={<RefreshCw size={16} />} text={t("remoteStart.waitingRunningSignal")} tone="muted" />
               ) : error ? (
-                <StatusLine icon={<XCircle size={16} />} text="Needs attention" tone="error" />
+                <StatusLine icon={<XCircle size={16} />} text={t("remoteStart.needsAttention")} tone="error" />
               ) : (
-                <StatusLine icon={<Terminal size={16} />} text="Ready to start server" tone="muted" />
+                <StatusLine icon={<Terminal size={16} />} text={t("remoteStart.readyToStart")} tone="muted" />
               )}
             </div>
 
             <div className="rounded-xl border border-white/10 bg-[#20262b] p-4">
-              <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Terminal</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">{t("remoteStart.terminal")}</p>
               {isServerOnline ? (
-                <StatusLine icon={<Terminal size={16} />} text="Command channel ready" tone="success" />
+                <StatusLine icon={<Terminal size={16} />} text={t("remoteStart.commandChannelReady")} tone="success" />
               ) : isStarting || isStartupWatchPending ? (
-                <StatusLine icon={<RefreshCw size={16} className="animate-spin" />} text="Waiting for server" tone="muted" />
+                <StatusLine icon={<RefreshCw size={16} className="animate-spin" />} text={t("remoteStart.waitingServer")} tone="muted" />
               ) : (
-                <StatusLine icon={<Terminal size={16} />} text="Available when online" tone="muted" />
+                <StatusLine icon={<Terminal size={16} />} text={t("remoteStart.availableWhenOnline")} tone="muted" />
               )}
             </div>
 
@@ -191,8 +193,8 @@ export function RemoteServerStartModal({
           <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-[#101417]">
             <div className="shrink-0 flex items-start justify-between gap-3 border-b border-white/10 px-4 py-3">
               <div>
-                <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Logs</p>
-                <p className="max-w-[520px] break-words text-xs text-gray-400">{startResult?.message ?? "Server startup workflow"}</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">{t("remoteStart.logs")}</p>
+                <p className="max-w-[520px] break-words text-xs text-gray-400">{startResult?.message ?? t("remoteStart.workflow")}</p>
               </div>
               <button
                 type="button"
@@ -200,7 +202,7 @@ export function RemoteServerStartModal({
                 disabled={isBusy}
                 className="rounded-lg border border-white/10 px-3 py-2 text-xs font-black text-gray-300 transition-colors hover:border-cyan-300/30 hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Recheck
+                {t("remoteStart.recheck")}
               </button>
             </div>
 
@@ -233,7 +235,7 @@ export function RemoteServerStartModal({
                     <input
                       value={commandText}
                       onChange={(event) => setCommandText(event.target.value)}
-                      placeholder="save, servermsg hello, quit..."
+                      placeholder={t("remoteStart.commandPlaceholder")}
                       disabled={isSendingCommand || isStoppingServer}
                       className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-gray-600 disabled:opacity-60"
                     />
@@ -244,7 +246,7 @@ export function RemoteServerStartModal({
                     className="flex items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm font-black text-cyan-200 transition-colors hover:bg-cyan-400 hover:text-[#071014] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {isSendingCommand ? <RefreshCw size={18} className="animate-spin" /> : <Send size={18} />}
-                    <span>Send command</span>
+                    <span>{t("remoteStart.sendCommand")}</span>
                   </button>
                 </form>
               </div>
@@ -258,7 +260,7 @@ export function RemoteServerStartModal({
                   className="flex items-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm font-black text-cyan-200 transition-colors hover:bg-cyan-400 hover:text-[#071014]"
                 >
                   <ShieldCheck size={18} />
-                  <span>Configure firewall</span>
+                  <span>{t("remoteStart.configureFirewall")}</span>
                 </button>
               )}
               {isServerOnline && (
@@ -269,7 +271,7 @@ export function RemoteServerStartModal({
                   className="flex items-center gap-2 rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-2 text-sm font-black text-red-200 transition-colors hover:bg-red-400 hover:text-[#160b0b] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isStoppingServer ? <RefreshCw size={18} className="animate-spin" /> : <Square size={18} />}
-                  <span>Stop server</span>
+                  <span>{t("remoteStart.stopServer")}</span>
                 </button>
               )}
               <button
@@ -279,7 +281,7 @@ export function RemoteServerStartModal({
                 className="flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 text-sm font-black text-emerald-200 transition-colors hover:bg-emerald-400 hover:text-[#071014] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isStarting ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
-                <span>Start server</span>
+                <span>{t("remoteStart.startServer")}</span>
               </button>
               <button
                 type="button"
@@ -288,7 +290,7 @@ export function RemoteServerStartModal({
                 className="flex items-center gap-2 rounded-xl border border-orange-400/30 bg-orange-400/10 px-4 py-2 text-sm font-black text-orange-200 transition-colors hover:bg-orange-400 hover:text-[#140d05] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isStarting ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
-                <span>Start -nosteam</span>
+                <span>{t("remoteStart.startNoSteam")}</span>
               </button>
             </div>
           </div>

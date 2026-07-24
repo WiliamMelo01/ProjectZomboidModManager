@@ -270,6 +270,27 @@ pub(crate) async fn read_remote_zomboid_server_file(
     })
     .await
 }
+
+#[tauri::command]
+pub(crate) async fn list_remote_zomboid_server_logs(
+    connection: RemoteServerConnectionRequest,
+    server_id: String,
+) -> Result<Vec<crate::servers::AvailableLogFile>, String> {
+    run_blocking(move || list_remote_zomboid_server_logs_impl(&connection, &server_id)).await
+}
+
+#[tauri::command]
+pub(crate) async fn read_remote_zomboid_server_log_file(
+    connection: RemoteServerConnectionRequest,
+    server_id: String,
+    log_name: String,
+) -> Result<RemoteServerFileContent, String> {
+    run_blocking(move || {
+        read_remote_zomboid_server_log_file_impl(&connection, &server_id, &log_name)
+    })
+    .await
+}
+
 #[tauri::command]
 pub(crate) async fn check_remote_zomboid_server_status(
     connection: RemoteServerConnectionRequest,
@@ -358,6 +379,7 @@ pub(crate) fn stream_remote_zomboid_server_logs(
     app: tauri::AppHandle,
     connection: RemoteServerConnectionRequest,
     server_id: String,
+    follow_from_end: Option<bool>,
 ) -> Result<RemoteServerActionResult, String> {
     let server_id = server_id.trim().to_string();
 
@@ -375,10 +397,15 @@ pub(crate) fn stream_remote_zomboid_server_logs(
     let mut helper_connection = connection.clone();
     helper_connection.server_path = config.server_path;
 
+    let follow_from_end = follow_from_end.unwrap_or(false);
+
     thread::spawn(move || {
-        if let Err(error) =
-            run_remote_zomboid_server_logs_streaming(&app, &helper_connection, &event_server_id)
-        {
+        if let Err(error) = run_remote_zomboid_server_logs_streaming(
+            &app,
+            &helper_connection,
+            &event_server_id,
+            follow_from_end,
+        ) {
             let _ = app.emit(
                 "remote-server-start-event",
                 ServerTestEvent {
@@ -468,6 +495,14 @@ pub(crate) async fn delete_remote_workspace_config(
     connection: RemoteServerConnectionRequest,
 ) -> Result<(), String> {
     run_blocking(move || delete_remote_workspace_config_impl(&connection)).await
+}
+
+#[tauri::command]
+pub(crate) async fn delete_all_remote_data(
+    connection: RemoteServerConnectionRequest,
+    confirmation: String,
+) -> Result<RemoteServerActionResult, String> {
+    run_blocking(move || delete_all_remote_data_impl(&connection, &confirmation)).await
 }
 
 #[tauri::command]
@@ -633,6 +668,12 @@ struct DeployProgressPayload {
     detail: Option<String>,
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct DeployModFolder {
+    path: PathBuf,
+    workshop_id: Option<String>,
+}
+
 #[tauri::command]
 pub(crate) async fn deploy_local_zomboid_server_to_remote(
     app: tauri::AppHandle,
@@ -694,7 +735,7 @@ fn deploy_local_zomboid_server_to_remote_impl(
             detail: None,
         },
     );
-    let mut folders_to_copy = HashSet::new();
+    let mut folders_to_copy: HashSet<DeployModFolder> = HashSet::new();
     let mut skipped_mods = Vec::new();
     let mut active_mods_count = 0;
 
@@ -709,9 +750,16 @@ fn deploy_local_zomboid_server_to_remote_impl(
             for mod_item in all_mods {
                 if mod_item.source == "local" {
                     let matching_ids = matching_active_mod_ids(&mod_item, &active_mod_ids);
-                    if !matching_ids.is_empty() {
+                    let workshop_id = mod_item.workshop_id.trim();
+                    if !matching_ids.is_empty()
+                        && !workshop_id.is_empty()
+                        && workshop_id.chars().all(|char| char.is_ascii_digit())
+                    {
                         matched_active_mod_ids.extend(matching_ids);
-                        folders_to_copy.insert(PathBuf::from(mod_item.package_path));
+                        folders_to_copy.insert(DeployModFolder {
+                            path: PathBuf::from(mod_item.package_path),
+                            workshop_id: Some(workshop_id.to_string()),
+                        });
                     }
                 }
             }
@@ -731,13 +779,19 @@ fn deploy_local_zomboid_server_to_remote_impl(
                     },
                 );
 
-                let remote_mods_dir = join_remote_unix_path(&remote_zomboid_dir, "mods");
+                let remote_mods_roots = [
+                    remote_steamcmd_home_workshop_dir(connection),
+                    remote_default_steam_workshop_dir(connection),
+                    join_remote_unix_path(&remote_zomboid_dir, "mods"),
+                ]
+                .join("\n");
                 let manifest_command = format!(
-                    r#"PZMM_ROOT={} python3 - <<'PY'
+                    r#"PZMM_ROOTS={} python3 - <<'PY'
 import json, os
-root = os.environ.get("PZMM_ROOT", "")
+roots = [root for root in os.environ.get("PZMM_ROOTS", "").splitlines() if root]
 out = []
-if root and os.path.isdir(root):
+for root in roots:
+  if root and os.path.isdir(root):
     for base, _dirs, files in os.walk(root):
         for name in files:
             path = os.path.join(base, name)
@@ -747,7 +801,7 @@ if root and os.path.isdir(root):
 print(json.dumps(out, separators=(",", ":")))
 PY
 "#,
-                    linux_shell_quote(&remote_mods_dir)
+                    linux_shell_quote(&remote_mods_roots)
                 );
                 let manifest_output = run_ssh_capture(connection, &manifest_command)
                     .map_err(|e| format!("Failed to read remote mods manifest: {e}"))?;
@@ -756,17 +810,24 @@ PY
                         .map_err(|e| format!("Failed to parse remote mods manifest: {e}"))?;
 
                 let mut remote_mods_files: HashMap<String, Vec<RemoteFileItem>> = HashMap::new();
-                for item in remote_files {
+                for mut item in remote_files {
                     let path_lower = item.p.to_lowercase();
-                    if let Some(idx) = path_lower.find('/') {
-                        let mod_folder = path_lower[..idx].to_string();
+                    let mod_path = path_lower
+                        .split_once("/mods/")
+                        .map(|(_, suffix)| suffix)
+                        .unwrap_or(&path_lower)
+                        .to_string();
+                    item.p = mod_path.clone();
+                    if let Some(idx) = mod_path.find('/') {
+                        let mod_folder = mod_path[..idx].to_string();
                         remote_mods_files.entry(mod_folder).or_default().push(item);
                     }
                 }
 
                 let mut dirty_folders = HashSet::new();
-                for local_folder in &folders_to_copy {
-                    let folder_name = local_folder
+                for deploy_folder in &folders_to_copy {
+                    let folder_name = deploy_folder
+                        .path
                         .file_name()
                         .ok_or_else(|| "Invalid mod folder name".to_string())?
                         .to_string_lossy()
@@ -774,9 +835,12 @@ PY
                     let folder_name_lower = folder_name.to_lowercase();
 
                     let mut local_files = HashMap::new();
-                    if let Some(parent) = local_folder.parent() {
-                        let _ =
-                            collect_local_files_recursive(local_folder, parent, &mut local_files);
+                    if let Some(parent) = deploy_folder.path.parent() {
+                        let _ = collect_local_files_recursive(
+                            &deploy_folder.path,
+                            parent,
+                            &mut local_files,
+                        );
                     }
 
                     let remote_mod_files = remote_mods_files.get(&folder_name_lower);
@@ -813,7 +877,7 @@ PY
                     };
 
                     if is_dirty {
-                        dirty_folders.insert(local_folder.clone());
+                        dirty_folders.insert(deploy_folder.clone());
                     }
                 }
 
@@ -909,10 +973,14 @@ PY
 
     // 5. Copy local mods
     let total_mods = folders_to_copy.len();
-    for (i, folder) in folders_to_copy.iter().enumerate() {
-        let folder_name = folder
+    for (i, deploy_folder) in folders_to_copy.iter().enumerate() {
+        let folder_name = deploy_folder
+            .path
             .file_name()
             .ok_or_else(|| "Invalid mod folder name".to_string())?;
+        let workshop_id = deploy_folder.workshop_id.as_deref().ok_or_else(|| {
+            "A Workshop ID is required to deploy mods into the Steam folder.".to_string()
+        })?;
 
         let _ = app.emit(
             "deploy-progress",
@@ -927,8 +995,11 @@ PY
             },
         );
 
-        let dest = temp_mods_dir.join(folder_name);
-        copy_dir_all(folder, &dest)?;
+        let dest = temp_mods_dir
+            .join(workshop_id)
+            .join("mods")
+            .join(folder_name);
+        copy_dir_all(&deploy_folder.path, &dest)?;
     }
 
     // 6. Zip server state and mods separately. The server archive keeps the Zomboid folder
@@ -1046,9 +1117,9 @@ PY
     let remote_script = format!(
         r#"set -e
 zomboid_dir={zomboid_dir}
+steam_mods_target={steam_mods_target}
 server_zip={server_zip}
 mods_zip={mods_zip}
-mods_target="$zomboid_dir/mods"
 overwrite={overwrite}
 extract_archive() {{
   zip_path="$1"
@@ -1085,12 +1156,13 @@ with zipfile.ZipFile(zip_path) as archive:
 PY
 }}
 extract_archive "$server_zip" "$zomboid_dir" 'server data'
-extract_archive "$mods_zip" "$mods_target" 'mods'
+extract_archive "$mods_zip" "$steam_mods_target" 'mods'
 echo 'DEPLOY_SUCCESS'
 echo 'PZMM_STEP|Cleaning remote compressed deploy files'
 rm -f "$server_zip" "$mods_zip"
 "#,
         zomboid_dir = linux_shell_quote(&remote_zomboid_dir),
+        steam_mods_target = linux_shell_quote(&remote_steamcmd_home_workshop_dir(connection)),
         server_zip = linux_shell_quote(&remote_server_zip_path),
         mods_zip = linux_shell_quote(&remote_mods_zip_path),
         overwrite = overwrite_existing,
@@ -1515,6 +1587,7 @@ pub(crate) async fn upload_local_mod_to_remote(
     app: tauri::AppHandle,
     connection: RemoteServerConnectionRequest,
     mod_id: String,
+    workshop_id: Option<String>,
     local_mod_path: String,
 ) -> Result<(), String> {
     run_blocking(move || {
@@ -1551,7 +1624,16 @@ pub(crate) async fn upload_local_mod_to_remote(
         // 5. Unzip on remote
         let (remote_zomboid_dir, remote_data_owner) =
             remote_zomboid_data_dir_and_owner_for_connection(connection)?;
-        let mods_target = format!("{}/mods", remote_zomboid_dir);
+        let workshop_id = workshop_id.unwrap_or_default();
+        let workshop_id = workshop_id.trim();
+        let mods_target = if workshop_id.chars().all(|char| char.is_ascii_digit()) && !workshop_id.is_empty() {
+            join_remote_unix_path(
+                &join_remote_unix_path(&remote_steamcmd_home_workshop_dir(connection), workshop_id),
+                "mods",
+            )
+        } else {
+            join_remote_unix_path(&remote_zomboid_dir, "mods")
+        };
 
         let remote_script = format!(
             r#"set -e
@@ -1741,11 +1823,11 @@ fn stage_remote_mod_install_source(
     } else {
         workshop_id.trim()
     });
+    let (remote_zomboid_dir, data_owner) =
+        remote_zomboid_data_dir_and_owner_for_connection(connection)?;
+    let cache_root = remote_workspace_cache_dir(&remote_zomboid_dir);
     let staged_mods_root = join_remote_unix_path(
-        &join_remote_unix_path(
-            &join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "cache"),
-            "install-sources",
-        ),
+        &join_remote_unix_path(&cache_root, "install-sources"),
         &join_remote_unix_path(&cache_workshop_id, "mods"),
     );
     let staged_package_path = join_remote_unix_path(&staged_mods_root, requested_folder);
@@ -1753,7 +1835,8 @@ fn stage_remote_mod_install_source(
     let source_root_dot = join_remote_unix_path(&source_root, ".");
 
     let command = format!(
-        "set -e; test -d {source_root} || {{ echo {missing_prefix} {source_root} >&2; exit 2; }}; sudo -n install -d -o pzmm -g pzmm {staged_root}; sudo -n cp -a {source_dot} {staged_root}/; sudo -n chown -R pzmm:pzmm {staged_root}; printf '%s\n' {staged_package}",
+        "set -e; data_owner={data_owner}; sudo -n id -u \"$data_owner\" >/dev/null; sudo -n test -d {source_root} || {{ echo {missing_prefix} {source_root} >&2; exit 2; }}; sudo -n -u \"$data_owner\" mkdir -p {staged_root}; sudo -n cp -a {source_dot} {staged_root}/; sudo -n chown -R \"${data_owner}:${data_owner}\" {staged_root}; printf '%s\n' {staged_package}",
+        data_owner = linux_sudo_user_arg(&data_owner),
         source_root = linux_shell_quote(&source_root),
         missing_prefix = linux_shell_quote("Workshop mods folder not found:"),
         staged_root = linux_shell_quote(&staged_mods_root),
@@ -1776,6 +1859,16 @@ fn stage_remote_mod_install_source(
     }
 
     Ok(staged.to_string())
+}
+
+fn remote_workspace_cache_dir(remote_zomboid_dir: &str) -> String {
+    let managed_zomboid_dir = join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "Zomboid");
+
+    if remote_zomboid_dir.trim().trim_end_matches('/') == managed_zomboid_dir {
+        join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "cache")
+    } else {
+        join_remote_unix_path(remote_zomboid_dir, ".pzmm-cache")
+    }
 }
 
 fn safe_remote_cache_segment(value: &str) -> String {
@@ -1901,7 +1994,9 @@ fn mark_remote_setup_completed_step(
     config.username = connection.username.clone();
     config.auth_method = connection.auth_method.clone();
     config.ssh_key_path = connection.ssh_key_path.clone();
-    config.server_path = connection.server_path.clone();
+    if config.server_path.trim().is_empty() {
+        config.server_path = connection.server_path.clone();
+    }
     config.remote_setup_completed_step = config
         .remote_setup_completed_step
         .max(completed_step.min(4));
@@ -1978,8 +2073,10 @@ fn read_remote_workspace_config_at_path(
         remote_zomboid_server_dir,
         remote_zomboid_server_path,
         remote_zomboid_server_owner: read_ini_value(&content, "remote_zomboid_server_owner")
+            .map(|owner| remote_workspace_owner_or_default(&owner))
             .unwrap_or_else(|| REMOTE_LINUX_MANAGED_USER.to_string()),
         remote_zomboid_data_owner: read_ini_value(&content, "remote_zomboid_data_owner")
+            .map(|owner| remote_workspace_owner_or_default(&owner))
             .unwrap_or_else(|| REMOTE_LINUX_MANAGED_USER.to_string()),
         remote_client_ram: read_ini_value(&content, "remote_client_ram")
             .or_else(|| read_ini_value(&content, "client_ram"))
@@ -2029,8 +2126,9 @@ fn save_remote_zomboid_server_path_impl(
     Ok(config)
 }
 fn save_remote_workspace_config_impl(
-    config: RemoteWorkspaceConfig,
+    mut config: RemoteWorkspaceConfig,
 ) -> Result<RemoteWorkspaceConfig, String> {
+    normalize_remote_workspace_config_owners(&mut config)?;
     write_remote_workspace_config(&config)?;
     Ok(config)
 }
@@ -2065,6 +2163,168 @@ fn delete_remote_workspace_config_impl(
     Ok(())
 }
 
+fn delete_all_remote_data_impl(
+    connection: &RemoteServerConnectionRequest,
+    confirmation: &str,
+) -> Result<RemoteServerActionResult, String> {
+    const DELETE_ALL_CONFIRMATION: &str = "DELETE ALL PZMM DATA";
+
+    if !delete_all_enabled() {
+        return Err("PZMM_DELETEALL_ENABLED is not enabled.".to_string());
+    }
+
+    if confirmation.trim() != DELETE_ALL_CONFIRMATION {
+        return Err(format!("Type {DELETE_ALL_CONFIRMATION} to confirm."));
+    }
+
+    let config = get_remote_workspace_config_for_connection_impl(connection)?
+        .unwrap_or_else(default_remote_workspace_config);
+    let mut targets = Vec::new();
+
+    let server_profile_path = if config.server_path.trim().is_empty() {
+        remote_server_profile_path_or_default(&connection.server_path)
+    } else {
+        remote_server_profile_path_or_default(&config.server_path)
+    };
+    if let Some(zomboid_dir) = remote_unix_parent_path(&server_profile_path) {
+        push_safe_remote_delete_target(&mut targets, &zomboid_dir);
+        if let Some(data_parent) = remote_unix_parent_path(&zomboid_dir) {
+            push_safe_remote_delete_target(
+                &mut targets,
+                &join_remote_unix_path(&data_parent, "Steam/steamapps/workshop/content/108600"),
+            );
+            push_safe_remote_delete_target(
+                &mut targets,
+                &join_remote_unix_path(
+                    &data_parent,
+                    ".local/share/Steam/steamapps/workshop/content/108600",
+                ),
+            );
+        }
+    }
+
+    push_safe_remote_delete_target(&mut targets, &config.remote_steamcmd_dir);
+    push_safe_remote_delete_target(&mut targets, &config.remote_zomboid_server_dir);
+
+    push_safe_remote_delete_target(&mut targets, REMOTE_LINUX_HELPER_DIR);
+    push_safe_remote_delete_target(
+        &mut targets,
+        &join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "cache"),
+    );
+
+    if targets.is_empty() {
+        delete_remote_workspace_config_impl(connection)?;
+        return Ok(RemoteServerActionResult {
+            success: true,
+            message: "No remote paths found to delete.".to_string(),
+            command: String::new(),
+            logs: vec!["No remote paths found to delete.".to_string()],
+        });
+    }
+
+    targets.sort_by_key(|target| std::cmp::Reverse(target.len()));
+
+    let quoted_targets = targets
+        .iter()
+        .map(|target| linux_shell_quote(target))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let command = format!(
+        r#"sudo -n true || {{ echo 'PZMM_REMOTE_DELETE_FAILED=sudo authentication is required' >&2; exit 1; }}
+pgrep -f '[p]zmm-helper' | sudo -n xargs -r kill 2>/dev/null || true
+pgrep -f '[s]teamcmd' | sudo -n xargs -r kill 2>/dev/null || true
+failures=0
+for target in {targets}; do
+  case "$target" in
+    ""|"/"|"/home"|"/root"|"/opt"|"/var"|"/var/lib"|"/usr"|"/tmp")
+      printf 'PZMM_REMOTE_REFUSED=%s\n' "$target" >&2
+      failures=$((failures + 1))
+      continue
+      ;;
+  esac
+  if sudo -n test -e "$target"; then
+    printf 'PZMM_REMOTE_DELETE_ATTEMPT=%s\n' "$target"
+    if sudo -n rm -rf -- "$target"; then
+      if sudo -n test -e "$target"; then
+        printf 'PZMM_REMOTE_DELETE_FAILED=%s still exists after rm\n' "$target" >&2
+        failures=$((failures + 1))
+      else
+        printf 'PZMM_REMOTE_DELETED=%s\n' "$target"
+      fi
+    else
+      printf 'PZMM_REMOTE_DELETE_FAILED=%s rm failed\n' "$target" >&2
+      failures=$((failures + 1))
+    fi
+  else
+    printf 'PZMM_REMOTE_SKIPPED=%s\n' "$target"
+  fi
+done
+if [ "$failures" -gt 0 ]; then
+  exit 1
+fi"#,
+        targets = quoted_targets,
+    );
+    let output = run_ssh_capture_raw(connection, &command)?;
+
+    if !output.success {
+        return Err(join_command_output(&[
+            "Remote delete-all command failed.",
+            output.stdout.as_str(),
+            output.stderr.as_str(),
+        ]));
+    }
+
+    delete_remote_workspace_config_impl(connection)?;
+
+    let mut logs = output
+        .stdout
+        .lines()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    logs.push("Remote workspace config removed from this app.".to_string());
+
+    Ok(RemoteServerActionResult {
+        success: true,
+        message: "Remote PZMM data deleted. Reopen the workspace setup before using this VM again."
+            .to_string(),
+        command,
+        logs,
+    })
+}
+
+fn delete_all_enabled() -> bool {
+    std::env::var("PZMM_DELETEALL_ENABLED")
+        .ok()
+        .map(|value| {
+            let normalized = value.trim().to_ascii_lowercase();
+            !normalized.is_empty() && !matches!(normalized.as_str(), "0" | "false" | "no" | "off")
+        })
+        .unwrap_or(false)
+}
+
+fn push_safe_remote_delete_target(targets: &mut Vec<String>, path: &str) {
+    let normalized = path.trim().trim_end_matches('/');
+
+    if !looks_like_linux_path(normalized) || normalized.is_empty() || normalized == "/" {
+        return;
+    }
+
+    if matches!(
+        normalized,
+        "/home" | "/root" | "/opt" | "/var" | "/var/lib" | "/usr" | "/tmp"
+    ) {
+        return;
+    }
+
+    if targets.iter().any(|target| target == normalized) {
+        return;
+    }
+
+    targets.push(normalized.to_string());
+}
+
 fn get_remote_app_settings_impl(
     connection: RemoteServerConnectionRequest,
 ) -> Result<AppSettings, String> {
@@ -2075,6 +2335,23 @@ fn get_remote_app_settings_impl(
 }
 
 fn get_remote_system_ram_impl(connection: &RemoteServerConnectionRequest) -> Result<u32, String> {
+    let result = run_ssh_capture(
+        connection,
+        "awk '/^MemTotal:/ { print int(($2 + 1048575) / 1048576); exit }' /proc/meminfo",
+    )?;
+
+    if result.success {
+        let ram = result
+            .stdout
+            .trim()
+            .parse::<u32>()
+            .map_err(|_| "Could not parse remote system RAM.".to_string())?;
+
+        if ram > 0 {
+            return Ok(ram);
+        }
+    }
+
     run_remote_helper_json(connection, "get-system-ram", Option::<&Value>::None)
 }
 
@@ -2102,7 +2379,7 @@ fn save_remote_app_settings_impl(request: RemoteAppSettingsRequest) -> Result<Ap
         &request.connection,
         &server_path,
         &server_ram,
-        server_owner,
+        &server_owner,
     )?;
 
     config.name = request.connection.name;
@@ -2142,34 +2419,49 @@ fn remote_app_settings_from_config(config: &RemoteWorkspaceConfig) -> AppSetting
     }
 }
 
-fn remote_default_steam_workshop_dir(_connection: &RemoteServerConnectionRequest) -> String {
+fn remote_data_dir_for_workshop_paths(connection: &RemoteServerConnectionRequest) -> String {
+    remote_zomboid_data_dir_and_owner_for_connection(connection)
+        .ok()
+        .and_then(|(zomboid_dir, _)| remote_unix_parent_path(&zomboid_dir))
+        .unwrap_or_else(|| REMOTE_LINUX_DATA_DIR.to_string())
+}
+
+fn remote_default_steam_workshop_dir(connection: &RemoteServerConnectionRequest) -> String {
     join_remote_unix_path(
-        REMOTE_LINUX_DATA_DIR,
+        &remote_data_dir_for_workshop_paths(connection),
         "Steam/steamapps/workshop/content/108600",
     )
 }
 
-fn remote_default_zomboid_mods_dir() -> String {
-    format!("{}/Zomboid/mods", REMOTE_LINUX_DATA_DIR)
+fn remote_steamcmd_home_workshop_dir(connection: &RemoteServerConnectionRequest) -> String {
+    join_remote_unix_path(
+        &remote_data_dir_for_workshop_paths(connection),
+        ".local/share/Steam/steamapps/workshop/content/108600",
+    )
 }
 
-fn remote_ssh_user_home(connection: &RemoteServerConnectionRequest) -> Option<String> {
-    let username = connection.username.trim();
-    if username.is_empty() {
-        None
-    } else {
-        Some(format!("/home/{username}"))
-    }
+fn remote_default_zomboid_mods_dir(connection: &RemoteServerConnectionRequest) -> String {
+    join_remote_unix_path(
+        &remote_data_dir_for_workshop_paths(connection),
+        "Zomboid/mods",
+    )
 }
 
 fn remote_steam_workshop_dir_candidates(
     connection: &RemoteServerConnectionRequest,
 ) -> Vec<(String, String, String)> {
-    vec![(
-        crate::i18n::mod_location_label("steam", None),
-        remote_default_steam_workshop_dir(connection),
-        "steam".to_string(),
-    )]
+    vec![
+        (
+            crate::i18n::mod_location_label("steam", None),
+            remote_steamcmd_home_workshop_dir(connection),
+            "steam".to_string(),
+        ),
+        (
+            crate::i18n::mod_location_label("steam", None),
+            remote_default_steam_workshop_dir(connection),
+            "steam".to_string(),
+        ),
+    ]
 }
 
 fn remote_extra_steam_workshop_dirs(connection: &RemoteServerConnectionRequest) -> String {
@@ -2183,12 +2475,21 @@ fn remote_extra_steam_workshop_dirs(connection: &RemoteServerConnectionRequest) 
 fn ensure_remote_steamcmd_workshop_dir_prepared(
     connection: &RemoteServerConnectionRequest,
 ) -> Result<(), String> {
+    let (remote_zomboid_dir, data_owner) =
+        remote_zomboid_data_dir_and_owner_for_connection(connection)?;
+    let remote_data_dir = remote_unix_parent_path(&remote_zomboid_dir)
+        .unwrap_or_else(|| REMOTE_LINUX_DATA_DIR.to_string());
     let target_dir = remote_default_steam_workshop_dir(connection);
-    let steam_root = join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "Steam");
+    let home_target_dir = remote_steamcmd_home_workshop_dir(connection);
+    let steam_root = join_remote_unix_path(&remote_data_dir, "Steam");
+    let home_steam_root = join_remote_unix_path(&remote_data_dir, ".local/share/Steam");
     let script = format!(
-        "set -e; sudo -n install -d -o pzmm -g pzmm {}; sudo -n chown -R pzmm:pzmm {}",
+        "set -e; data_owner={}; sudo -n id -u \"$data_owner\" >/dev/null; sudo -n -u \"$data_owner\" mkdir -p {} {}; sudo -n chown -R \"${data_owner}:${data_owner}\" {} {}",
+        linux_sudo_user_arg(&data_owner),
         linux_shell_quote(&target_dir),
+        linux_shell_quote(&home_target_dir),
         linux_shell_quote(&steam_root),
+        linux_shell_quote(&home_steam_root),
     );
     let output = run_ssh_capture(connection, &script)?;
 
@@ -2209,36 +2510,22 @@ fn get_remote_mod_locations_impl(
     let mut entries = remote_steam_workshop_dir_candidates(&connection);
     entries.push((
         crate::i18n::mod_location_label("local", None),
-        remote_default_zomboid_mods_dir(),
+        remote_default_zomboid_mods_dir(&connection),
         "local".to_string(),
     ));
 
-    let steam_paths = entries
+    // Workshop folders can live inside another user's home directory. Always
+    // check them through the helper running as the saved data owner, otherwise
+    // an SSH user such as ubuntu may see a false "missing" result for /home/user.
+    let paths = entries
         .iter()
-        .filter(|(_, _, kind)| kind == "steam")
         .map(|(_, path, _)| path.clone())
         .collect::<Vec<_>>();
-    let managed_paths = entries
-        .iter()
-        .filter(|(_, _, kind)| kind != "steam")
-        .map(|(_, path, _)| path.clone())
-        .collect::<Vec<_>>();
-
-    let mut remote_paths = Vec::new();
-    if !steam_paths.is_empty() {
-        remote_paths.extend(get_remote_path_status_as_ssh_user(
-            &connection,
-            &steam_paths,
-        )?);
-    }
-    if !managed_paths.is_empty() {
-        let managed_statuses: Vec<RemotePathExists> = run_remote_helper_json_with_sudo(
-            &connection,
-            "get-path-status",
-            Some(&serde_json::json!({ "paths": managed_paths })),
-        )?;
-        remote_paths.extend(managed_statuses);
-    }
+    let remote_paths: Vec<RemotePathExists> = run_remote_helper_json_with_sudo(
+        &connection,
+        "get-path-status",
+        Some(&serde_json::json!({ "paths": paths })),
+    )?;
 
     Ok(entries
         .into_iter()
@@ -2309,47 +2596,6 @@ struct RemotePathExists {
     exists: bool,
 }
 
-fn get_remote_path_status_as_ssh_user(
-    connection: &RemoteServerConnectionRequest,
-    paths: &[String],
-) -> Result<Vec<RemotePathExists>, String> {
-    if paths.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let checks = paths
-        .iter()
-        .map(|path| {
-            format!(
-                "if [ -d {path} ]; then printf '%s\t1\n' {path}; else printf '%s\t0\n' {path}; fi",
-                path = linux_shell_quote(path),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
-    let output = run_ssh_capture(connection, &format!("set -e; {checks}"))?;
-
-    if !output.success {
-        return Err(join_command_output(&[
-            "Could not check remote Steam folders.",
-            output.stdout.as_str(),
-            output.stderr.as_str(),
-        ]));
-    }
-
-    Ok(output
-        .stdout
-        .lines()
-        .filter_map(|line| {
-            let (path, exists) = line.rsplit_once('\t')?;
-            Some(RemotePathExists {
-                path: path.to_string(),
-                exists: exists.trim() == "1",
-            })
-        })
-        .collect())
-}
-
 fn remote_workspace_config_path() -> Result<PathBuf, String> {
     Ok(app_config_dir()?.join("remote-workspace.ini"))
 }
@@ -2396,6 +2642,8 @@ fn remote_workspace_config_path_for_config(
 
 fn write_remote_workspace_config(config: &RemoteWorkspaceConfig) -> Result<(), String> {
     let path = remote_workspace_config_path_for_config(config)?;
+    let mut config = config.clone();
+    normalize_remote_workspace_config_owners(&mut config)?;
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -2449,6 +2697,18 @@ fn write_remote_workspace_config(config: &RemoteWorkspaceConfig) -> Result<(), S
 
     fs::write(&path, format!("{content}\n"))
         .map_err(|error| format!("Nao foi possivel salvar {}: {error}", path.display()))
+}
+
+fn normalize_remote_workspace_config_owners(
+    config: &mut RemoteWorkspaceConfig,
+) -> Result<(), String> {
+    config.remote_zomboid_server_owner =
+        remote_workspace_owner_or_default(&config.remote_zomboid_server_owner);
+    config.remote_zomboid_data_owner =
+        remote_workspace_owner_or_default(&config.remote_zomboid_data_owner);
+    validate_linux_username(&config.remote_zomboid_server_owner)?;
+    validate_linux_username(&config.remote_zomboid_data_owner)?;
+    Ok(())
 }
 
 fn test_remote_server_connection_impl(
@@ -2561,13 +2821,19 @@ fn resolve_remote_zomboid_server_launch_path(
     } else {
         server_launch_path.trim()
     };
-    let candidates = [
+    let mut candidates = [
         launch_path.to_string(),
         join_remote_unix_path(directory, "start-server.sh"),
         join_remote_unix_path(directory, "ProjectZomboid64"),
-    ];
+    ]
+    .into_iter()
+    .filter(|candidate| looks_like_linux_path(candidate))
+    .collect::<Vec<_>>();
+    let mut seen = std::collections::HashSet::new();
+    candidates.retain(|x| seen.insert(x.clone()));
+
     let test_script = format!(
-        "set -e; for candidate in {}; do if [ -f \"$candidate\" ]; then printf 'PZMM_ZOMBOID_SERVER_PATH=%s\\n' \"$candidate\"; exit 0; fi; done; printf 'checked: {}\\n' >&2; exit 1",
+        "set -e; sudo -n true; for candidate in {}; do if sudo -n test -f \"$candidate\"; then printf 'PZMM_ZOMBOID_SERVER_PATH=%s\\n' \"$candidate\"; exit 0; fi; done; printf 'checked with sudo: {}\\n' >&2; exit 1",
         candidates
             .iter()
             .map(|candidate| linux_shell_quote(candidate))
@@ -2575,7 +2841,15 @@ fn resolve_remote_zomboid_server_launch_path(
             .join(" "),
         candidates.join(", ")
     );
-    let result = run_ssh_capture(connection, &test_script)?;
+    let result = run_ssh_capture_raw(connection, &test_script)?;
+
+    if !result.success {
+        return Err(join_command_output(&[
+            "Could not find the remote Project Zomboid Linux launcher path.",
+            result.stdout.as_str(),
+            result.stderr.as_str(),
+        ]));
+    }
 
     result
         .stdout
@@ -2631,7 +2905,26 @@ fn build_remote_performance_settings_script(
     format!(
         r#"set -e
 ram={}
-sudo -n -u {} env HOME=/var/lib/pzmm PZMM_DATA_DIR=/var/lib/pzmm python3 - "$ram" {} <<'PY'
+server_owner={}
+for server_dir in {}; do
+  for json_name in ProjectZomboid64.json ProjectZomboid32.json; do
+    json_path="$server_dir/$json_name"
+    if sudo -n test -f "$json_path"; then
+      detected_owner=$(sudo -n stat -c '%U' "$json_path")
+      if [ -n "$detected_owner" ] && [ "$detected_owner" != UNKNOWN ]; then
+        server_owner="$detected_owner"
+        break 2
+      fi
+    fi
+  done
+done
+sudo -n id -u "$server_owner" >/dev/null
+owner_home=$(getent passwd "$server_owner" | cut -d: -f6)
+if [ -z "$owner_home" ]; then
+  owner_home=/tmp
+fi
+cd /
+sudo -n -u "$server_owner" env HOME="$owner_home" PZMM_DATA_DIR="$owner_home" python3 - "$ram" {} <<'PY'
 import json, pathlib, re, sys
 ram = sys.argv[1]
 server_dirs = [pathlib.Path(value) for value in sys.argv[2:]]
@@ -2684,7 +2977,7 @@ if not updated:
 print("PZMM_REMOTE_PERFORMANCE_UPDATED=" + ",".join(updated))
 PY
 "#,
-        server_mb, server_owner, quoted_dirs,
+        server_mb, server_owner, quoted_dirs, quoted_dirs,
     )
 }
 
@@ -2794,18 +3087,46 @@ fn validate_linux_username(username: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn remote_workspace_owner_or_default(owner: &str) -> &str {
-    let owner = owner.trim();
+fn remote_workspace_owner_or_default(owner: &str) -> String {
+    let owner = normalize_remote_owner_value(owner);
 
     if owner.is_empty() {
-        REMOTE_LINUX_MANAGED_USER
+        REMOTE_LINUX_MANAGED_USER.to_string()
     } else {
         owner
     }
 }
 
+fn normalize_remote_owner_value(owner: &str) -> String {
+    let trimmed = owner.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    // Older builds persisted the output of shell quoting instead of the username
+    // itself, for example "$'\\''pzalt'\\'''". Recover only shell punctuation;
+    // reject any other characters later through validate_linux_username.
+    let mut normalized = String::new();
+    let mut had_shell_punctuation = false;
+    for character in trimmed.chars() {
+        if character.is_ascii_alphanumeric() || matches!(character, '_' | '-') {
+            normalized.push(character);
+        } else if matches!(character, '$' | '\'' | '"' | '\\') {
+            had_shell_punctuation = true;
+        } else {
+            return trimmed.to_string();
+        }
+    }
+
+    if had_shell_punctuation && !normalized.is_empty() {
+        normalized
+    } else {
+        trimmed.to_string()
+    }
+}
+
 fn linux_sudo_user_arg(owner: &str) -> String {
-    linux_shell_quote(remote_workspace_owner_or_default(owner))
+    remote_workspace_owner_or_default(owner)
 }
 
 fn remote_zomboid_data_dir_and_owner_for_connection(
@@ -2820,9 +3141,103 @@ fn remote_zomboid_data_dir_and_owner_for_connection(
     };
     let remote_zomboid_dir = remote_unix_parent_path(&server_profile_path)
         .unwrap_or_else(|| join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "Zomboid"));
-    let owner = remote_workspace_owner_or_default(&config.remote_zomboid_data_owner).to_string();
+    let owner = remote_workspace_owner_or_default(&config.remote_zomboid_data_owner);
     validate_linux_username(&owner)?;
     Ok((remote_zomboid_dir, owner))
+}
+
+fn list_remote_zomboid_server_logs_impl(
+    connection: &RemoteServerConnectionRequest,
+    _server_id: &str,
+) -> Result<Vec<crate::servers::AvailableLogFile>, String> {
+    let (remote_zomboid_dir, owner) = remote_zomboid_data_dir_and_owner_for_connection(connection)?;
+    let logs_dir = join_remote_unix_path(&remote_zomboid_dir, "Logs");
+    let command = format!(
+        r#"set -e
+logs_dir={logs_dir}
+owner={owner}
+sudo -n id -u "$owner" >/dev/null
+if ! sudo -n test -d "$logs_dir"; then printf '[]\n'; exit 0; fi
+sudo -n -u "$owner" env LOGS_DIR="$logs_dir" python3 - <<'PY'
+import json, os, pathlib
+logs_dir = pathlib.Path(os.environ["LOGS_DIR"])
+items = []
+for path in logs_dir.iterdir():
+    if not path.is_file() or path.suffix not in (".txt", ".log"):
+        continue
+    stat = path.stat()
+    items.append({{
+        "name": path.name,
+        "path": str(path),
+        "sizeBytes": stat.st_size,
+        "lastModified": int(stat.st_mtime),
+    }})
+items.sort(key=lambda item: item["lastModified"], reverse=True)
+print(json.dumps(items))
+PY"#,
+        logs_dir = linux_shell_quote(&logs_dir),
+        owner = linux_sudo_user_arg(&owner),
+    );
+    let output = run_ssh_capture(connection, &command)?;
+    serde_json::from_str(output.stdout.trim()).map_err(|error| {
+        format!(
+            "Could not parse remote server logs list: {error}\n\n{}",
+            join_command_output(&[output.stdout.as_str(), output.stderr.as_str()])
+        )
+    })
+}
+
+fn read_remote_zomboid_server_log_file_impl(
+    connection: &RemoteServerConnectionRequest,
+    server_id: &str,
+    log_name: &str,
+) -> Result<RemoteServerFileContent, String> {
+    let clean_log_name = Path::new(log_name)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .filter(|name| !name.trim().is_empty())
+        .ok_or_else(|| "Invalid server log name.".to_string())?;
+
+    if !clean_log_name.ends_with(".txt") && !clean_log_name.ends_with(".log") {
+        return Err("Invalid server log extension.".to_string());
+    }
+
+    let (remote_zomboid_dir, owner) = remote_zomboid_data_dir_and_owner_for_connection(connection)?;
+    let logs_dir = join_remote_unix_path(&remote_zomboid_dir, "Logs");
+    let command = format!(
+        r#"set -e
+logs_dir={logs_dir}
+owner={owner}
+log_name={log_name}
+sudo -n id -u "$owner" >/dev/null
+sudo -n -u "$owner" env LOGS_DIR="$logs_dir" LOG_NAME="$log_name" SERVER_ID={server_id} python3 - <<'PY'
+import json, os, pathlib
+logs_dir = pathlib.Path(os.environ["LOGS_DIR"])
+log_name = pathlib.Path(os.environ["LOG_NAME"]).name
+if not log_name.endswith((".txt", ".log")):
+    raise SystemExit("Invalid server log extension.")
+path = logs_dir / log_name
+if not path.is_file():
+    raise SystemExit(f"Server log file not found: {{path}}")
+print(json.dumps({{
+    "serverId": os.environ["SERVER_ID"],
+    "fileName": log_name,
+    "path": str(path),
+    "content": path.read_text(encoding="utf-8", errors="replace"),
+}}))
+PY"#,
+        logs_dir = linux_shell_quote(&logs_dir),
+        owner = linux_sudo_user_arg(&owner),
+        log_name = linux_shell_quote(&clean_log_name),
+        server_id = linux_shell_quote(server_id),
+    );
+    let output = run_ssh_capture(connection, &command)?;
+    serde_json::from_str(output.stdout.trim()).map_err(|error| {
+        format!(
+            "Could not parse remote server log file: {error}\n\n{}",
+            join_command_output(&[output.stdout.as_str(), output.stderr.as_str()])
+        )
+    })
 }
 
 fn remote_server_profile_path_or_default(path: &str) -> String {
@@ -2924,14 +3339,6 @@ fn list_remote_zomboid_mods_impl(
     let mut seen_keys = HashSet::new();
     mods.retain(|mod_item| register_remote_mod_identity(&mut seen_keys, mod_item));
 
-    let steam_mods: Vec<crate::models::ZomboidMod> =
-        run_remote_helper_json_as_ssh_user(&connection, "list-mods")?;
-    for mod_item in steam_mods {
-        if mod_item.source == "steam" && register_remote_mod_identity(&mut seen_keys, &mod_item) {
-            mods.push(mod_item);
-        }
-    }
-
     mods.sort_by_key(|mod_item| mod_item.name.to_lowercase());
     hydrate_remote_mod_images(&connection, &mut mods);
     Ok(mods)
@@ -2998,14 +3405,17 @@ fn download_remote_steam_workshop_items_impl(
         .unwrap_or_else(default_remote_workspace_config);
     let steamcmd_path = required_field(&config.remote_steamcmd_path, "remote SteamCMD path")?;
     ensure_remote_steamcmd_workshop_dir_prepared(&connection)?;
-    let steamcmd_workshop_dir = remote_default_steam_workshop_dir(&connection);
+    let steamcmd_workshop_dirs = remote_steam_workshop_dir_candidates(&connection)
+        .into_iter()
+        .map(|(_, path, _)| path)
+        .collect::<Vec<_>>();
 
     let mut skipped_ids = Vec::new();
     let mut pending_ids = workshop_ids.clone();
 
     if !force_validate {
         let existing_ids =
-            remote_existing_workshop_ids(&connection, &steamcmd_workshop_dir, &workshop_ids)?;
+            remote_existing_workshop_ids(&connection, &steamcmd_workshop_dirs, &workshop_ids)?;
         skipped_ids = workshop_ids
             .iter()
             .filter(|workshop_id| existing_ids.contains(*workshop_id))
@@ -3049,19 +3459,38 @@ fn download_remote_steam_workshop_items_impl(
             force_validate,
         )?;
 
-        if result.success {
-            for workshop_id in chunk {
-                completed_items.insert(workshop_id.clone());
-                emit_workshop_download_event(app, workshop_id, "completed", None);
-            }
-        } else {
-            let output = join_command_output(&[result.stdout.as_str(), result.stderr.as_str()]);
-            for workshop_id in chunk {
-                emit_workshop_download_event(app, workshop_id, "failed", Some(&output));
+        let output = join_command_output(&[result.stdout.as_str(), result.stderr.as_str()]);
+        let failed_by_log = parse_remote_steamcmd_failed_items(&output, chunk);
+        let completed_by_log = parse_remote_steamcmd_completed_items(&output, chunk);
+        let installed_ids = remote_existing_workshop_ids_with_mod_info(
+            &connection,
+            &steamcmd_workshop_dirs,
+            chunk,
+        )?;
+
+        for workshop_id in chunk {
+            if let Some(error) = failed_by_log.get(workshop_id.as_str()) {
+                emit_workshop_download_event(app, workshop_id, "failed", Some(error));
                 failed_items.push(WorkshopDownloadFailedItem {
                     workshop_id: workshop_id.clone(),
                     name: workshop_id.clone(),
-                    error: output.clone(),
+                    error: error.clone(),
+                });
+            } else if completed_by_log.contains(workshop_id) || installed_ids.contains(workshop_id)
+            {
+                completed_items.insert(workshop_id.clone());
+                emit_workshop_download_event(app, workshop_id, "completed", None);
+            } else {
+                let error = if result.success {
+                    "SteamCMD finished without installing this Workshop item.".to_string()
+                } else {
+                    output.clone()
+                };
+                emit_workshop_download_event(app, workshop_id, "failed", Some(&error));
+                failed_items.push(WorkshopDownloadFailedItem {
+                    workshop_id: workshop_id.clone(),
+                    name: workshop_id.clone(),
+                    error,
                 });
             }
         }
@@ -3088,34 +3517,56 @@ fn run_remote_steamcmd_workshop_chunk(
         emit_workshop_download_event(app, workshop_id, "downloading", None);
     }
 
-    let mut args = vec!["+login anonymous".to_string()];
+    let mut script_lines = vec![
+        "@ShutdownOnFailedCommand 0".to_string(),
+        "@NoPromptForPassword 1".to_string(),
+        "login anonymous".to_string(),
+    ];
     for workshop_id in workshop_ids {
-        args.push(format!("+workshop_download_item 108600 {workshop_id}"));
-        if force_validate {
-            args.push("validate".to_string());
-        }
+        let validate = if force_validate { " validate" } else { "" };
+        script_lines.push(format!(
+            "workshop_download_item 108600 {workshop_id}{validate}"
+        ));
     }
-    args.push("+quit".to_string());
+    script_lines.push("quit".to_string());
+    let script_text = script_lines.join("\\n");
+    let (remote_zomboid_dir, data_owner) =
+        remote_zomboid_data_dir_and_owner_for_connection(connection)?;
+    let remote_data_dir = remote_unix_parent_path(&remote_zomboid_dir)
+        .unwrap_or_else(|| REMOTE_LINUX_DATA_DIR.to_string());
+    validate_linux_username(&data_owner)?;
+    let steam_root = join_remote_unix_path(&remote_data_dir, "Steam");
+    let steam_apps = join_remote_unix_path(&steam_root, "steamapps");
+    let home_steam_root = join_remote_unix_path(&remote_data_dir, ".local/share/Steam");
+    let home_steam_apps = join_remote_unix_path(&home_steam_root, "steamapps");
     let command = format!(
-        "set -e; steamcmd={}; if [ ! -x \"$steamcmd\" ] && ! command -v \"$steamcmd\" >/dev/null 2>&1; then echo \"SteamCMD not found: $steamcmd\" >&2; exit 1; fi; sudo -n install -d -o pzmm -g pzmm {} {}; sudo -n -u pzmm env HOME={} PZMM_DATA_DIR={} \"$steamcmd\" {}",
+        "set -e; steamcmd={}; data_owner={}; remote_data_dir={}; script_path=$(mktemp /tmp/pzmm-steamcmd-XXXXXX.txt); cleanup() {{ rm -f \"$script_path\"; }}; trap cleanup EXIT; if [ ! -x \"$steamcmd\" ] && ! command -v \"$steamcmd\" >/dev/null 2>&1; then echo \"SteamCMD not found: $steamcmd\" >&2; exit 1; fi; sudo -n id -u \"$data_owner\" >/dev/null; sudo -n -u \"$data_owner\" mkdir -p {} {} {} {}; sudo -n chown -R \"${data_owner}:${data_owner}\" {} {}; printf '%b\\n' {} > \"$script_path\"; chmod 0644 \"$script_path\"; sudo -n -u \"$data_owner\" env HOME=\"$remote_data_dir\" PZMM_DATA_DIR=\"$remote_data_dir\" \"$steamcmd\" +runscript \"$script_path\"",
         linux_shell_quote(steamcmd_path),
-        linux_shell_quote(&join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "Steam")),
-        linux_shell_quote(&join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "Steam/steamapps")),
-        linux_shell_quote(REMOTE_LINUX_DATA_DIR),
-        linux_shell_quote(REMOTE_LINUX_DATA_DIR),
-        args.join(" ")
+        linux_sudo_user_arg(&data_owner),
+        linux_shell_quote(&remote_data_dir),
+        linux_shell_quote(&steam_root),
+        linux_shell_quote(&steam_apps),
+        linux_shell_quote(&home_steam_root),
+        linux_shell_quote(&home_steam_apps),
+        linux_shell_quote(&steam_root),
+        linux_shell_quote(&home_steam_root),
+        linux_shell_quote(&script_text),
     );
     run_ssh_workshop_streaming(app, connection, &command)
 }
 fn remote_existing_workshop_ids(
     connection: &RemoteServerConnectionRequest,
-    workshop_dir: &str,
+    workshop_dirs: &[String],
     workshop_ids: &[String],
 ) -> Result<HashSet<String>, String> {
-    let paths = workshop_ids
-        .iter()
-        .map(|workshop_id| join_remote_unix_path(workshop_dir, workshop_id))
-        .collect::<Vec<_>>();
+    let mut paths = Vec::new();
+    let mut path_workshop_ids = Vec::new();
+    for workshop_dir in workshop_dirs {
+        for workshop_id in workshop_ids {
+            paths.push(join_remote_unix_path(workshop_dir, workshop_id));
+            path_workshop_ids.push(workshop_id.clone());
+        }
+    }
     let remote_paths: Vec<RemotePathExists> = run_remote_helper_json_with_sudo(
         connection,
         "get-path-status",
@@ -3124,49 +3575,102 @@ fn remote_existing_workshop_ids(
 
     Ok(remote_paths
         .into_iter()
-        .zip(workshop_ids.iter())
+        .zip(path_workshop_ids)
         .filter(|(item, _)| item.exists)
-        .map(|(_, workshop_id)| workshop_id.clone())
+        .map(|(_, workshop_id)| workshop_id)
         .collect())
 }
-fn run_remote_helper_json_as_ssh_user<T>(
-    connection: &RemoteServerConnectionRequest,
-    helper_command: &str,
-) -> Result<T, String>
-where
-    T: serde::de::DeserializeOwned,
-{
-    let helper_path = ensure_cached_remote_helper(connection)?;
-    let home = remote_ssh_user_home(connection).unwrap_or_else(|| "/tmp".to_string());
-    let command = format!(
-        "HOME={} PZMM_EXTRA_STEAM_WORKSHOP_DIRS={} {} {}",
-        linux_shell_quote(&home),
-        linux_shell_quote(&remote_extra_steam_workshop_dirs(connection)),
-        linux_shell_quote(&helper_path),
-        linux_shell_quote(helper_command),
-    );
-    let output = run_ssh_capture(connection, &command).inspect_err(|_| {
-        invalidate_remote_helper_cache(connection);
-    })?;
-    let stdout = output.stdout.trim();
 
-    if stdout.is_empty() {
-        invalidate_remote_helper_cache(connection);
-        let message = format!("pzmm Linux helper returned no JSON output for {helper_command}.");
+fn remote_existing_workshop_ids_with_mod_info(
+    connection: &RemoteServerConnectionRequest,
+    workshop_dirs: &[String],
+    workshop_ids: &[String],
+) -> Result<HashSet<String>, String> {
+    let mut script = String::from("set -e\n");
+    for workshop_id in workshop_ids {
+        let safe_workshop_id = safe_remote_cache_segment(workshop_id);
+        script.push_str(&format!(
+            "found=0; item_id={id}; for root in {roots}; do if sudo -n find \"$root/$item_id/mods\" -name mod.info -type f -print -quit 2>/dev/null | grep -q .; then found=1; break; fi; done; if [ \"$found\" = 1 ]; then printf 'PZMM_WORKSHOP_READY=%s\\n' \"$item_id\"; fi\n",
+            roots = workshop_dirs
+                .iter()
+                .map(|path| linux_shell_quote(path))
+                .collect::<Vec<_>>()
+                .join(" "),
+            id = linux_shell_quote(&safe_workshop_id),
+        ));
+    }
+
+    let output = run_ssh_capture_raw(connection, &script)?;
+    if !output.success {
         return Err(join_command_output(&[
-            message.as_str(),
+            "Could not verify downloaded remote Workshop items.",
+            output.stdout.as_str(),
             output.stderr.as_str(),
         ]));
     }
 
-    serde_json::from_str::<T>(stdout).map_err(|error| {
-        invalidate_remote_helper_cache(connection);
-        let message =
-            format!("Could not parse pzmm Linux helper JSON output for {helper_command}: {error}");
-        join_command_output(&[message.as_str(), stdout, output.stderr.as_str()])
-    })
+    Ok(output
+        .stdout
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("PZMM_WORKSHOP_READY="))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect())
 }
 
+fn parse_remote_steamcmd_failed_items(
+    output: &str,
+    wanted_ids: &[String],
+) -> HashMap<String, String> {
+    let wanted = wanted_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let mut failed = HashMap::new();
+
+    for line in output.lines() {
+        let normalized = line.to_lowercase();
+        if !normalized.contains("download item")
+            || !(normalized.contains("error") || normalized.contains("failed"))
+        {
+            continue;
+        }
+
+        if let Some(workshop_id) = line
+            .split(|char: char| !char.is_ascii_digit())
+            .find(|value| wanted.contains(*value))
+        {
+            failed.insert(workshop_id.to_string(), line.trim().to_string());
+        }
+    }
+
+    failed
+}
+
+fn parse_remote_steamcmd_completed_items(output: &str, wanted_ids: &[String]) -> HashSet<String> {
+    let wanted = wanted_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let mut completed = HashSet::new();
+
+    for line in output.lines() {
+        let normalized = line.to_lowercase();
+        if !(normalized.contains("success") || normalized.contains("downloaded item")) {
+            continue;
+        }
+
+        if let Some(workshop_id) = line
+            .split(|char: char| !char.is_ascii_digit())
+            .find(|value| wanted.contains(*value))
+        {
+            completed.insert(workshop_id.to_string());
+        }
+    }
+
+    completed
+}
 fn cancel_remote_steam_workshop_download_impl(
     connection: RemoteServerConnectionRequest,
 ) -> Result<(), String> {
@@ -3239,6 +3743,7 @@ struct RemoteServerTestRequest<'a> {
     server_launch_path: Option<&'a str>,
     server_profile_path: Option<&'a str>,
     no_steam: bool,
+    follow_from_end: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -3265,6 +3770,7 @@ fn run_remote_zomboid_server_start_streaming(
         server_launch_path: Some(server_launch_path),
         server_profile_path: (!server_profile_path.is_empty()).then_some(server_profile_path),
         no_steam,
+        follow_from_end: None,
     };
     let json = serde_json::to_vec(&payload)
         .map_err(|error| format!("Could not serialize remote server start payload: {error}"))?;
@@ -3291,6 +3797,7 @@ fn run_remote_zomboid_server_logs_streaming(
     app: &tauri::AppHandle,
     connection: &RemoteServerConnectionRequest,
     server_id: &str,
+    follow_from_end: bool,
 ) -> Result<(), String> {
     let helper_path = ensure_cached_remote_helper(connection)?;
     let payload = RemoteServerTestRequest {
@@ -3298,6 +3805,7 @@ fn run_remote_zomboid_server_logs_streaming(
         server_launch_path: None,
         server_profile_path: None,
         no_steam: false,
+        follow_from_end: Some(follow_from_end),
     };
     let json = serde_json::to_vec(&payload)
         .map_err(|error| format!("Could not serialize remote server logs payload: {error}"))?;
@@ -3333,6 +3841,7 @@ fn run_remote_zomboid_server_test_streaming(
         server_launch_path: Some(server_launch_path),
         server_profile_path: (!server_profile_path.is_empty()).then_some(server_profile_path),
         no_steam: false,
+        follow_from_end: None,
     };
     let json = serde_json::to_vec(&payload)
         .map_err(|error| format!("Could not serialize remote server test payload: {error}"))?;
@@ -3561,7 +4070,7 @@ fn hydrate_remote_mod_images_with_cache(
         }
 
         match remote_image_cache_path(connection, &remote_image_path) {
-            Ok(cache_path) if cache_path.is_file() => {
+            Ok(cache_path) if is_valid_cached_remote_image(&cache_path) => {
                 resolved_paths.insert(remote_image_path, cache_path);
             }
             Ok(_) => missing_paths.push(remote_image_path),
@@ -3634,7 +4143,7 @@ fn ensure_cached_remote_file(
 ) -> Result<PathBuf, String> {
     let cache_path = remote_image_cache_path(connection, remote_path)?;
 
-    if cache_path.is_file() {
+    if is_valid_cached_remote_image(&cache_path) {
         return Ok(cache_path);
     }
 
@@ -3645,6 +4154,12 @@ fn ensure_cached_remote_file(
 
     download_remote_file(connection, remote_path, &cache_path)?;
     Ok(cache_path)
+}
+
+fn is_valid_cached_remote_image(path: &Path) -> bool {
+    fs::metadata(path)
+        .map(|metadata| metadata.is_file() && metadata.len() > 0)
+        .unwrap_or(false)
 }
 
 fn remote_image_cache_path(
@@ -3753,11 +4268,20 @@ fn download_remote_file_via_base64(
     local_path: &PathBuf,
 ) -> Result<(), String> {
     let command = format!(
-        "set -e; test -f {}; base64 -w 0 {}",
+        "set -e; sudo -n test -f {}; sudo -n base64 -w 0 {}",
         linux_shell_quote(remote_path),
         linux_shell_quote(remote_path)
     );
-    let output = run_ssh_capture(connection, &command)?;
+    let output = run_ssh_capture_raw(connection, &command)?;
+
+    if !output.success {
+        return Err(join_command_output(&[
+            "Could not read remote file with sudo.",
+            output.stdout.as_str(),
+            output.stderr.as_str(),
+        ]));
+    }
+
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(output.stdout.trim().as_bytes())
         .map_err(|error| format!("Could not decode remote file bytes: {error}"))?;
@@ -3772,7 +4296,7 @@ fn download_remote_file_via_base64(
 fn ensure_cached_remote_helper(
     connection: &RemoteServerConnectionRequest,
 ) -> Result<String, String> {
-    let cache_key = remote_helper_cache_key(connection)?;
+    let cache_key = remote_helper_connection_cache_key(connection);
     let remote_path = REMOTE_LINUX_HELPER_PATH.to_string();
     let cache = VERIFIED_REMOTE_HELPERS.get_or_init(|| Mutex::new(HashSet::new()));
 
@@ -3793,29 +4317,29 @@ fn ensure_cached_remote_helper(
     Ok(helper_path)
 }
 fn invalidate_remote_helper_cache(connection: &RemoteServerConnectionRequest) {
-    if let Ok(cache_key) = remote_helper_cache_key(connection) {
-        if let Some(cache) = VERIFIED_REMOTE_HELPERS.get() {
-            if let Ok(mut cache) = cache.lock() {
-                cache.remove(&cache_key);
-            }
+    let cache_key = remote_helper_connection_cache_key(connection);
+    if let Some(cache) = VERIFIED_REMOTE_HELPERS.get() {
+        if let Ok(mut cache) = cache.lock() {
+            cache.remove(&cache_key);
         }
     }
 }
 
-fn remote_helper_cache_key(connection: &RemoteServerConnectionRequest) -> Result<String, String> {
-    let mut hasher = DefaultHasher::new();
-    local_helper_signature()?.hash(&mut hasher);
-
-    Ok(format!(
-        "{}|{}|{}|{}|{:016x}",
+fn remote_helper_connection_cache_key(connection: &RemoteServerConnectionRequest) -> String {
+    format!(
+        "{}|{}|{}|{}",
         connection.host.trim().to_lowercase(),
         connection.port.trim(),
         connection.username.trim().to_lowercase(),
         REMOTE_LINUX_HELPER_PATH,
-        hasher.finish()
-    ))
+    )
 }
+
 fn ensure_remote_helper(connection: &RemoteServerConnectionRequest) -> Result<String, String> {
+    if validate_existing_remote_helper(connection)? {
+        return Ok(REMOTE_LINUX_HELPER_PATH.to_string());
+    }
+
     let result = setup_remote_helper_impl(None, connection)?;
 
     if result.success {
@@ -3828,6 +4352,19 @@ fn ensure_remote_helper(connection: &RemoteServerConnectionRequest) -> Result<St
         ]))
     }
 }
+
+fn validate_existing_remote_helper(
+    connection: &RemoteServerConnectionRequest,
+) -> Result<bool, String> {
+    let command = format!(
+        "test -x {helper_path} && {helper_command} --version >/dev/null",
+        helper_path = linux_shell_quote(REMOTE_LINUX_HELPER_PATH),
+        helper_command = remote_helper_command_prefix(REMOTE_LINUX_HELPER_PATH),
+    );
+
+    run_ssh_capture_raw(connection, &command).map(|result| result.success)
+}
+
 fn setup_remote_helper_impl(
     app: Option<&tauri::AppHandle>,
     connection: &RemoteServerConnectionRequest,
@@ -3921,14 +4458,6 @@ fn setup_remote_helper_impl(
         stdout: join_command_output(&[prereq.stdout.as_str(), install.stdout.as_str()]),
         stderr: join_command_output(&[prereq.stderr.as_str(), install.stderr.as_str()]),
     })
-}
-
-fn local_helper_binary_path() -> Result<PathBuf, String> {
-    if pzmm_dev_mode_enabled() {
-        return local_dev_helper_binary_path();
-    }
-
-    download_release_helper_binary()
 }
 
 fn local_helper_binary_path_for_setup() -> Result<PathBuf, String> {
@@ -4273,25 +4802,6 @@ fn make_helper_executable(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn local_helper_signature() -> Result<String, String> {
-    let path = local_helper_binary_path()?;
-    let metadata = fs::metadata(&path)
-        .map_err(|error| format!("Could not inspect helper binary metadata: {error}"))?;
-    let modified = metadata
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|duration| duration.as_secs())
-        .unwrap_or_default();
-
-    Ok(format!(
-        "{}|{}|{}",
-        path.display(),
-        metadata.len(),
-        modified
-    ))
-}
-
 fn upload_helper_binary_to_remote(
     connection: &RemoteServerConnectionRequest,
     local_path: &Path,
@@ -4395,7 +4905,7 @@ if {{ [ -z "$data_owner" ] || [ "$data_owner" = {managed_user} ]; }} && [ "$remo
 fi
 case "$data_owner" in ''|UNKNOWN|-*|*[!A-Za-z0-9_-]*) echo "Invalid Linux owner for $remote_zomboid_dir: $data_owner" >&2; exit 1 ;; esac
 sudo -n id -u "$data_owner" >/dev/null
-if [ "$data_owner" = {managed_user} ]; then
+if [ "$remote_zomboid_dir" = "$managed_zomboid_dir" ]; then
   cache_dir={managed_cache_dir}
   sudo -n install -d -o pzmm -g pzmm {managed_data_dir} "$cache_dir" "$managed_zomboid_dir" "$managed_profile_dir"
 else
@@ -4412,7 +4922,7 @@ sudo -n -u "$data_owner" env HOME="$remote_data_dir" PZMM_DATA_DIR="$remote_data
         managed_profile_dir = linux_shell_quote(REMOTE_LINUX_SERVER_PROFILE_DIR),
         data_owner = linux_sudo_user_arg(data_owner_value),
         server_owner = linux_sudo_user_arg(server_owner_value),
-        ssh_user = linux_sudo_user_arg(&connection.username),
+        ssh_user = linux_shell_quote(&connection.username),
         managed_user = linux_shell_quote(REMOTE_LINUX_MANAGED_USER),
         managed_cache_dir =
             linux_shell_quote(&join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "cache")),
@@ -5294,22 +5804,26 @@ fn upload_steamcmd_to_remote_impl(
 steamcmd_dir={steamcmd_dir}
 steamcmd_path="$steamcmd_dir/steamcmd.sh"
 temp_archive=/tmp/pzmm-steamcmd-linux.tar.gz
+managed_user={managed_user}
+managed_data_dir={managed_data_dir}
 
-sudo -n install -d -o pzmm -g pzmm "$steamcmd_dir"
+sudo -n install -d -o "$managed_user" -g "$managed_user" "$steamcmd_dir" "$managed_data_dir"
 sudo -n apt-get update
 sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y lib32gcc-s1 ca-certificates curl tar gzip
 
 if [ ! -x "$steamcmd_path" ]; then
   curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz -o "$temp_archive"
-  sudo -n -u pzmm tar -xzf "$temp_archive" -C "$steamcmd_dir"
+  sudo -n -u "$managed_user" tar -xzf "$temp_archive" -C "$steamcmd_dir"
   sudo -n chmod 0755 "$steamcmd_path"
 fi
 
-sudo -n chown -R pzmm:pzmm "$steamcmd_dir"
-sudo -n -u pzmm env HOME=/var/lib/pzmm PZMM_DATA_DIR=/var/lib/pzmm "$steamcmd_path" +quit >/dev/null
+sudo -n chown -R "${managed_user}:${managed_user}" "$steamcmd_dir"
+sudo -n -u "$managed_user" env HOME="$managed_data_dir" PZMM_DATA_DIR="$managed_data_dir" "$steamcmd_path" +quit >/dev/null
 printf 'PZMM_STEAMCMD_PATH=%s\n' "$steamcmd_path"
 "#,
         steamcmd_dir = linux_shell_quote(&remote_directory),
+        managed_user = linux_shell_quote(REMOTE_LINUX_MANAGED_USER),
+        managed_data_dir = linux_shell_quote(REMOTE_LINUX_DATA_DIR),
     );
     let result = run_ssh_streaming(app, &connection, &script, "steamcmd")?;
     let steamcmd_executable_path = result
@@ -5420,6 +5934,8 @@ fn install_zomboid_server_on_remote_impl(
         r#"set -e
 steamcmd={steamcmd}
 install_dir={install_dir}
+managed_user={managed_user}
+managed_data_dir={managed_data_dir}
 if [ ! -x "$steamcmd" ] && ! command -v "$steamcmd" >/dev/null 2>&1; then
   echo "SteamCMD not found: $steamcmd" >&2
   exit 1
@@ -5432,9 +5948,9 @@ if [ -f "$install_dir/start-server.sh" ]; then
   exit 0
 fi
 
-sudo -n install -d -o pzmm -g pzmm "$install_dir"
+sudo -n install -d -o "$managed_user" -g "$managed_user" "$install_dir" "$managed_data_dir"
 echo "PZMM_STEAMCMD_APP_UPDATE={branch_label}"
-sudo -n -u pzmm env HOME=/var/lib/pzmm PZMM_DATA_DIR=/var/lib/pzmm "$steamcmd" +force_install_dir "$install_dir" +login anonymous +app_update 380870 {branch_args} validate +quit
+sudo -n -u "$managed_user" env HOME="$managed_data_dir" PZMM_DATA_DIR="$managed_data_dir" "$steamcmd" +force_install_dir "$install_dir" +login anonymous +app_update 380870 {branch_args} validate +quit
 if [ ! -f "$install_dir/start-server.sh" ]; then
   echo "Linux launcher not found after install: $install_dir/start-server.sh" >&2
   exit 1
@@ -5444,6 +5960,8 @@ printf 'PZMM_SERVER_PATH=%s\n' "$install_dir/start-server.sh"
 "#,
         steamcmd = linux_shell_quote(&steamcmd_path),
         install_dir = linux_shell_quote(&install_directory),
+        managed_user = linux_shell_quote(REMOTE_LINUX_MANAGED_USER),
+        managed_data_dir = linux_shell_quote(REMOTE_LINUX_DATA_DIR),
         branch_args = steamcmd_branch_args,
     );
     let install_message = format!(
@@ -5467,6 +5985,11 @@ printf 'PZMM_SERVER_PATH=%s\n' "$install_dir/start-server.sh"
         let connection_for_helper = connection.clone();
         let existing_config = get_remote_workspace_config_for_connection_impl(&connection)?
             .unwrap_or_else(default_remote_workspace_config);
+        let server_owner = detect_remote_path_owner(&connection, &server_executable_path)
+            .unwrap_or_else(|_| REMOTE_LINUX_MANAGED_USER.to_string());
+        let managed_zomboid_dir = join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "Zomboid");
+        let data_owner = detect_remote_path_owner(&connection, &managed_zomboid_dir)
+            .unwrap_or_else(|_| REMOTE_LINUX_MANAGED_USER.to_string());
         write_remote_workspace_config(&RemoteWorkspaceConfig {
             name: connection.name,
             host: connection.host,
@@ -5474,13 +5997,13 @@ printf 'PZMM_SERVER_PATH=%s\n' "$install_dir/start-server.sh"
             username: connection.username,
             auth_method: connection.auth_method,
             ssh_key_path: connection.ssh_key_path,
-            server_path: connection.server_path,
+            server_path: REMOTE_LINUX_SERVER_PROFILE_DIR.to_string(),
             remote_steamcmd_dir: existing_config.remote_steamcmd_dir,
             remote_steamcmd_path: steamcmd_path,
             remote_zomboid_server_dir: install_directory,
             remote_zomboid_server_path: server_executable_path,
-            remote_zomboid_server_owner: REMOTE_LINUX_MANAGED_USER.to_string(),
-            remote_zomboid_data_owner: REMOTE_LINUX_MANAGED_USER.to_string(),
+            remote_zomboid_server_owner: server_owner,
+            remote_zomboid_data_owner: data_owner,
             remote_client_ram: existing_config.remote_client_ram,
             remote_server_ram: existing_config.remote_server_ram,
             remote_setup_completed_step: existing_config.remote_setup_completed_step.max(3),
@@ -5913,7 +6436,9 @@ mod tests {
 
         assert!(script.contains("ProjectZomboid64.json"));
         assert!(script.contains("ProjectZomboid32.json"));
-        assert!(script.contains("sudo -n -u 'steam'"));
+        assert!(script.contains("server_owner='steam'"));
+        assert!(script.contains("detected_owner=$(sudo -n stat -c '%U' \"$json_path\")"));
+        assert!(script.contains("sudo -n -u \"$server_owner\""));
         assert!(script.contains("-Xms\" + ram + \"m"));
         assert!(script.contains("-Xmx\" + ram + \"m"));
         assert!(!script.contains("path.write_text(text)"));
@@ -5936,11 +6461,48 @@ mod tests {
     }
 
     #[test]
+    fn remote_steam_workshop_candidates_include_steamcmd_home_library() {
+        let connection = RemoteServerConnectionRequest {
+            name: "test".to_string(),
+            host: "example.com".to_string(),
+            port: "22".to_string(),
+            username: "ubuntu".to_string(),
+            auth_method: "key".to_string(),
+            password: String::new(),
+            ssh_key_path: String::new(),
+            server_path: String::new(),
+        };
+        let paths = remote_steam_workshop_dir_candidates(&connection)
+            .into_iter()
+            .map(|(_, path, _)| path)
+            .collect::<Vec<_>>();
+
+        assert!(paths.contains(&remote_steamcmd_home_workshop_dir(&connection)));
+        assert!(paths.contains(&remote_default_steam_workshop_dir(&connection)));
+    }
+
+    #[test]
     fn remote_workspace_owner_defaults_to_managed_user() {
         assert_eq!(
             remote_workspace_owner_or_default(""),
             REMOTE_LINUX_MANAGED_USER
         );
+    }
+
+    #[test]
+    fn remote_workspace_owner_strips_shell_quotes() {
+        assert_eq!(remote_workspace_owner_or_default("'pzalt'"), "pzalt");
+        assert_eq!(remote_workspace_owner_or_default("\"pzalt\""), "pzalt");
+        assert_eq!(remote_workspace_owner_or_default("$'pzalt'"), "pzalt");
+        assert_eq!(
+            remote_workspace_owner_or_default("$'\\''pzalt'\\''"),
+            "pzalt"
+        );
+        assert_eq!(
+            remote_workspace_owner_or_default("'$\\''pzalt'\\'''"),
+            "pzalt"
+        );
+        assert_eq!(linux_sudo_user_arg("'$\\''pzalt'\\'''"), "'pzalt'");
     }
 
     #[test]

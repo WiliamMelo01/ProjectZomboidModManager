@@ -4353,21 +4353,73 @@ fn remote_helper_sudo_command_prefix(
         .as_ref()
         .map(|config| config.remote_zomboid_data_owner.as_str())
         .unwrap_or(REMOTE_LINUX_MANAGED_USER);
+    let server_owner_value = saved_config
+        .as_ref()
+        .map(|config| config.remote_zomboid_server_owner.as_str())
+        .unwrap_or(REMOTE_LINUX_MANAGED_USER);
     format!(
-        "set -e; server_profile_dir={}; remote_data_dir={}; remote_zomboid_dir={}; managed_zomboid_dir={}; data_owner={}; if [ \"$remote_zomboid_dir\" != \"$managed_zomboid_dir\" ] && [ ! -e \"$remote_zomboid_dir\" ]; then echo \"Remote Zomboid data folder not found: $remote_zomboid_dir\" >&2; exit 1; fi; if {{ [ -z \"$data_owner\" ] || [ \"$data_owner\" = {} ]; }} && [ \"$remote_zomboid_dir\" != \"$managed_zomboid_dir\" ] && [ -e \"$remote_zomboid_dir\" ]; then data_owner=$(sudo -n stat -c '%U' \"$remote_zomboid_dir\"); fi; case \"$data_owner\" in ''|UNKNOWN|-*|*[!A-Za-z0-9_-]*) echo \"Invalid Linux owner for $remote_zomboid_dir: $data_owner\" >&2; exit 1 ;; esac; sudo -n id -u \"$data_owner\" >/dev/null; if [ \"$data_owner\" = {} ]; then cache_dir={}; sudo -n install -d -o pzmm -g pzmm {} \"$cache_dir\" \"$managed_zomboid_dir\" {}; else if [ ! -d \"$remote_zomboid_dir\" ]; then echo \"Remote Zomboid data folder not found: $remote_zomboid_dir\" >&2; exit 1; fi; cache_dir=\"$remote_zomboid_dir/.pzmm-cache\"; sudo -n -u \"$data_owner\" mkdir -p \"$cache_dir\" \"$server_profile_dir\"; fi; sudo -n -u \"$data_owner\" env HOME=\"$remote_data_dir\" PZMM_DATA_DIR=\"$remote_data_dir\" PZMM_CACHE_DIR=\"$cache_dir\" PZMM_SERVER_PROFILE_DIR=\"$server_profile_dir\" PZMM_SERVER_LAUNCH_PATH={} PZMM_EXTRA_STEAM_WORKSHOP_DIRS={} {}",
-        linux_shell_quote(&server_profile_dir),
-        linux_shell_quote(&remote_data_dir),
-        linux_shell_quote(&remote_zomboid_dir),
-        linux_shell_quote(&join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "Zomboid")),
-        linux_sudo_user_arg(data_owner_value),
-        linux_shell_quote(REMOTE_LINUX_MANAGED_USER),
-        linux_shell_quote(REMOTE_LINUX_MANAGED_USER),
-        linux_shell_quote(&join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "cache")),
-        linux_shell_quote(REMOTE_LINUX_DATA_DIR),
-        linux_shell_quote(REMOTE_LINUX_SERVER_PROFILE_DIR),
-        linux_shell_quote(REMOTE_LINUX_ZOMBOID_LAUNCHER),
-        linux_shell_quote(&remote_extra_steam_workshop_dirs(connection)),
-        linux_shell_quote(helper_path)
+        r#"set -e
+server_profile_dir={server_profile_dir}
+remote_data_dir={remote_data_dir}
+remote_zomboid_dir={remote_zomboid_dir}
+managed_zomboid_dir={managed_zomboid_dir}
+managed_profile_dir={managed_profile_dir}
+data_owner={data_owner}
+server_owner={server_owner}
+ssh_user={ssh_user}
+if [ "$remote_zomboid_dir" != "$managed_zomboid_dir" ] && [ ! -e "$remote_zomboid_dir" ]; then
+  for candidate_user in "$data_owner" "$server_owner" "$ssh_user"; do
+    case "$candidate_user" in ''|UNKNOWN|-*|*[!A-Za-z0-9_-]*|pzmm) continue ;; esac
+    candidate_home=$(getent passwd "$candidate_user" | cut -d: -f6 || true)
+    candidate_zomboid="$candidate_home/Zomboid"
+    if [ -n "$candidate_home" ] && [ -d "$candidate_zomboid/Server" ]; then
+      remote_zomboid_dir="$candidate_zomboid"
+      server_profile_dir="$candidate_zomboid/Server"
+      remote_data_dir="$candidate_home"
+      data_owner=$(sudo -n stat -c '%U' "$remote_zomboid_dir")
+      break
+    fi
+  done
+fi
+if [ "$remote_zomboid_dir" != "$managed_zomboid_dir" ] && [ ! -e "$remote_zomboid_dir" ]; then
+  found_profile=$(sudo -n find /home -mindepth 3 -maxdepth 3 -type d -path '*/Zomboid/Server' -print -quit 2>/dev/null || true)
+  if [ -n "$found_profile" ]; then
+    server_profile_dir="$found_profile"
+    remote_zomboid_dir=$(dirname "$server_profile_dir")
+    remote_data_dir=$(dirname "$remote_zomboid_dir")
+    data_owner=$(sudo -n stat -c '%U' "$remote_zomboid_dir")
+  fi
+fi
+if {{ [ -z "$data_owner" ] || [ "$data_owner" = {managed_user} ]; }} && [ "$remote_zomboid_dir" != "$managed_zomboid_dir" ] && [ -e "$remote_zomboid_dir" ]; then
+  data_owner=$(sudo -n stat -c '%U' "$remote_zomboid_dir")
+fi
+case "$data_owner" in ''|UNKNOWN|-*|*[!A-Za-z0-9_-]*) echo "Invalid Linux owner for $remote_zomboid_dir: $data_owner" >&2; exit 1 ;; esac
+sudo -n id -u "$data_owner" >/dev/null
+if [ "$data_owner" = {managed_user} ]; then
+  cache_dir={managed_cache_dir}
+  sudo -n install -d -o pzmm -g pzmm {managed_data_dir} "$cache_dir" "$managed_zomboid_dir" "$managed_profile_dir"
+else
+  if [ ! -d "$remote_zomboid_dir" ]; then echo "Remote Zomboid data folder not found: $remote_zomboid_dir" >&2; exit 1; fi
+  cache_dir="$remote_zomboid_dir/.pzmm-cache"
+  sudo -n -u "$data_owner" mkdir -p "$cache_dir" "$server_profile_dir"
+fi
+sudo -n -u "$data_owner" env HOME="$remote_data_dir" PZMM_DATA_DIR="$remote_data_dir" PZMM_CACHE_DIR="$cache_dir" PZMM_SERVER_PROFILE_DIR="$server_profile_dir" PZMM_SERVER_LAUNCH_PATH={launch_path} PZMM_EXTRA_STEAM_WORKSHOP_DIRS={extra_workshop_dirs} {helper_path}"#,
+        server_profile_dir = linux_shell_quote(&server_profile_dir),
+        remote_data_dir = linux_shell_quote(&remote_data_dir),
+        remote_zomboid_dir = linux_shell_quote(&remote_zomboid_dir),
+        managed_zomboid_dir =
+            linux_shell_quote(&join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "Zomboid")),
+        managed_profile_dir = linux_shell_quote(REMOTE_LINUX_SERVER_PROFILE_DIR),
+        data_owner = linux_sudo_user_arg(data_owner_value),
+        server_owner = linux_sudo_user_arg(server_owner_value),
+        ssh_user = linux_sudo_user_arg(&connection.username),
+        managed_user = linux_shell_quote(REMOTE_LINUX_MANAGED_USER),
+        managed_cache_dir =
+            linux_shell_quote(&join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "cache")),
+        managed_data_dir = linux_shell_quote(REMOTE_LINUX_DATA_DIR),
+        launch_path = linux_shell_quote(REMOTE_LINUX_ZOMBOID_LAUNCHER),
+        extra_workshop_dirs = linux_shell_quote(&remote_extra_steam_workshop_dirs(connection)),
+        helper_path = linux_shell_quote(helper_path),
     )
 }
 fn append_ssh_common_args(

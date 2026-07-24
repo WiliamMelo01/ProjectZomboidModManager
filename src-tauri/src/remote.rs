@@ -4367,12 +4367,12 @@ managed_profile_dir={managed_profile_dir}
 data_owner={data_owner}
 server_owner={server_owner}
 ssh_user={ssh_user}
-if [ "$remote_zomboid_dir" != "$managed_zomboid_dir" ] && [ ! -e "$remote_zomboid_dir" ]; then
+if [ "$remote_zomboid_dir" != "$managed_zomboid_dir" ] && ! sudo -n test -e "$remote_zomboid_dir"; then
   for candidate_user in "$data_owner" "$server_owner" "$ssh_user"; do
     case "$candidate_user" in ''|UNKNOWN|-*|*[!A-Za-z0-9_-]*|pzmm) continue ;; esac
     candidate_home=$(getent passwd "$candidate_user" | cut -d: -f6 || true)
     candidate_zomboid="$candidate_home/Zomboid"
-    if [ -n "$candidate_home" ] && [ -d "$candidate_zomboid/Server" ]; then
+    if [ -n "$candidate_home" ] && sudo -n test -d "$candidate_zomboid/Server"; then
       remote_zomboid_dir="$candidate_zomboid"
       server_profile_dir="$candidate_zomboid/Server"
       remote_data_dir="$candidate_home"
@@ -4381,7 +4381,7 @@ if [ "$remote_zomboid_dir" != "$managed_zomboid_dir" ] && [ ! -e "$remote_zomboi
     fi
   done
 fi
-if [ "$remote_zomboid_dir" != "$managed_zomboid_dir" ] && [ ! -e "$remote_zomboid_dir" ]; then
+if [ "$remote_zomboid_dir" != "$managed_zomboid_dir" ] && ! sudo -n test -e "$remote_zomboid_dir"; then
   found_profile=$(sudo -n find /home -mindepth 3 -maxdepth 3 -type d -path '*/Zomboid/Server' -print -quit 2>/dev/null || true)
   if [ -n "$found_profile" ]; then
     server_profile_dir="$found_profile"
@@ -4390,7 +4390,7 @@ if [ "$remote_zomboid_dir" != "$managed_zomboid_dir" ] && [ ! -e "$remote_zomboi
     data_owner=$(sudo -n stat -c '%U' "$remote_zomboid_dir")
   fi
 fi
-if {{ [ -z "$data_owner" ] || [ "$data_owner" = {managed_user} ]; }} && [ "$remote_zomboid_dir" != "$managed_zomboid_dir" ] && [ -e "$remote_zomboid_dir" ]; then
+if {{ [ -z "$data_owner" ] || [ "$data_owner" = {managed_user} ]; }} && [ "$remote_zomboid_dir" != "$managed_zomboid_dir" ] && sudo -n test -e "$remote_zomboid_dir"; then
   data_owner=$(sudo -n stat -c '%U' "$remote_zomboid_dir")
 fi
 case "$data_owner" in ''|UNKNOWN|-*|*[!A-Za-z0-9_-]*) echo "Invalid Linux owner for $remote_zomboid_dir: $data_owner" >&2; exit 1 ;; esac
@@ -4399,7 +4399,7 @@ if [ "$data_owner" = {managed_user} ]; then
   cache_dir={managed_cache_dir}
   sudo -n install -d -o pzmm -g pzmm {managed_data_dir} "$cache_dir" "$managed_zomboid_dir" "$managed_profile_dir"
 else
-  if [ ! -d "$remote_zomboid_dir" ]; then echo "Remote Zomboid data folder not found: $remote_zomboid_dir" >&2; exit 1; fi
+  if ! sudo -n test -d "$remote_zomboid_dir"; then echo "Remote Zomboid data folder not found: $remote_zomboid_dir" >&2; exit 1; fi
   cache_dir="$remote_zomboid_dir/.pzmm-cache"
   sudo -n -u "$data_owner" mkdir -p "$cache_dir" "$server_profile_dir"
 fi

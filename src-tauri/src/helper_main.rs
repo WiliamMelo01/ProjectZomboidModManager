@@ -1941,6 +1941,10 @@ where
 }
 
 fn app_config_dir() -> Result<PathBuf, String> {
+    if let Some(cache_dir) = env::var_os("PZMM_CACHE_DIR") {
+        return Ok(PathBuf::from(cache_dir));
+    }
+
     if let Some(data_dir) = env::var_os("PZMM_DATA_DIR") {
         return Ok(PathBuf::from(data_dir).join("cache"));
     }

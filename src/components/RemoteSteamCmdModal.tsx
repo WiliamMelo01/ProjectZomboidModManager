@@ -715,6 +715,8 @@ export function RemoteSteamCmdModal({
       remoteSteamcmdPath: resolvedSteamcmdPath,
       remoteZomboidServerDir: derivedZomboidServerDir,
       remoteZomboidServerPath: resolvedZomboidServerPath,
+      remoteZomboidServerOwner: "pzmm",
+      remoteZomboidDataOwner: "pzmm",
       remoteClientRam: "4.00",
       remoteServerRam: "4.00",
       remoteSetupCompletedStep: 0,
@@ -1237,6 +1239,14 @@ export function RemoteSteamCmdModal({
                   <SavedPath
                     label={t("remoteSetup.step3DataDirLabel")}
                     value={resolvedZomboidDataDir}
+                  />
+                  <SavedPath
+                    label={t("remoteSetup.step3ServerOwnerLabel")}
+                    value={config?.remoteZomboidServerOwner || "pzmm"}
+                  />
+                  <SavedPath
+                    label={t("remoteSetup.step3DataOwnerLabel")}
+                    value={config?.remoteZomboidDataOwner || "pzmm"}
                   />
                   <SavedPath
                     label={t("remoteSetup.step4ClientRamLabel")}

@@ -18,6 +18,8 @@ export type RemoteWorkspaceConfig = RemoteConnectionDraft & {
   remoteSteamcmdPath: string;
   remoteZomboidServerDir: string;
   remoteZomboidServerPath: string;
+  remoteZomboidServerOwner: string;
+  remoteZomboidDataOwner: string;
   remoteClientRam: string;
   remoteServerRam: string;
   remoteSetupCompletedStep: number;

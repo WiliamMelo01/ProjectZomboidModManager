@@ -268,6 +268,8 @@ pub(crate) struct RemoteWorkspaceConfig {
     pub(crate) remote_steamcmd_path: String,
     pub(crate) remote_zomboid_server_dir: String,
     pub(crate) remote_zomboid_server_path: String,
+    pub(crate) remote_zomboid_server_owner: String,
+    pub(crate) remote_zomboid_data_owner: String,
     pub(crate) remote_client_ram: String,
     pub(crate) remote_server_ram: String,
     pub(crate) remote_setup_completed_step: u8,

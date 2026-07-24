@@ -135,6 +135,8 @@ function defaultRemoteConfig(
       cleanLegacyPath(existing?.remoteZomboidServerDir) ||
       `${remoteAppDataBase(connection.username)}/zomboid-server`,
     remoteZomboidServerPath: cleanLegacyPath(existing?.remoteZomboidServerPath),
+    remoteZomboidServerOwner: existing?.remoteZomboidServerOwner || "pzmm",
+    remoteZomboidDataOwner: existing?.remoteZomboidDataOwner || "pzmm",
     remoteClientRam: existing?.remoteClientRam || "4.00",
     remoteServerRam: existing?.remoteServerRam || "4.00",
     remoteSetupCompletedStep: existing?.remoteSetupCompletedStep ?? 0,

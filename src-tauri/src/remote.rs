@@ -45,6 +45,7 @@ const REMOTE_LINUX_SERVER_PROFILE_DIR: &str = "/var/lib/pzmm/Zomboid/Server";
 const REMOTE_LINUX_STEAMCMD_DIR: &str = "/var/lib/pzmm/steamcmd";
 const REMOTE_LINUX_ZOMBOID_SERVER_DIR: &str = "/var/lib/pzmm/zomboid-server";
 const REMOTE_LINUX_ZOMBOID_LAUNCHER: &str = "/var/lib/pzmm/zomboid-server/start-server.sh";
+const REMOTE_LINUX_MANAGED_USER: &str = "pzmm";
 const HELPER_RELEASE_REPOSITORY: &str = "WiliamMelo01/ProjectZomboidModManager";
 static VERIFIED_REMOTE_HELPERS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
@@ -651,8 +652,8 @@ fn deploy_local_zomboid_server_to_remote_impl(
         return Err("Server ID cannot be empty.".to_string());
     }
 
-    let remote_zomboid_dir = remote_unix_parent_path(&connection.server_path)
-        .unwrap_or_else(|| format!("{}/Zomboid", REMOTE_LINUX_DATA_DIR));
+    let (remote_zomboid_dir, remote_data_owner) =
+        remote_zomboid_data_dir_and_owner_for_connection(connection)?;
 
     // 1. Locate local configuration files
     let _ = app.emit(
@@ -983,13 +984,8 @@ PY
             }
         })
         .collect::<String>();
-    let home_dir = if connection.username.trim() == "root" {
-        "/root".to_string()
-    } else {
-        format!("/home/{}", connection.username.trim())
-    };
-    let remote_server_zip_path = format!("{}/pzmm-{safe_deploy_id}-server.zip", home_dir);
-    let remote_mods_zip_path = format!("{}/pzmm-{safe_deploy_id}-mods.zip", home_dir);
+    let remote_server_zip_path = format!("/tmp/pzmm-{safe_deploy_id}-server.zip");
+    let remote_mods_zip_path = format!("/tmp/pzmm-{safe_deploy_id}-mods.zip");
 
     let upload_err_handler = |e| {
         let _ = fs::remove_dir_all(&temp_dir);
@@ -1006,7 +1002,8 @@ PY
         },
     );
     let mkdir_command = format!(
-        "set -e; sudo -n install -d -o pzmm -g pzmm {}; sudo -n install -d -o pzmm -g pzmm {}",
+        "set -e; sudo -n -u {} mkdir -p {} {}",
+        linux_sudo_user_arg(&remote_data_owner),
         linux_shell_quote(&remote_zomboid_dir),
         linux_shell_quote(&join_remote_unix_path(&remote_zomboid_dir, "mods")),
     );
@@ -1062,8 +1059,9 @@ extract_archive() {{
     return 0
   fi
   echo "PZMM_STEP|Extracting $label archive directly to $target_path"
-  sudo -n install -d -o pzmm -g pzmm "$target_path"
-  sudo -n -u pzmm env PZMM_ZIP="$zip_path" PZMM_TARGET="$target_path" PZMM_OVERWRITE="$overwrite" python3 - <<'PY'
+  chmod 0644 "$zip_path" || true
+  sudo -n -u {data_owner} mkdir -p "$target_path"
+  sudo -n -u {data_owner} env PZMM_ZIP="$zip_path" PZMM_TARGET="$target_path" PZMM_OVERWRITE="$overwrite" python3 - <<'PY'
 import os, pathlib, zipfile
 zip_path = pathlib.Path(os.environ["PZMM_ZIP"])
 target = pathlib.Path(os.environ["PZMM_TARGET"]).resolve()
@@ -1085,7 +1083,6 @@ with zipfile.ZipFile(zip_path) as archive:
         with archive.open(item) as source, open(dest, "wb") as output:
             output.write(source.read())
 PY
-  sudo -n chown -R pzmm:pzmm "$target_path"
 }}
 extract_archive "$server_zip" "$zomboid_dir" 'server data'
 extract_archive "$mods_zip" "$mods_target" 'mods'
@@ -1097,6 +1094,7 @@ rm -f "$server_zip" "$mods_zip"
         server_zip = linux_shell_quote(&remote_server_zip_path),
         mods_zip = linux_shell_quote(&remote_mods_zip_path),
         overwrite = overwrite_existing,
+        data_owner = linux_sudo_user_arg(&remote_data_owner),
     );
     let remote_command = remote_script.clone();
 
@@ -1551,8 +1549,8 @@ pub(crate) async fn upload_local_mod_to_remote(
         upload_bundle_to_remote(connection, &local_zip_path, &remote_zip_path)?;
 
         // 5. Unzip on remote
-        let remote_zomboid_dir = remote_unix_parent_path(&connection.server_path)
-            .unwrap_or_else(|| format!("{}/Zomboid", REMOTE_LINUX_DATA_DIR));
+        let (remote_zomboid_dir, remote_data_owner) =
+            remote_zomboid_data_dir_and_owner_for_connection(connection)?;
         let mods_target = format!("{}/mods", remote_zomboid_dir);
 
         let remote_script = format!(
@@ -1560,8 +1558,8 @@ pub(crate) async fn upload_local_mod_to_remote(
 zip_path={zip_path}
 target_path={target_path}
 chmod 644 "$zip_path"
-sudo -n install -d -o pzmm -g pzmm "$target_path"
-sudo -n -u pzmm env PZMM_ZIP="$zip_path" PZMM_TARGET="$target_path" PZMM_OVERWRITE="true" python3 - <<'PY'
+sudo -n -u {data_owner} mkdir -p "$target_path"
+sudo -n -u {data_owner} env PZMM_ZIP="$zip_path" PZMM_TARGET="$target_path" PZMM_OVERWRITE="true" python3 - <<'PY'
 import os, pathlib, zipfile
 zip_path = pathlib.Path(os.environ["PZMM_ZIP"])
 target = pathlib.Path(os.environ["PZMM_TARGET"]).resolve()
@@ -1580,11 +1578,11 @@ with zipfile.ZipFile(zip_path) as archive:
         with archive.open(item) as source, open(dest, "wb") as output:
             output.write(source.read())
 PY
-sudo -n chown -R pzmm:pzmm "$target_path"
 rm -f "$zip_path"
 "#,
             zip_path = linux_shell_quote(&remote_zip_path),
             target_path = linux_shell_quote(&mods_target),
+            data_owner = linux_sudo_user_arg(&remote_data_owner),
         );
 
         let _ = run_ssh_capture(connection, &remote_script)?;
@@ -1979,6 +1977,10 @@ fn read_remote_workspace_config_at_path(
         remote_steamcmd_path,
         remote_zomboid_server_dir,
         remote_zomboid_server_path,
+        remote_zomboid_server_owner: read_ini_value(&content, "remote_zomboid_server_owner")
+            .unwrap_or_else(|| REMOTE_LINUX_MANAGED_USER.to_string()),
+        remote_zomboid_data_owner: read_ini_value(&content, "remote_zomboid_data_owner")
+            .unwrap_or_else(|| REMOTE_LINUX_MANAGED_USER.to_string()),
         remote_client_ram: read_ini_value(&content, "remote_client_ram")
             .or_else(|| read_ini_value(&content, "client_ram"))
             .unwrap_or_else(|| "4.00".to_string()),
@@ -2006,6 +2008,10 @@ fn save_remote_zomboid_server_path_impl(
     )?;
     let resolved_dir = remote_unix_parent_path(&resolved_path)
         .unwrap_or_else(|| request.server_directory.trim().to_string());
+    let remote_zomboid_data_dir = remote_unix_parent_path(&server_profile_path)
+        .unwrap_or_else(|| join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "Zomboid"));
+    let server_owner = detect_remote_path_owner(&request.connection, &resolved_path)?;
+    let data_owner = detect_remote_path_owner(&request.connection, &remote_zomboid_data_dir)?;
 
     config.name = request.connection.name;
     config.host = request.connection.host;
@@ -2016,6 +2022,8 @@ fn save_remote_zomboid_server_path_impl(
     config.server_path = server_profile_path;
     config.remote_zomboid_server_dir = resolved_dir;
     config.remote_zomboid_server_path = resolved_path;
+    config.remote_zomboid_server_owner = server_owner;
+    config.remote_zomboid_data_owner = data_owner;
     config.remote_setup_completed_step = config.remote_setup_completed_step.max(3);
     write_remote_workspace_config(&config)?;
     Ok(config)
@@ -2089,7 +2097,13 @@ fn save_remote_app_settings_impl(request: RemoteAppSettingsRequest) -> Result<Ap
         );
     }
 
-    apply_remote_performance_settings(&request.connection, &server_path, &server_ram)?;
+    let server_owner = remote_workspace_owner_or_default(&config.remote_zomboid_server_owner);
+    apply_remote_performance_settings(
+        &request.connection,
+        &server_path,
+        &server_ram,
+        server_owner,
+    )?;
 
     config.name = request.connection.name;
     config.host = request.connection.host;
@@ -2407,6 +2421,14 @@ fn write_remote_workspace_config(config: &RemoteWorkspaceConfig) -> Result<(), S
             "remote_zomboid_server_path",
             config.remote_zomboid_server_path.as_str(),
         ),
+        (
+            "remote_zomboid_server_owner",
+            config.remote_zomboid_server_owner.as_str(),
+        ),
+        (
+            "remote_zomboid_data_owner",
+            config.remote_zomboid_data_owner.as_str(),
+        ),
         ("remote_client_ram", config.remote_client_ram.as_str()),
         ("remote_server_ram", config.remote_server_ram.as_str()),
     ] {
@@ -2576,9 +2598,10 @@ fn apply_remote_performance_settings(
     connection: &RemoteServerConnectionRequest,
     server_path: &str,
     server_ram: &str,
+    server_owner: &str,
 ) -> Result<(), String> {
     let server_mb = remote_ram_gb_to_mb(server_ram)?;
-    let script = build_remote_performance_settings_script(server_path, server_mb);
+    let script = build_remote_performance_settings_script(server_path, server_mb, server_owner);
     let result = run_ssh_capture(connection, &script)?;
 
     if result.success {
@@ -2592,18 +2615,23 @@ fn apply_remote_performance_settings(
     }
 }
 
-fn build_remote_performance_settings_script(server_path: &str, server_mb: u32) -> String {
+fn build_remote_performance_settings_script(
+    server_path: &str,
+    server_mb: u32,
+    server_owner: &str,
+) -> String {
     let server_dirs = remote_zomboid_server_config_dirs(server_path);
     let quoted_dirs = server_dirs
         .iter()
         .map(|path| linux_shell_quote(path))
         .collect::<Vec<_>>()
         .join(" ");
+    let server_owner = linux_sudo_user_arg(server_owner);
 
     format!(
         r#"set -e
 ram={}
-sudo -n -u pzmm env HOME=/var/lib/pzmm PZMM_DATA_DIR=/var/lib/pzmm python3 - "$ram" {} <<'PY'
+sudo -n -u {} env HOME=/var/lib/pzmm PZMM_DATA_DIR=/var/lib/pzmm python3 - "$ram" {} <<'PY'
 import json, pathlib, re, sys
 ram = sys.argv[1]
 server_dirs = [pathlib.Path(value) for value in sys.argv[2:]]
@@ -2656,7 +2684,7 @@ if not updated:
 print("PZMM_REMOTE_PERFORMANCE_UPDATED=" + ",".join(updated))
 PY
 "#,
-        server_mb, quoted_dirs,
+        server_mb, server_owner, quoted_dirs,
     )
 }
 
@@ -2710,6 +2738,91 @@ fn resolve_remote_server_profile_path(
     }
 
     Ok(profile_path)
+}
+
+fn detect_remote_path_owner(
+    connection: &RemoteServerConnectionRequest,
+    remote_path: &str,
+) -> Result<String, String> {
+    let script = format!(
+        "set -e; path={}; owner=$(sudo -n stat -c '%U' \"$path\"); if [ -z \"$owner\" ] || [ \"$owner\" = UNKNOWN ]; then echo \"Could not resolve Linux owner for $path.\" >&2; exit 1; fi; sudo -n id -u \"$owner\" >/dev/null; printf 'PZMM_PATH_OWNER=%s\\n' \"$owner\"",
+        linux_shell_quote(remote_path),
+    );
+    let result = run_ssh_capture(connection, &script)?;
+
+    if !result.success {
+        return Err(join_command_output(&[
+            "Could not detect the Linux owner for the selected remote path.",
+            result.stdout.as_str(),
+            result.stderr.as_str(),
+        ]));
+    }
+
+    let owner = result
+        .stdout
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("PZMM_PATH_OWNER="))
+        .map(str::trim)
+        .filter(|owner| !owner.is_empty())
+        .ok_or_else(|| {
+            join_command_output(&[
+                "Could not parse the Linux owner for the selected remote path.",
+                result.stdout.as_str(),
+                result.stderr.as_str(),
+            ])
+        })?;
+
+    validate_linux_username(owner)?;
+    Ok(owner.to_string())
+}
+
+fn validate_linux_username(username: &str) -> Result<(), String> {
+    let username = username.trim();
+
+    if username.is_empty()
+        || username == "UNKNOWN"
+        || username.starts_with('-')
+        || !username
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+    {
+        return Err(format!(
+            "Invalid Linux owner '{username}'. Configure the folder with a valid Linux user."
+        ));
+    }
+
+    Ok(())
+}
+
+fn remote_workspace_owner_or_default(owner: &str) -> &str {
+    let owner = owner.trim();
+
+    if owner.is_empty() {
+        REMOTE_LINUX_MANAGED_USER
+    } else {
+        owner
+    }
+}
+
+fn linux_sudo_user_arg(owner: &str) -> String {
+    linux_shell_quote(remote_workspace_owner_or_default(owner))
+}
+
+fn remote_zomboid_data_dir_and_owner_for_connection(
+    connection: &RemoteServerConnectionRequest,
+) -> Result<(String, String), String> {
+    let config = get_remote_workspace_config_for_connection_impl(connection)?
+        .unwrap_or_else(default_remote_workspace_config);
+    let server_profile_path = if config.server_path.trim().is_empty() {
+        remote_server_profile_path_or_default(&connection.server_path)
+    } else {
+        remote_server_profile_path_or_default(&config.server_path)
+    };
+    let remote_zomboid_dir = remote_unix_parent_path(&server_profile_path)
+        .unwrap_or_else(|| join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "Zomboid"));
+    let owner = remote_workspace_owner_or_default(&config.remote_zomboid_data_owner).to_string();
+    validate_linux_username(&owner)?;
+    Ok((remote_zomboid_dir, owner))
 }
 
 fn remote_server_profile_path_or_default(path: &str) -> String {
@@ -4225,24 +4338,38 @@ fn remote_helper_sudo_command_prefix(
     connection: &RemoteServerConnectionRequest,
     helper_path: &str,
 ) -> String {
-    let server_profile_dir = remote_server_profile_path_or_default(&connection.server_path);
+    let saved_config = get_remote_workspace_config_for_connection_impl(connection)
+        .ok()
+        .flatten();
+    let server_profile_source = saved_config
+        .as_ref()
+        .map(|config| config.server_path.as_str())
+        .unwrap_or(connection.server_path.as_str());
+    let server_profile_dir = remote_server_profile_path_or_default(server_profile_source);
     let remote_data_dir = remote_data_dir_from_server_profile_path(&server_profile_dir);
     let remote_zomboid_dir = remote_unix_parent_path(&server_profile_dir)
         .unwrap_or_else(|| join_remote_unix_path(&remote_data_dir, "Zomboid"));
+    let data_owner_value = saved_config
+        .as_ref()
+        .map(|config| config.remote_zomboid_data_owner.as_str())
+        .unwrap_or(REMOTE_LINUX_MANAGED_USER);
+    let data_owner = linux_sudo_user_arg(data_owner_value);
+    let cache_dir =
+        if remote_workspace_owner_or_default(data_owner_value) == REMOTE_LINUX_MANAGED_USER {
+            join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "cache")
+        } else {
+            join_remote_unix_path(&remote_zomboid_dir, ".pzmm-cache")
+        };
     format!(
-        "set -e; sudo -n install -d -o pzmm -g pzmm {} {} {} {}; sudo -n chown pzmm:pzmm {} {} {} {}; sudo -n chown -R pzmm:pzmm {} {}; sudo -n -u pzmm env HOME={} PZMM_DATA_DIR={} PZMM_SERVER_PROFILE_DIR={} PZMM_SERVER_LAUNCH_PATH={} PZMM_EXTRA_STEAM_WORKSHOP_DIRS={} {}",
-        linux_shell_quote(&remote_data_dir),
-        linux_shell_quote(&join_remote_unix_path(&remote_data_dir, "cache")),
+        "set -e; sudo -n -u {} mkdir -p {} {} {}; sudo -n -u {} env HOME={} PZMM_DATA_DIR={} PZMM_CACHE_DIR={} PZMM_SERVER_PROFILE_DIR={} PZMM_SERVER_LAUNCH_PATH={} PZMM_EXTRA_STEAM_WORKSHOP_DIRS={} {}",
+        data_owner,
+        linux_shell_quote(&cache_dir),
         linux_shell_quote(&remote_zomboid_dir),
         linux_shell_quote(&server_profile_dir),
-        linux_shell_quote(&remote_data_dir),
-        linux_shell_quote(&join_remote_unix_path(&remote_data_dir, "cache")),
-        linux_shell_quote(&remote_zomboid_dir),
-        linux_shell_quote(&server_profile_dir),
-        linux_shell_quote(&server_profile_dir),
-        linux_shell_quote(&join_remote_unix_path(&remote_data_dir, "cache")),
+        data_owner,
         linux_shell_quote(&remote_data_dir),
         linux_shell_quote(&remote_data_dir),
+        linux_shell_quote(&cache_dir),
         linux_shell_quote(&server_profile_dir),
         linux_shell_quote(REMOTE_LINUX_ZOMBOID_LAUNCHER),
         linux_shell_quote(&remote_extra_steam_workshop_dirs(connection)),
@@ -5070,6 +5197,8 @@ printf 'PZMM_STEAMCMD_PATH=%s
             remote_steamcmd_path: steamcmd_executable_path,
             remote_zomboid_server_dir: existing_config.remote_zomboid_server_dir,
             remote_zomboid_server_path: existing_config.remote_zomboid_server_path,
+            remote_zomboid_server_owner: existing_config.remote_zomboid_server_owner,
+            remote_zomboid_data_owner: existing_config.remote_zomboid_data_owner,
             remote_client_ram: existing_config.remote_client_ram,
             remote_server_ram: existing_config.remote_server_ram,
             remote_setup_completed_step: existing_config.remote_setup_completed_step.max(2),
@@ -5170,6 +5299,8 @@ printf 'PZMM_STEAMCMD_PATH=%s\n' "$steamcmd_path"
             remote_steamcmd_path: steamcmd_executable_path,
             remote_zomboid_server_dir: existing_config.remote_zomboid_server_dir,
             remote_zomboid_server_path: existing_config.remote_zomboid_server_path,
+            remote_zomboid_server_owner: existing_config.remote_zomboid_server_owner,
+            remote_zomboid_data_owner: existing_config.remote_zomboid_data_owner,
             remote_client_ram: existing_config.remote_client_ram,
             remote_server_ram: existing_config.remote_server_ram,
             remote_setup_completed_step: existing_config.remote_setup_completed_step.max(2),
@@ -5302,6 +5433,8 @@ printf 'PZMM_SERVER_PATH=%s\n' "$install_dir/start-server.sh"
             remote_steamcmd_path: steamcmd_path,
             remote_zomboid_server_dir: install_directory,
             remote_zomboid_server_path: server_executable_path,
+            remote_zomboid_server_owner: REMOTE_LINUX_MANAGED_USER.to_string(),
+            remote_zomboid_data_owner: REMOTE_LINUX_MANAGED_USER.to_string(),
             remote_client_ram: existing_config.remote_client_ram,
             remote_server_ram: existing_config.remote_server_ram,
             remote_setup_completed_step: existing_config.remote_setup_completed_step.max(3),
@@ -5392,6 +5525,8 @@ fn default_remote_workspace_config() -> RemoteWorkspaceConfig {
         remote_steamcmd_path: String::new(),
         remote_zomboid_server_dir: default_remote_zomboid_server_dir(),
         remote_zomboid_server_path: String::new(),
+        remote_zomboid_server_owner: REMOTE_LINUX_MANAGED_USER.to_string(),
+        remote_zomboid_data_owner: REMOTE_LINUX_MANAGED_USER.to_string(),
         remote_client_ram: "4.00".to_string(),
         remote_server_ram: "4.00".to_string(),
         remote_setup_completed_step: 0,
@@ -5724,11 +5859,15 @@ mod tests {
 
     #[test]
     fn remote_ram_script_updates_json_configs_without_writing_launcher_script() {
-        let script =
-            build_remote_performance_settings_script("/opt/pzserver/start-server.sh", 8192);
+        let script = build_remote_performance_settings_script(
+            "/opt/pzserver/start-server.sh",
+            8192,
+            "steam",
+        );
 
         assert!(script.contains("ProjectZomboid64.json"));
         assert!(script.contains("ProjectZomboid32.json"));
+        assert!(script.contains("sudo -n -u 'steam'"));
         assert!(script.contains("-Xms\" + ram + \"m"));
         assert!(script.contains("-Xmx\" + ram + \"m"));
         assert!(!script.contains("path.write_text(text)"));
@@ -5748,5 +5887,19 @@ mod tests {
             remote_data_dir_from_server_profile_path("/srv/pz/Zomboid/Server"),
             "/srv/pz"
         );
+    }
+
+    #[test]
+    fn remote_workspace_owner_defaults_to_managed_user() {
+        assert_eq!(
+            remote_workspace_owner_or_default(""),
+            REMOTE_LINUX_MANAGED_USER
+        );
+    }
+
+    #[test]
+    fn linux_username_validation_rejects_unknown_owner() {
+        assert!(validate_linux_username("UNKNOWN").is_err());
+        assert!(validate_linux_username("steam").is_ok());
     }
 }

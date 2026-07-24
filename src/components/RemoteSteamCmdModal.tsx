@@ -91,6 +91,10 @@ function remoteZomboidServerDir(username: string) {
   return `${remoteAppDataBase(username)}/zomboid-server`;
 }
 
+function remoteZomboidDataDir(username: string) {
+  return `${remoteAppDataBase(username)}/Zomboid`;
+}
+
 function joinRemotePath(directory: string, fileName: string) {
   return `${directory.replace(/[\\/]+$/, "")}/${fileName}`;
 }
@@ -126,6 +130,20 @@ function cleanRemoteLinuxPath(path?: string) {
   return value && !isLegacyPzManagerPath(value) && isAbsoluteLinuxPath(value)
     ? value
     : "";
+}
+
+function remoteZomboidDataDirFromServerProfilePath(path?: string) {
+  const value = cleanRemoteLinuxPath(path);
+  if (!value) return "";
+
+  const normalized = value.replace(/[\\/]+$/, "");
+  return normalized.toLowerCase().endsWith("/server")
+    ? parentRemotePath(normalized)
+    : normalized;
+}
+
+function remoteServerProfilePathFromDataDir(path: string) {
+  return joinRemotePath(path, "Server");
 }
 function getRemoteSetupCompletedStep(config?: RemoteWorkspaceConfig | null) {
   let completedStep = Math.min(
@@ -171,6 +189,10 @@ export function RemoteSteamCmdModal({
     () => remoteZomboidServerDir(connection.username),
     [connection.username],
   );
+  const defaultZomboidDataDir = useMemo(
+    () => remoteZomboidDataDir(connection.username),
+    [connection.username],
+  );
   const [config, setConfig] = useState<RemoteWorkspaceConfig | null>(null);
   const [activeStep, setActiveStep] = useState(1);
   const [zomboidMode, setZomboidMode] = useState<ZomboidSetupMode>("download");
@@ -182,6 +204,7 @@ export function RemoteSteamCmdModal({
     defaultZomboidServerDir,
   );
   const [zomboidServerPath, setZomboidServerPath] = useState("");
+  const [zomboidDataDir, setZomboidDataDir] = useState(defaultZomboidDataDir);
   const [steamcmdStatus, setSteamcmdStatus] = useState<StepStatus>("idle");
   const [helperStatus, setHelperStatus] = useState<StepStatus>("idle");
   const [zomboidStatus, setZomboidStatus] = useState<StepStatus>("idle");
@@ -221,6 +244,10 @@ export function RemoteSteamCmdModal({
     steamcmdPath || remoteSteamcmdPath(managedSteamcmdDir);
   const resolvedZomboidServerPath =
     zomboidServerPath || joinRemotePath(zomboidServerDir, "start-server.sh");
+  const resolvedZomboidDataDir =
+    cleanRemoteLinuxPath(zomboidDataDir) || defaultZomboidDataDir;
+  const resolvedRemoteServerProfilePath =
+    remoteServerProfilePathFromDataDir(resolvedZomboidDataDir);
   const derivedZomboidServerDir =
     cleanRemoteLinuxPath(parentRemotePath(resolvedZomboidServerPath)) ||
     defaultZomboidServerDir;
@@ -233,6 +260,7 @@ export function RemoteSteamCmdModal({
   const isZomboidServerPathValid = isAbsoluteLinuxPath(
     resolvedZomboidServerPath,
   );
+  const isZomboidDataDirValid = isAbsoluteLinuxPath(resolvedZomboidDataDir);
   const canSetupHelper =
     connection.authMethod === "key" &&
     connection.sshKeyPath.trim().length > 0 &&
@@ -249,6 +277,7 @@ export function RemoteSteamCmdModal({
     resolvedZomboidServerPath.trim().length > 0 &&
     isZomboidServerDirValid &&
     isZomboidServerPathValid &&
+    isZomboidDataDirValid &&
     !isRunning;
   const canDownloadZomboid =
     steamcmdStatus === "success" &&
@@ -289,6 +318,9 @@ export function RemoteSteamCmdModal({
         const loadedZomboidServerPath = cleanRemoteLinuxPath(
           nextConfig?.remoteZomboidServerPath,
         );
+        const loadedZomboidDataDir =
+          remoteZomboidDataDirFromServerProfilePath(nextConfig?.serverPath) ||
+          defaultZomboidDataDir;
 
         const completedStep = getRemoteSetupCompletedStep(nextConfig);
 
@@ -297,6 +329,7 @@ export function RemoteSteamCmdModal({
         setSteamcmdPath(loadedSteamcmdPath);
         setZomboidServerDir(loadedZomboidServerDir);
         setZomboidServerPath(loadedZomboidServerPath);
+        setZomboidDataDir(loadedZomboidDataDir);
         setClientRam(nextConfig?.remoteClientRam || "4.00");
         setServerRam(nextConfig?.remoteServerRam || "4.00");
         setHelperStatus(completedStep >= 1 ? "success" : "idle");
@@ -332,7 +365,7 @@ export function RemoteSteamCmdModal({
     return () => {
       isMounted = false;
     };
-  }, [defaultSteamcmdDir, defaultZomboidServerDir, isOpen]);
+  }, [defaultSteamcmdDir, defaultZomboidDataDir, defaultZomboidServerDir, isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -549,15 +582,23 @@ export function RemoteSteamCmdModal({
         "save_remote_zomboid_server_path",
         {
           request: {
-            connection,
+            connection: {
+              ...connection,
+              serverPath: resolvedRemoteServerProfilePath,
+            },
             serverDirectory: derivedZomboidServerDir,
             serverLaunchPath: resolvedZomboidServerPath,
+            serverProfilePath: resolvedRemoteServerProfilePath,
           },
         },
       );
       setConfig(savedConfig);
       setZomboidServerDir(savedConfig.remoteZomboidServerDir);
       setZomboidServerPath(savedConfig.remoteZomboidServerPath);
+      setZomboidDataDir(
+        remoteZomboidDataDirFromServerProfilePath(savedConfig.serverPath) ||
+          resolvedZomboidDataDir,
+      );
       setZomboidStatus("success");
       finishZomboidTimer(startedAt);
       setActiveStep(4);
@@ -622,7 +663,10 @@ export function RemoteSteamCmdModal({
     try {
       await invokeTauri<AppSettings>("save_remote_app_settings", {
         request: {
-          connection,
+          connection: {
+            ...connection,
+            serverPath: resolvedRemoteServerProfilePath,
+          },
           gameExecutablePath: resolvedZomboidServerPath,
           clientRam,
           serverRam,
@@ -666,6 +710,7 @@ export function RemoteSteamCmdModal({
   async function saveRemoteConfig(values: Partial<RemoteWorkspaceConfig>) {
     const baseConfig = config ?? {
       ...connection,
+      serverPath: resolvedRemoteServerProfilePath,
       remoteSteamcmdDir: managedSteamcmdDir,
       remoteSteamcmdPath: resolvedSteamcmdPath,
       remoteZomboidServerDir: derivedZomboidServerDir,
@@ -685,6 +730,7 @@ export function RemoteSteamCmdModal({
           remoteSteamcmdPath: resolvedSteamcmdPath,
           remoteZomboidServerDir: derivedZomboidServerDir,
           remoteZomboidServerPath: resolvedZomboidServerPath,
+          serverPath: resolvedRemoteServerProfilePath,
           ...values,
         },
       },
@@ -981,6 +1027,13 @@ export function RemoteSteamCmdModal({
                     }}
                   />
                   <RemotePathInput
+                    label={t("remoteSetup.step3DataDirLabel")}
+                    value={resolvedZomboidDataDir}
+                    placeholder={defaultZomboidDataDir}
+                    disabled={isRunning || zomboidMode === "download"}
+                    onChange={setZomboidDataDir}
+                  />
+                  <RemotePathInput
                     label={t("remoteSetup.step3DirLabel")}
                     value={derivedZomboidServerDir}
                     placeholder={defaultZomboidServerDir}
@@ -990,7 +1043,7 @@ export function RemoteSteamCmdModal({
                   {!isZomboidServerDirValid ||
                   (zomboidMode === "existing" &&
                     resolvedZomboidServerPath.trim().length > 0 &&
-                    !isZomboidServerPathValid) ? (
+                    (!isZomboidServerPathValid || !isZomboidDataDirValid)) ? (
                     <p className="rounded-[8px] border border-yellow-400/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100">
                       {t("remoteSetup.linuxPathRequired")}
                     </p>
@@ -1180,6 +1233,10 @@ export function RemoteSteamCmdModal({
                   <SavedPath
                     label={t("remoteSetup.step3PathLabel")}
                     value={resolvedZomboidServerPath}
+                  />
+                  <SavedPath
+                    label={t("remoteSetup.step3DataDirLabel")}
+                    value={resolvedZomboidDataDir}
                   />
                   <SavedPath
                     label={t("remoteSetup.step4ClientRamLabel")}

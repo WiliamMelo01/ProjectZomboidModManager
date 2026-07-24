@@ -82,6 +82,7 @@ struct TestServerRequest {
 struct ServerControlRequest {
     server_id: String,
     server_launch_path: Option<String>,
+    server_profile_path: Option<String>,
     no_steam: Option<bool>,
 }
 
@@ -240,6 +241,14 @@ fn run() -> Result<(), String> {
             {
                 let _ = HELPER_SERVER_LAUNCH_PATH.set(server_launch_path.to_string());
             }
+            if let Some(server_profile_path) = request
+                .server_profile_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+            {
+                let _ = HELPER_SERVER_PROFILE_DIR.set(server_profile_path.to_string());
+            }
             print_json(&start_server(
                 request.server_id,
                 ServerLaunchOptions {
@@ -256,6 +265,14 @@ fn run() -> Result<(), String> {
                 .filter(|path| !path.is_empty())
             {
                 let _ = HELPER_SERVER_LAUNCH_PATH.set(server_launch_path.to_string());
+            }
+            if let Some(server_profile_path) = request
+                .server_profile_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+            {
+                let _ = HELPER_SERVER_PROFILE_DIR.set(server_profile_path.to_string());
             }
             run_server_start_streaming(
                 request.server_id,
@@ -939,6 +956,9 @@ fn start_server(
     );
 
     let mut command = Command::new(&helper_path);
+    if let Ok(server_profile_dir) = zomboid_server_dir() {
+        command.env("PZMM_SERVER_PROFILE_DIR", server_profile_dir);
+    }
     let mut controller = util::hide_command_window(&mut command)
         .arg("run-server-controller")
         .arg(&server_id)

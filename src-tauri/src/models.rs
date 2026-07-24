@@ -332,6 +332,7 @@ pub(crate) struct RemoteZomboidServerPathRequest {
     pub(crate) connection: RemoteServerConnectionRequest,
     pub(crate) server_directory: String,
     pub(crate) server_launch_path: String,
+    pub(crate) server_profile_path: Option<String>,
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

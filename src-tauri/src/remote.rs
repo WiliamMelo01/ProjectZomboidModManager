@@ -149,6 +149,8 @@ pub(crate) fn start_remote_zomboid_server_test(
 
     let config = get_remote_workspace_config_for_connection_impl(&connection)?
         .unwrap_or_else(default_remote_workspace_config);
+    let mut helper_connection = connection.clone();
+    helper_connection.server_path = config.server_path.clone();
     let server_launch_path = config.remote_zomboid_server_path.trim().to_string();
 
     if server_launch_path.is_empty() {
@@ -169,7 +171,7 @@ pub(crate) fn start_remote_zomboid_server_test(
     thread::spawn(move || {
         if let Err(error) = run_remote_zomboid_server_test_streaming(
             &app,
-            &connection,
+            &helper_connection,
             &event_server_id,
             &server_launch_path,
         ) {
@@ -300,6 +302,8 @@ pub(crate) fn start_remote_zomboid_server(
 
     let config = get_remote_workspace_config_for_connection_impl(&connection)?
         .unwrap_or_else(default_remote_workspace_config);
+    let mut helper_connection = connection.clone();
+    helper_connection.server_path = config.server_path.clone();
     let server_launch_path = config.remote_zomboid_server_path.trim().to_string();
 
     if server_launch_path.is_empty() {
@@ -321,7 +325,7 @@ pub(crate) fn start_remote_zomboid_server(
     thread::spawn(move || {
         if let Err(error) = run_remote_zomboid_server_start_streaming(
             &app,
-            &connection,
+            &helper_connection,
             &event_server_id,
             &server_launch_path,
             no_steam,
@@ -365,10 +369,14 @@ pub(crate) fn stream_remote_zomboid_server_logs(
     }
 
     let event_server_id = server_id.clone();
+    let config = get_remote_workspace_config_for_connection_impl(&connection)?
+        .unwrap_or_else(default_remote_workspace_config);
+    let mut helper_connection = connection.clone();
+    helper_connection.server_path = config.server_path;
 
     thread::spawn(move || {
         if let Err(error) =
-            run_remote_zomboid_server_logs_streaming(&app, &connection, &event_server_id)
+            run_remote_zomboid_server_logs_streaming(&app, &helper_connection, &event_server_id)
         {
             let _ = app.emit(
                 "remote-server-start-event",
@@ -1987,6 +1995,10 @@ fn save_remote_zomboid_server_path_impl(
 ) -> Result<RemoteWorkspaceConfig, String> {
     let mut config = get_remote_workspace_config_for_connection_impl(&request.connection)?
         .unwrap_or_else(default_remote_workspace_config);
+    let server_profile_path = resolve_remote_server_profile_path(
+        request.server_profile_path.as_deref(),
+        &request.connection.server_path,
+    )?;
     let resolved_path = resolve_remote_zomboid_server_launch_path(
         &request.connection,
         &request.server_directory,
@@ -2001,7 +2013,7 @@ fn save_remote_zomboid_server_path_impl(
     config.username = request.connection.username;
     config.auth_method = request.connection.auth_method;
     config.ssh_key_path = request.connection.ssh_key_path;
-    config.server_path = request.connection.server_path;
+    config.server_path = server_profile_path;
     config.remote_zomboid_server_dir = resolved_dir;
     config.remote_zomboid_server_path = resolved_path;
     config.remote_setup_completed_step = config.remote_setup_completed_step.max(3);
@@ -2085,7 +2097,9 @@ fn save_remote_app_settings_impl(request: RemoteAppSettingsRequest) -> Result<Ap
     config.username = request.connection.username;
     config.auth_method = request.connection.auth_method;
     config.ssh_key_path = request.connection.ssh_key_path;
-    config.server_path = request.connection.server_path;
+    if config.server_path.trim().is_empty() {
+        config.server_path = remote_server_profile_path_or_default(&request.connection.server_path);
+    }
     config.remote_zomboid_server_path = server_path.clone();
     config.remote_zomboid_server_dir = remote_unix_parent_path(&server_path)
         .unwrap_or_else(|| config.remote_zomboid_server_dir.clone());
@@ -2677,6 +2691,52 @@ fn push_unique_string(values: &mut Vec<String>, value: String) {
         values.push(value);
     }
 }
+
+fn resolve_remote_server_profile_path(
+    requested_profile_path: Option<&str>,
+    connection_profile_path: &str,
+) -> Result<String, String> {
+    let value = requested_profile_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .unwrap_or_else(|| connection_profile_path.trim());
+    let profile_path = remote_server_profile_path_or_default(value);
+
+    if !looks_like_linux_path(&profile_path) {
+        return Err(
+            "Use an absolute Linux Zomboid data folder, for example /var/lib/pzmm/Zomboid."
+                .to_string(),
+        );
+    }
+
+    Ok(profile_path)
+}
+
+fn remote_server_profile_path_or_default(path: &str) -> String {
+    let trimmed = path.trim().trim_end_matches('/');
+
+    if trimmed.is_empty() {
+        return REMOTE_LINUX_SERVER_PROFILE_DIR.to_string();
+    }
+
+    let normalized = trimmed.to_ascii_lowercase();
+    if normalized.ends_with("/server") {
+        trimmed.to_string()
+    } else if normalized.ends_with("/zomboid") {
+        join_remote_unix_path(trimmed, "Server")
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn remote_data_dir_from_server_profile_path(server_profile_path: &str) -> String {
+    let profile_path = remote_server_profile_path_or_default(server_profile_path);
+    let Some(zomboid_dir) = remote_unix_parent_path(&profile_path) else {
+        return REMOTE_LINUX_DATA_DIR.to_string();
+    };
+
+    remote_unix_parent_path(&zomboid_dir).unwrap_or_else(|| REMOTE_LINUX_DATA_DIR.to_string())
+}
 fn matching_active_mod_ids(
     mod_item: &crate::models::ZomboidMod,
     active_mod_ids: &[String],
@@ -3086,10 +3146,11 @@ fn run_remote_zomboid_server_start_streaming(
     no_steam: bool,
 ) -> Result<(), String> {
     let helper_path = ensure_cached_remote_helper(connection)?;
+    let server_profile_path = connection.server_path.trim();
     let payload = RemoteServerTestRequest {
         server_id,
         server_launch_path: Some(server_launch_path),
-        server_profile_path: None,
+        server_profile_path: (!server_profile_path.is_empty()).then_some(server_profile_path),
         no_steam,
     };
     let json = serde_json::to_vec(&payload)
@@ -4164,21 +4225,25 @@ fn remote_helper_sudo_command_prefix(
     connection: &RemoteServerConnectionRequest,
     helper_path: &str,
 ) -> String {
+    let server_profile_dir = remote_server_profile_path_or_default(&connection.server_path);
+    let remote_data_dir = remote_data_dir_from_server_profile_path(&server_profile_dir);
+    let remote_zomboid_dir = remote_unix_parent_path(&server_profile_dir)
+        .unwrap_or_else(|| join_remote_unix_path(&remote_data_dir, "Zomboid"));
     format!(
         "set -e; sudo -n install -d -o pzmm -g pzmm {} {} {} {}; sudo -n chown pzmm:pzmm {} {} {} {}; sudo -n chown -R pzmm:pzmm {} {}; sudo -n -u pzmm env HOME={} PZMM_DATA_DIR={} PZMM_SERVER_PROFILE_DIR={} PZMM_SERVER_LAUNCH_PATH={} PZMM_EXTRA_STEAM_WORKSHOP_DIRS={} {}",
-        linux_shell_quote(REMOTE_LINUX_DATA_DIR),
-        linux_shell_quote(&join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "cache")),
-        linux_shell_quote(&join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "Zomboid")),
-        linux_shell_quote(REMOTE_LINUX_SERVER_PROFILE_DIR),
-        linux_shell_quote(REMOTE_LINUX_DATA_DIR),
-        linux_shell_quote(&join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "cache")),
-        linux_shell_quote(&join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "Zomboid")),
-        linux_shell_quote(REMOTE_LINUX_SERVER_PROFILE_DIR),
-        linux_shell_quote(REMOTE_LINUX_SERVER_PROFILE_DIR),
-        linux_shell_quote(&join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "cache")),
-        linux_shell_quote(REMOTE_LINUX_DATA_DIR),
-        linux_shell_quote(REMOTE_LINUX_DATA_DIR),
-        linux_shell_quote(REMOTE_LINUX_SERVER_PROFILE_DIR),
+        linux_shell_quote(&remote_data_dir),
+        linux_shell_quote(&join_remote_unix_path(&remote_data_dir, "cache")),
+        linux_shell_quote(&remote_zomboid_dir),
+        linux_shell_quote(&server_profile_dir),
+        linux_shell_quote(&remote_data_dir),
+        linux_shell_quote(&join_remote_unix_path(&remote_data_dir, "cache")),
+        linux_shell_quote(&remote_zomboid_dir),
+        linux_shell_quote(&server_profile_dir),
+        linux_shell_quote(&server_profile_dir),
+        linux_shell_quote(&join_remote_unix_path(&remote_data_dir, "cache")),
+        linux_shell_quote(&remote_data_dir),
+        linux_shell_quote(&remote_data_dir),
+        linux_shell_quote(&server_profile_dir),
         linux_shell_quote(REMOTE_LINUX_ZOMBOID_LAUNCHER),
         linux_shell_quote(&remote_extra_steam_workshop_dirs(connection)),
         linux_shell_quote(helper_path)
@@ -5668,5 +5733,20 @@ mod tests {
         assert!(script.contains("-Xmx\" + ram + \"m"));
         assert!(!script.contains("path.write_text(text)"));
         assert!(!script.contains("launcher="));
+    }
+
+    #[test]
+    fn remote_server_profile_path_accepts_zomboid_data_folder() {
+        let profile_path = resolve_remote_server_profile_path(Some("/srv/pz/Zomboid"), "").unwrap();
+
+        assert_eq!(profile_path, "/srv/pz/Zomboid/Server");
+    }
+
+    #[test]
+    fn remote_data_dir_is_parent_of_zomboid_folder() {
+        assert_eq!(
+            remote_data_dir_from_server_profile_path("/srv/pz/Zomboid/Server"),
+            "/srv/pz"
+        );
     }
 }

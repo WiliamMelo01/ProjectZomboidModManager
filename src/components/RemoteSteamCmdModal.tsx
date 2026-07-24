@@ -243,14 +243,18 @@ export function RemoteSteamCmdModal({
   const resolvedSteamcmdPath =
     steamcmdPath || remoteSteamcmdPath(managedSteamcmdDir);
   const resolvedZomboidServerPath =
-    zomboidServerPath || joinRemotePath(zomboidServerDir, "start-server.sh");
+    zomboidMode === "download"
+      ? zomboidServerPath || joinRemotePath(zomboidServerDir, "start-server.sh")
+      : cleanRemoteLinuxPath(zomboidServerPath);
   const resolvedZomboidDataDir =
-    cleanRemoteLinuxPath(zomboidDataDir) || defaultZomboidDataDir;
+    zomboidMode === "download"
+      ? cleanRemoteLinuxPath(zomboidDataDir) || defaultZomboidDataDir
+      : cleanRemoteLinuxPath(zomboidDataDir);
   const resolvedRemoteServerProfilePath =
     remoteServerProfilePathFromDataDir(resolvedZomboidDataDir);
   const derivedZomboidServerDir =
     cleanRemoteLinuxPath(parentRemotePath(resolvedZomboidServerPath)) ||
-    defaultZomboidServerDir;
+    (zomboidMode === "download" ? defaultZomboidServerDir : "");
   const selectedZomboidBranchCommand =
     zomboidBranch === "unstable"
       ? "app_update 380870 -beta unstable validate"
@@ -420,6 +424,16 @@ export function RemoteSteamCmdModal({
   }, [zomboidStartedAt, zomboidStatus]);
 
   if (!isOpen) return null;
+
+  function selectExistingZomboidMode() {
+    setZomboidMode("existing");
+    if (!config?.remoteZomboidServerPath && zomboidServerPath.trim().length === 0) {
+      setZomboidServerDir("");
+    }
+    if (!config?.serverPath && zomboidDataDir === defaultZomboidDataDir) {
+      setZomboidDataDir("");
+    }
+  }
 
   async function setupHelperStep() {
     if (!canSetupHelper) return;
@@ -1005,7 +1019,7 @@ export function RemoteSteamCmdModal({
                     active={zomboidMode === "existing"}
                     title={t("remoteSetup.step3ModeExistingTitle")}
                     description={t("remoteSetup.step3ModeExistingDesc")}
-                    onClick={() => setZomboidMode("existing")}
+                    onClick={selectExistingZomboidMode}
                   />
                 </div>
 
@@ -1013,10 +1027,11 @@ export function RemoteSteamCmdModal({
                   <RemotePathInput
                     label={t("remoteSetup.step3PathLabel")}
                     value={resolvedZomboidServerPath}
-                    placeholder={joinRemotePath(
-                      defaultZomboidServerDir,
-                      "start-server.sh",
-                    )}
+                    placeholder={
+                      zomboidMode === "existing"
+                        ? "/home/pzuser/zomboid-server/start-server.sh"
+                        : joinRemotePath(defaultZomboidServerDir, "start-server.sh")
+                    }
                     disabled={isRunning || zomboidMode === "download"}
                     onChange={(value) => {
                       setZomboidServerPath(value);
@@ -1031,14 +1046,20 @@ export function RemoteSteamCmdModal({
                   <RemotePathInput
                     label={t("remoteSetup.step3DataDirLabel")}
                     value={resolvedZomboidDataDir}
-                    placeholder={defaultZomboidDataDir}
+                    placeholder={
+                      zomboidMode === "existing"
+                        ? "/home/pzuser/Zomboid"
+                        : defaultZomboidDataDir
+                    }
                     disabled={isRunning || zomboidMode === "download"}
                     onChange={setZomboidDataDir}
                   />
                   <RemotePathInput
                     label={t("remoteSetup.step3DirLabel")}
                     value={derivedZomboidServerDir}
-                    placeholder={defaultZomboidServerDir}
+                    placeholder={
+                      zomboidMode === "existing" ? "" : defaultZomboidServerDir
+                    }
                     disabled
                     onChange={() => undefined}
                   />

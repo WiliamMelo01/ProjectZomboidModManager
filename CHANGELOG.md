@@ -9,6 +9,17 @@ improved, and fixed in each public release.
 
 - No changes recorded yet.
 
+## [0.6.0] - 2026-07-25
+
+Release v0.6.0 - Automated Server Versioning, Setup UI Simplification and Dependency Fixes
+
+### Added
+- Automated Server Versioning: the app now remembers the server version (B41/B42) during remote setup and persists it, streamlining the "Create Server" UI for remote workspaces.
+
+### Fixed
+- Dependency Resolution: Fixed a bug where downloading a missing dependency for a mod would install the dependency but fail to activate the original mod.
+- Server Status: Addressed issues with false positives in server running state.
+
 ## [0.5.0] - 2026-07-20
 
 Release focused on real server operations, especially remote Linux servers and
@@ -188,6 +199,7 @@ First public release of PZ Manager.
 
 ## Links
 
+- [0.6.0](https://github.com/WiliamMelo01/ProjectZomboidModManager/releases/tag/v0.6.0)
 - [0.5.0](https://github.com/WiliamMelo01/ProjectZomboidModManager/releases/tag/v0.5.0)
 - [0.4.0](https://github.com/WiliamMelo01/ProjectZomboidModManager/releases/tag/v0.4.0)
 - [0.3.0](https://github.com/WiliamMelo01/ProjectZomboidModManager/releases/tag/v0.3.0)

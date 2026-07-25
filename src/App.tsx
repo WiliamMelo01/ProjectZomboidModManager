@@ -211,6 +211,7 @@ function LocalWorkspaceApp({
   remoteConnection: RemoteConnectionDraft | null;
 }) {
   const [isCreateServerModalOpen, setIsCreateServerModalOpen] = useState(false);
+  const [remoteWorkspaceConfig, setRemoteWorkspaceConfig] = useState<RemoteWorkspaceConfig | null>(null);
   const [isRemoteSteamCmdModalOpen, setIsRemoteSteamCmdModalOpen] =
     useState(false);
   const [isRemoteTerminalModalOpen, setIsRemoteTerminalModalOpen] =
@@ -849,6 +850,7 @@ function LocalWorkspaceApp({
   async function installDownloadedDependencyForServer(
     server: ZomboidServer,
     dependencyId: string,
+    originalModId?: string,
   ) {
     const refreshedMods = await loadMods();
     const normalizedDependencyId = dependencyId.trim().toLowerCase();
@@ -862,17 +864,44 @@ function LocalWorkspaceApp({
       throw new Error(t("dependency.downloadedMissing", { id: dependencyId }));
     }
 
+    const modsToInstall = [];
     if (!dependency.isInstalled) {
-      await installMods([dependency]);
+      modsToInstall.push(dependency);
     }
 
-    await activateServerMods(server, [
+    const modsToActivate = [
       {
         ...dependency,
         isInstalled: true,
         source: dependency.source === "steam" ? "local" : dependency.source,
       },
-    ]);
+    ];
+
+    if (originalModId) {
+      const normalizedOriginalModId = originalModId.trim().toLowerCase();
+      const originalMod = findModForServerId(
+        refreshedMods,
+        normalizedOriginalModId,
+        server.gameBuild,
+      );
+
+      if (originalMod) {
+        if (!originalMod.isInstalled) {
+          modsToInstall.push(originalMod);
+        }
+        modsToActivate.push({
+          ...originalMod,
+          isInstalled: true,
+          source: originalMod.source === "steam" ? "local" : originalMod.source,
+        });
+      }
+    }
+
+    if (modsToInstall.length > 0) {
+      await installMods(modsToInstall);
+    }
+
+    await activateServerMods(server, modsToActivate);
   }
 
   async function changeServerBuild(
@@ -1593,8 +1622,12 @@ function LocalWorkspaceApp({
       { connection: remoteConnection },
     )
       .then((config) => {
-        if (!isMounted || isRemoteSetupComplete(config)) return;
+        if (!isMounted || isRemoteSetupComplete(config)) {
+          setRemoteWorkspaceConfig(config);
+          return;
+        }
 
+        setRemoteWorkspaceConfig(config);
         remoteSetupPromptedConnectionRef.current = connectionKey;
         setIsRemoteSteamCmdModalOpen(true);
       })
@@ -1939,10 +1972,11 @@ function LocalWorkspaceApp({
                   onRefreshMods={async () => {
                     await loadMods();
                   }}
-                  onDependencyDownloaded={(dependencyId) =>
+                  onDependencyDownloaded={(dependencyId, originalModId) =>
                     installDownloadedDependencyForServer(
                       selectedServer,
                       dependencyId,
+                      originalModId,
                     )
                   }
                   onOpenSettings={() => setActiveTab("settings")}
@@ -2031,6 +2065,7 @@ function LocalWorkspaceApp({
         onClose={() => setIsCreateServerModalOpen(false)}
         existingServers={servers}
         availableMods={mods}
+        fixedGameBuild={remoteWorkspaceConfig?.remoteServerVersion as any}
         onCreate={createServer}
       />
 
@@ -2088,6 +2123,12 @@ function LocalWorkspaceApp({
             connection={remoteConnection}
             isOpen={isRemoteSteamCmdModalOpen}
             onClose={() => setIsRemoteSteamCmdModalOpen(false)}
+            onComplete={(config) => {
+              setIsRemoteSteamCmdModalOpen(false);
+              setRemoteWorkspaceConfig(config as any);
+              void loadServers();
+              void loadLibrary();
+            }}
           />
           <RemoteTerminalModal
             connection={remoteConnection}

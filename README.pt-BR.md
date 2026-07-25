@@ -6,7 +6,7 @@
 
 ### Gerencie mods, downloads, configurações e servidores Linux remotos de Project Zomboid em um app desktop.
 
-[![Versão](https://img.shields.io/badge/versão-0.5.0-6d5dfc?style=for-the-badge)](package.json)
+[![Versão](https://img.shields.io/badge/versão-0.6.0-6d5dfc?style=for-the-badge)](package.json)
 ![Plataforma](https://img.shields.io/badge/plataforma-Windows%20%7C%20Linux-0078D4?style=for-the-badge&logo=windows)
 ![Desktop](https://img.shields.io/badge/desktop-Tauri-24C8D8?style=for-the-badge&logo=tauri&logoColor=white)
 ![Status](https://img.shields.io/badge/status-desenvolvimento%20ativo-F59E0B?style=for-the-badge)
@@ -23,7 +23,7 @@ Ele escaneia mods locais e da Steam Workshop, gerencia perfis de servidor, escre
 
 O app suporta perfis **Build 41** e **Build 42**. Cada servidor mantém sua própria build, lista de mods, itens da Workshop, configurações, logs e estado de execução.
 
-## Destaques da versão 0.5.0
+## Destaques da versão 0.6.0
 
 - **Banco comunitário de Workshop IDs**: sincroniza pares `Mod ID -> Workshop ID` descobertos com um serviço compartilhado, mantém cache local e mostra erro visual quando o serviço fica indisponível.
 - **Ferramentas para corrigir Workshop IDs**: editar IDs pelos detalhes do mod, corrigir IDs ausentes nos mods ativos do servidor e manter `Mods=` alinhado com `WorkshopItems=`.
@@ -258,7 +258,7 @@ cd ..
 
 ## Estado Atual
 
-O projeto está em desenvolvimento ativo. A versão 0.5.0 expande o PZ Manager de um gerenciador local de mods/perfis para uma ferramenta mais completa de operação de servidores, com gerenciamento remoto Linux, sincronização de Workshop IDs, fluxos SteamCMD, diagnósticos, logs e controles de inicialização mais seguros.
+O projeto está em desenvolvimento ativo. A versão 0.6.0 expande o PZ Manager de um gerenciador local de mods/perfis para uma ferramenta mais completa de operação de servidores, com gerenciamento remoto Linux, sincronização de Workshop IDs, fluxos SteamCMD, diagnósticos, logs e detecção inteligente de versão automática.
 
 ## Licença
 

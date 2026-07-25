@@ -6,7 +6,7 @@
 
 ### Manage Project Zomboid server mods, downloads, configs, and remote Linux servers from one desktop app.
 
-[![Version](https://img.shields.io/badge/version-0.5.0-6d5dfc?style=for-the-badge)](package.json)
+[![Version](https://img.shields.io/badge/version-0.6.0-6d5dfc?style=for-the-badge)](package.json)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D4?style=for-the-badge&logo=windows)
 ![Desktop](https://img.shields.io/badge/desktop-Tauri-24C8D8?style=for-the-badge&logo=tauri&logoColor=white)
 ![Status](https://img.shields.io/badge/status-active%20development-F59E0B?style=for-the-badge)
@@ -23,7 +23,7 @@ It can scan local and Steam Workshop mods, manage server profiles, write `Mods=`
 
 The app supports **Build 41** and **Build 42** profiles. Each server keeps its own build, mod list, Workshop items, configuration, logs, and runtime state.
 
-## Version 0.5.0 Highlights
+## Version 0.6.0 Highlights
 
 - **Community Workshop ID database**: syncs discovered `Mod ID -> Workshop ID` mappings with a shared service, keeps a local cache, and falls back visually when the service is unavailable.
 - **Workshop ID repair tools**: edit IDs from mod details, fix missing Workshop IDs for active server mods, and keep `Mods=` aligned with `WorkshopItems=`.
@@ -258,7 +258,7 @@ cd ..
 
 ## Current Status
 
-The project is under active development. Version 0.5.0 expands PZ Manager from a local mod/profile manager into a broader server-management tool with remote Linux operations, Workshop ID sync, SteamCMD workflows, diagnostics, logs, and safer startup controls.
+The project is under active development. Version 0.6.0 expands PZ Manager from a local mod/profile manager into a broader server-management tool with remote Linux operations, Workshop ID sync, SteamCMD workflows, diagnostics, logs, and smarter automatic version detection.
 
 ## License
 

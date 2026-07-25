@@ -197,6 +197,7 @@ export function RemoteSteamCmdModal({
   const [config, setConfig] = useState<RemoteWorkspaceConfig | null>(null);
   const [activeStep, setActiveStep] = useState(1);
   const [zomboidMode, setZomboidMode] = useState<ZomboidSetupMode>("download");
+  const [existingServerVersion, setExistingServerVersion] = useState<"b41" | "b42">("b41");
   const [zomboidBranch, setZomboidBranch] =
     useState<ZomboidServerBranch>("default");
   const [steamcmdDir, setSteamcmdDir] = useState(defaultSteamcmdDir);
@@ -742,7 +743,13 @@ export function RemoteSteamCmdModal({
       remoteServerRam: "4.00",
       remoteSetupCompletedStep: 0,
       remoteModLocations: [],
+      remoteServerVersion: "b41",
     };
+
+    const nextRemoteServerVersion = zomboidMode === "download"
+      ? (zomboidBranch === "unstable" ? "b42" : "b41")
+      : existingServerVersion;
+
     const savedConfig = await invokeTauri<RemoteWorkspaceConfig>(
       "save_remote_workspace_config",
       {
@@ -754,6 +761,7 @@ export function RemoteSteamCmdModal({
           remoteZomboidServerDir: derivedZomboidServerDir,
           remoteZomboidServerPath: resolvedZomboidServerPath,
           serverPath: resolvedRemoteServerProfilePath,
+          remoteServerVersion: nextRemoteServerVersion,
           ...values,
         },
       },
@@ -786,6 +794,15 @@ export function RemoteSteamCmdModal({
       if (nextZomboidServerDir) setZomboidServerDir(nextZomboidServerDir);
       if (nextZomboidServerPath) setZomboidServerPath(nextZomboidServerPath);
       if (nextZomboidDataDir) setZomboidDataDir(nextZomboidDataDir);
+      
+      if (nextConfig.remoteServerVersion) {
+        setExistingServerVersion(nextConfig.remoteServerVersion as "b41" | "b42");
+        if (nextConfig.remoteServerVersion === "b42") {
+          setZomboidBranch("unstable");
+        } else {
+          setZomboidBranch("default");
+        }
+      }
     }
     return nextConfig;
   }
@@ -1079,6 +1096,31 @@ export function RemoteSteamCmdModal({
                     disabled={isRunning || zomboidMode === "download"}
                     onChange={setZomboidDataDir}
                   />
+
+                  {zomboidMode === "existing" && (
+                    <div className="space-y-3">
+                      <p className="ml-1 text-[9px] font-black uppercase tracking-[0.2em] text-gray-500">
+                        {t("createServer.build", "Server Version")}
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 h-[48px]">
+                        {(["b41", "b42"] as const).map((build) => (
+                          <button
+                            key={build}
+                            type="button"
+                            disabled={isRunning}
+                            onClick={() => setExistingServerVersion(build)}
+                            className={`rounded-xl border text-xs font-black uppercase italic transition-all ${
+                              existingServerVersion === build
+                                ? "border-orange-500/40 bg-orange-500/10 text-orange-400 ring-1 ring-orange-500/20 shadow-[0_0_15px_rgba(249,115,22,0.1)]"
+                                : "border-white/5 bg-[#1c2126] text-gray-500 hover:bg-white/5"
+                            } disabled:opacity-50`}
+                          >
+                            {build}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <RemotePathInput
                     label={t("remoteSetup.step3DirLabel")}
                     value={derivedZomboidServerDir}

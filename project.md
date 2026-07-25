@@ -7,7 +7,7 @@ desktop application for managing Project Zomboid multiplayer server profiles,
 mods, Workshop downloads, diagnostics, and remote Linux dedicated servers.
 
 The app started as a local Windows-focused mod/profile manager, but version
-`0.5.0` now includes remote workspace support over SSH, a Linux helper, SteamCMD
+`0.6.0` now includes remote workspace support over SSH, a Linux helper, SteamCMD
 workflows, server startup controls, log viewing, and a shared Workshop ID
 mapping sync.
 
@@ -15,7 +15,7 @@ mapping sync.
 
 - Name: Zomboid Server Mod Manager / PZ Manager
 - Package: `zomboid-server-mod-manager`
-- Version: `0.5.0`
+- Version: `0.6.0`
 - Channel: `beta`
 - Type: Desktop application
 - Runtime shell: Tauri 2
@@ -157,9 +157,9 @@ uploaded through the mapping sync.
 - Custom mod locations.
 - Cache refresh and full rescan actions.
 
-## Version 0.5.0 Release Notes
+## Version 0.6.0 Release Notes
 
-Version `0.5.0` focuses on making the app more useful for real server operators,
+Version `0.6.0` focuses on making the app more useful for real server operators,
 especially remote Linux server admins.
 
 Key changes:

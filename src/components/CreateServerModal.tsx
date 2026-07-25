@@ -12,15 +12,16 @@ type CreateServerModalProps = {
   onClose: () => void
   existingServers: ZomboidServer[]
   availableMods: ZomboidMod[]
+  fixedGameBuild?: GameBuild
   onCreate?: (data: { name: string; modIds: string[]; gameBuild: GameBuild; maxPlayers: number }) => Promise<void> | void
 }
 
-export function CreateServerModal({ isOpen, onClose, existingServers, availableMods, onCreate }: CreateServerModalProps) {
+export function CreateServerModal({ isOpen, onClose, existingServers, availableMods, fixedGameBuild, onCreate }: CreateServerModalProps) {
   const { t } = useTranslation()
   const [step, setStep] = useState(1)
   const [serverName, setServerName] = useState("")
   const [maxPlayers, setMaxPlayers] = useState(16)
-  const [gameBuild, setGameBuild] = useState<GameBuild>("b41")
+  const [gameBuild, setGameBuild] = useState<GameBuild>(fixedGameBuild || "b41")
   const [modSelectionMode, setModSelectionMode] = useState<"checklist" | "clone">("checklist")
   const [selectedModIds, setSelectedModIds] = useState<Set<string>>(new Set())
   const [cloneSourceId, setCloneSourceId] = useState<string>("")
@@ -149,32 +150,34 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="ml-1 text-[9px] font-black uppercase tracking-[0.2em] text-gray-500">
-                    {t("createServer.build")}
-                  </label>
-                  <div className="grid grid-cols-2 gap-2 h-[60px]">
-                    {(["b41", "b42"] as GameBuild[]).map((build) => (
-                      <button
-                        key={build}
-                        type="button"
-                        onClick={() => {
-                          setGameBuild(build)
-                          setSelectedModIds(new Set())
-                          setCloneSourceId("")
-                        }}
-                        className={`rounded-xl border text-xs font-black uppercase italic transition-all ${
-                          gameBuild === build
-                            ? "border-orange-500/40 bg-orange-500/10 text-orange-400 ring-1 ring-orange-500/20 shadow-[0_0_15px_rgba(249,115,22,0.1)]"
-                            : "border-white/5 bg-[#1c2126] text-gray-500 hover:bg-white/5"
-                        }`}
-                      >
-                        {build}
-                      </button>
-                    ))}
-                  </div>
+                  {!fixedGameBuild && (
+                    <div className="space-y-2">
+                      <label className="ml-1 text-[9px] font-black uppercase tracking-[0.2em] text-gray-500">
+                        {t("createServer.build")}
+                      </label>
+                      <div className="grid grid-cols-2 gap-2 h-[60px]">
+                        {(["b41", "b42"] as GameBuild[]).map((build) => (
+                          <button
+                            key={build}
+                            type="button"
+                            onClick={() => {
+                              setGameBuild(build)
+                              setSelectedModIds(new Set())
+                              setCloneSourceId("")
+                            }}
+                            className={`rounded-xl border text-xs font-black uppercase italic transition-all ${
+                              gameBuild === build
+                                ? "border-orange-500/40 bg-orange-500/10 text-orange-400 ring-1 ring-orange-500/20 shadow-[0_0_15px_rgba(249,115,22,0.1)]"
+                                : "border-white/5 bg-[#1c2126] text-gray-500 hover:bg-white/5"
+                            }`}
+                          >
+                            {build}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
             </div>
           ) : (
             <div className="space-y-8 animate-in slide-in-from-right-4 duration-300">

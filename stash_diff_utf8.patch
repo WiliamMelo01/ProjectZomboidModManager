@@ -1,0 +1,4067 @@
+﻿diff --git a/.env.example b/.env.example
+index 88c692a..77a681c 100644
+--- a/.env.example
++++ b/.env.example
+@@ -1,3 +1,4 @@
+ # Enable local Linux helper lookup for development.
+ # When unset or false, the app downloads/caches the helper from the GitHub release.
+-PZMM_DEV=0
+\ No newline at end of file
++PZMM_DEV=0
++PZMM_DELETEALL_ENABLED=true
+\ No newline at end of file
+diff --git a/scripts/run-tauri-command.mjs b/scripts/run-tauri-command.mjs
+index 0d4e2ad..8844f9a 100644
+--- a/scripts/run-tauri-command.mjs
++++ b/scripts/run-tauri-command.mjs
+@@ -1,5 +1,5 @@
+ import { spawn } from "node:child_process"
+-import { existsSync } from "node:fs"
++import { existsSync, readFileSync } from "node:fs"
+ import path from "node:path"
+ import { fileURLToPath } from "node:url"
+ 
+@@ -12,6 +12,9 @@ if (!command) {
+ }
+ 
+ const env = { ...process.env }
++const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
++
++loadDotEnv(path.join(repoRoot, ".env"), env)
+ 
+ if (process.platform === "linux") {
+   for (const key of Object.keys(env)) {
+@@ -29,7 +32,6 @@ if (process.platform === "linux") {
+   }
+ }
+ 
+-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
+ const localTauri = path.join(repoRoot, "node_modules", ".bin", process.platform === "win32" ? "tauri.cmd" : "tauri")
+ const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm"
+ const commandPath = existsSync(localTauri) ? localTauri : npmCommand
+@@ -74,3 +76,35 @@ child.on("exit", (code, signal) => {
+   process.exit(code ?? 1)
+ })
+ 
++function loadDotEnv(filePath, targetEnv) {
++  if (!existsSync(filePath)) {
++    return
++  }
++
++  const content = readFileSync(filePath, "utf8")
++  for (const rawLine of content.split(/\r?\n/)) {
++    const line = rawLine.trim()
++    if (!line || line.startsWith("#")) {
++      continue
++    }
++
++    const separator = line.indexOf("=")
++    if (separator <= 0) {
++      continue
++    }
++
++    const key = line.slice(0, separator).trim()
++    let value = line.slice(separator + 1).trim()
++    if (
++      (value.startsWith('"') && value.endsWith('"')) ||
++      (value.startsWith("'") && value.endsWith("'"))
++    ) {
++      value = value.slice(1, -1)
++    }
++
++    if (!(key in targetEnv)) {
++      targetEnv[key] = value
++    }
++  }
++}
++
+diff --git a/src-tauri/src/game/installation.rs b/src-tauri/src/game/installation.rs
+index 536212a..cedea60 100644
+--- a/src-tauri/src/game/installation.rs
++++ b/src-tauri/src/game/installation.rs
+@@ -59,7 +59,9 @@ pub(super) fn scan_zomboid_installation_impl(
+     })
+ }
+ 
+-pub(crate) fn resolve_zomboid_executable_path(game_executable_path: Option<&str>) -> Option<PathBuf> {
++pub(crate) fn resolve_zomboid_executable_path(
++    game_executable_path: Option<&str>,
++) -> Option<PathBuf> {
+     game_executable_path
+         .map(str::trim)
+         .filter(|path| !path.is_empty())
+diff --git a/src-tauri/src/helper_main.rs b/src-tauri/src/helper_main.rs
+index b8f9cdd..0ca5163 100644
+--- a/src-tauri/src/helper_main.rs
++++ b/src-tauri/src/helper_main.rs
+@@ -60,6 +60,13 @@ struct ServerIdRequest {
+     server_id: String,
+ }
+ 
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct ServerLogFileRequest {
++    server_id: String,
++    log_name: String,
++}
++
+ #[derive(serde::Serialize)]
+ #[serde(rename_all = "camelCase")]
+ struct ServerFileContent {
+@@ -69,6 +76,15 @@ struct ServerFileContent {
+     content: String,
+ }
+ 
++#[derive(serde::Serialize)]
++#[serde(rename_all = "camelCase")]
++struct AvailableLogFile {
++    name: String,
++    path: String,
++    size_bytes: u64,
++    last_modified: u64,
++}
++
+ #[derive(Deserialize)]
+ #[serde(rename_all = "camelCase")]
+ struct TestServerRequest {
+@@ -84,6 +100,7 @@ struct ServerControlRequest {
+     server_launch_path: Option<String>,
+     server_profile_path: Option<String>,
+     no_steam: Option<bool>,
++    follow_from_end: Option<bool>,
+ }
+ 
+ #[derive(Deserialize)]
+@@ -198,6 +215,14 @@ fn run() -> Result<(), String> {
+             let request = read_request::<ServerIdRequest>()?;
+             print_json(&read_server_file(request.server_id)?)
+         }
++        "list-server-logs" => {
++            let request = read_request::<ServerIdRequest>()?;
++            print_json(&list_server_logs(request.server_id)?)
++        }
++        "read-server-log-file" => {
++            let request = read_request::<ServerLogFileRequest>()?;
++            print_json(&read_server_log_file(request.server_id, request.log_name)?)
++        }
+         "test-server" => {
+             let request = read_request::<TestServerRequest>()?;
+             if let Some(server_launch_path) = request
+@@ -283,7 +308,7 @@ fn run() -> Result<(), String> {
+         }
+         "stream-server-logs" => {
+             let request = read_request::<ServerControlRequest>()?;
+-            run_server_logs_streaming(request.server_id)
++            run_server_logs_streaming(request.server_id, request.follow_from_end.unwrap_or(false))
+         }
+         "send-server-command" => {
+             let request = read_request::<SendServerCommandRequest>()?;
+@@ -432,6 +457,88 @@ fn read_server_file(server_id: String) -> Result<ServerFileContent, String> {
+     })
+ }
+ 
++fn zomboid_logs_dir() -> Result<PathBuf, String> {
++    if let Some(data_dir) = env::var_os("PZMM_DATA_DIR") {
++        return Ok(PathBuf::from(data_dir).join("Zomboid").join("Logs"));
++    }
++
++    if let Some(server_parent) = zomboid_server_dir()?.parent().map(Path::to_path_buf) {
++        return Ok(server_parent.join("Logs"));
++    }
++
++    Ok(user_home_dir()?.join("Zomboid").join("Logs"))
++}
++
++fn list_server_logs(_server_id: String) -> Result<Vec<AvailableLogFile>, String> {
++    let logs_dir = zomboid_logs_dir()?;
++    let mut log_files = Vec::new();
++
++    if logs_dir.is_dir() {
++        for entry in fs::read_dir(&logs_dir)
++            .map_err(|error| format!("Could not read server logs folder: {error}"))?
++            .flatten()
++        {
++            let path = entry.path();
++            if !path.is_file() {
++                continue;
++            }
++
++            let file_name = path
++                .file_name()
++                .map(|name| name.to_string_lossy().to_string())
++                .unwrap_or_default();
++            if !file_name.ends_with(".txt") && !file_name.ends_with(".log") {
++                continue;
++            }
++
++            let metadata = fs::metadata(&path).ok();
++            let size_bytes = metadata
++                .as_ref()
++                .map(|metadata| metadata.len())
++                .unwrap_or(0);
++            let last_modified = metadata
++                .as_ref()
++                .and_then(|metadata| metadata.modified().ok())
++                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
++                .map(|duration| duration.as_secs())
++                .unwrap_or(0);
++
++            log_files.push(AvailableLogFile {
++                name: file_name,
++                path: path.display().to_string(),
++                size_bytes,
++                last_modified,
++            });
++        }
++    }
++
++    log_files.sort_by_key(|file| std::cmp::Reverse(file.last_modified));
++    Ok(log_files)
++}
++
++fn read_server_log_file(server_id: String, log_name: String) -> Result<ServerFileContent, String> {
++    let clean_log_name = Path::new(&log_name)
++        .file_name()
++        .map(|name| name.to_string_lossy().to_string())
++        .ok_or_else(|| "Invalid server log name.".to_string())?;
++
++    if !clean_log_name.ends_with(".txt") && !clean_log_name.ends_with(".log") {
++        return Err("Invalid server log extension.".to_string());
++    }
++
++    let log_path = zomboid_logs_dir()?.join(&clean_log_name);
++    if !log_path.is_file() {
++        return Err(format!("Server log file not found: {}", log_path.display()));
++    }
++
++    Ok(ServerFileContent {
++        server_id,
++        file_name: clean_log_name,
++        path: log_path.display().to_string(),
++        content: util::read_text_lossy(&log_path)?,
++    })
++}
++
+ fn run_server_test(server_id: String) -> Result<(), String> {
+     clear_server_test_cancel(&server_id)?;
+     print_json(&HelperServerTestEvent {
+@@ -871,12 +978,13 @@ fn run_server_start_streaming(
+     Ok(())
+ }
+ 
+-fn run_server_logs_streaming(server_id: String) -> Result<(), String> {
++fn run_server_logs_streaming(server_id: String, follow_from_end: bool) -> Result<(), String> {
+     let server_id = server_id.trim().to_string();
+     let state_path = server_controller_state_path(&server_id)?;
+ 
+     if !state_path.is_file() {
+-        return Err(format!("No running server state found for {server_id}."));
++        emit_server_start_event("finished", None, None, None)?;
++        return Ok(());
+     }
+ 
+     let state_content = fs::read_to_string(&state_path)
+@@ -892,7 +1000,11 @@ fn run_server_logs_streaming(server_id: String) -> Result<(), String> {
+     emit_server_start_event("started", None, None, None)?;
+ 
+     let initial_lines = read_start_log_lines(&log_path);
+-    let mut seen_lines = initial_lines.len().saturating_sub(150);
++    let mut seen_lines = if follow_from_end {
++        initial_lines.len()
++    } else {
++        initial_lines.len().saturating_sub(150)
++    };
+ 
+     loop {
+         let current_lines = read_start_log_lines(&log_path);
+diff --git a/src-tauri/src/main.rs b/src-tauri/src/main.rs
+index 67e70cc..287255a 100644
+--- a/src-tauri/src/main.rs
++++ b/src-tauri/src/main.rs
+@@ -43,22 +43,24 @@ use remote::{
+     cancel_remote_zomboid_server_test, check_remote_zomboid_server_firewall,
+     check_remote_zomboid_server_status, clear_remote_zomboid_mods_and_images_cache,
+     clear_remote_zomboid_mods_cache, configure_remote_zomboid_server_firewall,
+-    create_remote_zomboid_server, delete_remote_workspace_config, delete_remote_zomboid_server,
+-    delete_zomboid_mod_command, deploy_local_zomboid_server_to_remote,
+-    download_remote_steam_workshop_collection, download_remote_steam_workshop_item,
+-    download_remote_steam_workshop_items, fix_ssh_key_permissions, generate_ssh_public_key,
+-    get_remote_app_settings, get_remote_mod_locations, get_remote_system_ram,
+-    get_remote_workspace_config, get_remote_zomboid_server_lua_settings,
+-    get_remote_zomboid_server_settings, install_remote_zomboid_mod,
+-    install_remote_zomboid_server_map, install_zomboid_server_on_remote, list_remote_zomboid_mods,
++    create_remote_zomboid_server, delete_all_remote_data, delete_remote_workspace_config,
++    delete_remote_zomboid_server, delete_zomboid_mod_command,
++    deploy_local_zomboid_server_to_remote, download_remote_steam_workshop_collection,
++    download_remote_steam_workshop_item, download_remote_steam_workshop_items,
++    fix_ssh_key_permissions, generate_ssh_public_key, get_remote_app_settings,
++    get_remote_mod_locations, get_remote_system_ram, get_remote_workspace_config,
++    get_remote_zomboid_server_lua_settings, get_remote_zomboid_server_settings,
++    install_remote_zomboid_mod, install_remote_zomboid_server_map,
++    install_zomboid_server_on_remote, list_remote_zomboid_mods, list_remote_zomboid_server_logs,
+     list_remote_zomboid_servers, open_remote_mod_location, read_remote_zomboid_server_file,
+-    run_terminal_command, save_remote_app_settings, save_remote_workspace_config,
+-    save_remote_zomboid_server_path, select_ssh_key_file, send_remote_zomboid_server_command,
+-    setup_remote_helper, start_remote_zomboid_server, start_remote_zomboid_server_test,
+-    stream_remote_zomboid_server_logs, test_remote_server_connection, test_remote_server_latency,
+-    update_remote_zomboid_server_build, update_remote_zomboid_server_lua_settings,
+-    update_remote_zomboid_server_mods, update_remote_zomboid_server_settings,
+-    upload_local_mod_to_remote, upload_steamcmd_to_remote, verify_remote_steamcmd_available,
++    read_remote_zomboid_server_log_file, run_terminal_command, save_remote_app_settings,
++    save_remote_workspace_config, save_remote_zomboid_server_path, select_ssh_key_file,
++    send_remote_zomboid_server_command, setup_remote_helper, start_remote_zomboid_server,
++    start_remote_zomboid_server_test, stream_remote_zomboid_server_logs,
++    test_remote_server_connection, test_remote_server_latency, update_remote_zomboid_server_build,
++    update_remote_zomboid_server_lua_settings, update_remote_zomboid_server_mods,
++    update_remote_zomboid_server_settings, upload_local_mod_to_remote, upload_steamcmd_to_remote,
++    verify_remote_steamcmd_available,
+ };
+ use server_test::{
+     cancel_zomboid_server_test, check_zomboid_server_ports, kill_processes_by_pid,
+@@ -73,8 +75,8 @@ use servers::{
+ };
+ use settings::{
+     add_mod_location, get_app_settings, get_mod_locations, install_linux_steamcmd,
+-    open_mod_location, push_mod_location, save_app_settings, select_mod_folder,
+-    DEFAULT_MAX_CONCURRENT_DOWNLOADS,
++    is_delete_all_enabled, open_mod_location, push_mod_location, save_app_settings,
++    select_mod_folder, DEFAULT_MAX_CONCURRENT_DOWNLOADS,
+ };
+ use util::*;
+ use workshop::{
+@@ -691,6 +693,7 @@ fn main() {
+             save_remote_app_settings,
+             save_remote_workspace_config,
+             delete_remote_workspace_config,
++            delete_all_remote_data,
+             save_remote_zomboid_server_path,
+             select_ssh_key_file,
+             generate_ssh_public_key,
+@@ -704,6 +707,8 @@ fn main() {
+             configure_remote_zomboid_server_firewall,
+             send_remote_zomboid_server_command,
+             read_remote_zomboid_server_file,
++            list_remote_zomboid_server_logs,
++            read_remote_zomboid_server_log_file,
+             start_remote_zomboid_server,
+             stream_remote_zomboid_server_logs,
+             setup_remote_helper,
+@@ -727,6 +732,7 @@ fn main() {
+             get_app_settings,
+             get_mod_locations,
+             save_app_settings,
++            is_delete_all_enabled,
+             install_linux_steamcmd,
+             select_game_executable,
+             get_system_ram,
+diff --git a/src-tauri/src/mods.rs b/src-tauri/src/mods.rs
+index 2f2af55..8368f9e 100644
+--- a/src-tauri/src/mods.rs
++++ b/src-tauri/src/mods.rs
+@@ -62,7 +62,8 @@ pub(crate) fn install_zomboid_mod(
+ }
+ 
+ #[tauri::command]
+-pub(crate) async fn get_workshop_mappings() -> Result<std::collections::HashMap<String, String>, String> {
++pub(crate) async fn get_workshop_mappings(
++) -> Result<std::collections::HashMap<String, String>, String> {
+     let config_dir = crate::app_config_dir()?;
+     let db_path = config_dir.join("workshop-mods-db.json");
+     if !db_path.exists() {
+@@ -70,13 +71,16 @@ pub(crate) async fn get_workshop_mappings() -> Result<std::collections::HashMap<
+     }
+     let content = std::fs::read_to_string(&db_path)
+         .map_err(|e| format!("Falha ao ler banco de dados: {}", e))?;
+-    let mappings: std::collections::HashMap<String, String> = serde_json::from_str(&content)
+-        .unwrap_or_else(|_| std::collections::HashMap::new());
++    let mappings: std::collections::HashMap<String, String> =
++        serde_json::from_str(&content).unwrap_or_else(|_| std::collections::HashMap::new());
+     Ok(mappings)
+ }
+ 
+ #[tauri::command]
+-pub(crate) async fn save_workshop_mapping(mod_id: String, workshop_id: String) -> Result<(), String> {
++pub(crate) async fn save_workshop_mapping(
++    mod_id: String,
++    workshop_id: String,
++) -> Result<(), String> {
+     let config_dir = crate::app_config_dir()?;
+     let db_path = config_dir.join("workshop-mods-db.json");
+     let mut mappings = if db_path.exists() {
+@@ -98,13 +102,15 @@ pub(crate) async fn save_workshop_mapping(mod_id: String, workshop_id: String) -
+ }
+ 
+ #[tauri::command]
+-pub(crate) async fn save_workshop_mappings(mappings: std::collections::HashMap<String, String>) -> Result<(), String> {
++pub(crate) async fn save_workshop_mappings(
++    mappings: std::collections::HashMap<String, String>,
++) -> Result<(), String> {
+     let config_dir = crate::app_config_dir()?;
+     let db_path = config_dir.join("workshop-mods-db.json");
+-    
++
+     let serialized = serde_json::to_string_pretty(&mappings)
+         .map_err(|e| format!("Falha ao serializar dados: {}", e))?;
+-        
++
+     std::fs::create_dir_all(&config_dir)
+         .map_err(|e| format!("Falha ao criar pasta de configuracoes: {}", e))?;
+     std::fs::write(&db_path, serialized)
+@@ -121,8 +127,8 @@ pub(crate) async fn delete_workshop_mapping(mod_id: String) -> Result<(), String
+     }
+     let content = std::fs::read_to_string(&db_path)
+         .map_err(|e| format!("Falha ao ler banco de dados: {}", e))?;
+-    let mut mappings: std::collections::HashMap<String, String> = serde_json::from_str(&content)
+-        .unwrap_or_else(|_| std::collections::HashMap::new());
++    let mut mappings: std::collections::HashMap<String, String> =
++        serde_json::from_str(&content).unwrap_or_else(|_| std::collections::HashMap::new());
+     mappings.remove(&mod_id);
+     let serialized = serde_json::to_string_pretty(&mappings)
+         .map_err(|e| format!("Falha ao salvar banco de dados: {}", e))?;
+diff --git a/src-tauri/src/remote.rs b/src-tauri/src/remote.rs
+index 090a57f..f9d3143 100644
+--- a/src-tauri/src/remote.rs
++++ b/src-tauri/src/remote.rs
+@@ -270,6 +270,27 @@ pub(crate) async fn read_remote_zomboid_server_file(
+     })
+     .await
+ }
++
++#[tauri::command]
++pub(crate) async fn list_remote_zomboid_server_logs(
++    connection: RemoteServerConnectionRequest,
++    server_id: String,
++) -> Result<Vec<crate::servers::AvailableLogFile>, String> {
++    run_blocking(move || list_remote_zomboid_server_logs_impl(&connection, &server_id)).await
++}
++
++#[tauri::command]
++pub(crate) async fn read_remote_zomboid_server_log_file(
++    connection: RemoteServerConnectionRequest,
++    server_id: String,
++    log_name: String,
++) -> Result<RemoteServerFileContent, String> {
++    run_blocking(move || {
++        read_remote_zomboid_server_log_file_impl(&connection, &server_id, &log_name)
++    })
++    .await
++}
++
+ #[tauri::command]
+ pub(crate) async fn check_remote_zomboid_server_status(
+     connection: RemoteServerConnectionRequest,
+@@ -358,6 +379,7 @@ pub(crate) fn stream_remote_zomboid_server_logs(
+     app: tauri::AppHandle,
+     connection: RemoteServerConnectionRequest,
+     server_id: String,
++    follow_from_end: Option<bool>,
+ ) -> Result<RemoteServerActionResult, String> {
+     let server_id = server_id.trim().to_string();
+ 
+@@ -375,10 +397,15 @@ pub(crate) fn stream_remote_zomboid_server_logs(
+     let mut helper_connection = connection.clone();
+     helper_connection.server_path = config.server_path;
+ 
++    let follow_from_end = follow_from_end.unwrap_or(false);
++
+     thread::spawn(move || {
+-        if let Err(error) =
+-            run_remote_zomboid_server_logs_streaming(&app, &helper_connection, &event_server_id)
+-        {
++        if let Err(error) = run_remote_zomboid_server_logs_streaming(
++            &app,
++            &helper_connection,
++            &event_server_id,
++            follow_from_end,
++        ) {
+             let _ = app.emit(
+                 "remote-server-start-event",
+                 ServerTestEvent {
+@@ -470,6 +497,14 @@ pub(crate) async fn delete_remote_workspace_config(
+     run_blocking(move || delete_remote_workspace_config_impl(&connection)).await
+ }
+ 
++#[tauri::command]
++pub(crate) async fn delete_all_remote_data(
++    connection: RemoteServerConnectionRequest,
++    confirmation: String,
++) -> Result<RemoteServerActionResult, String> {
++    run_blocking(move || delete_all_remote_data_impl(&connection, &confirmation)).await
++}
++
+ #[tauri::command]
+ pub(crate) async fn get_remote_app_settings(
+     connection: RemoteServerConnectionRequest,
+@@ -633,6 +668,12 @@ struct DeployProgressPayload {
+     detail: Option<String>,
+ }
+ 
++#[derive(Clone, Debug, Eq, Hash, PartialEq)]
++struct DeployModFolder {
++    path: PathBuf,
++    workshop_id: Option<String>,
++}
++
+ #[tauri::command]
+ pub(crate) async fn deploy_local_zomboid_server_to_remote(
+     app: tauri::AppHandle,
+@@ -694,7 +735,7 @@ fn deploy_local_zomboid_server_to_remote_impl(
+             detail: None,
+         },
+     );
+-    let mut folders_to_copy = HashSet::new();
++    let mut folders_to_copy: HashSet<DeployModFolder> = HashSet::new();
+     let mut skipped_mods = Vec::new();
+     let mut active_mods_count = 0;
+ 
+@@ -709,9 +750,16 @@ fn deploy_local_zomboid_server_to_remote_impl(
+             for mod_item in all_mods {
+                 if mod_item.source == "local" {
+                     let matching_ids = matching_active_mod_ids(&mod_item, &active_mod_ids);
+-                    if !matching_ids.is_empty() {
++                    let workshop_id = mod_item.workshop_id.trim();
++                    if !matching_ids.is_empty()
++                        && !workshop_id.is_empty()
++                        && workshop_id.chars().all(|char| char.is_ascii_digit())
++                    {
+                         matched_active_mod_ids.extend(matching_ids);
+-                        folders_to_copy.insert(PathBuf::from(mod_item.package_path));
++                        folders_to_copy.insert(DeployModFolder {
++                            path: PathBuf::from(mod_item.package_path),
++                            workshop_id: Some(workshop_id.to_string()),
++                        });
+                     }
+                 }
+             }
+@@ -731,13 +779,19 @@ fn deploy_local_zomboid_server_to_remote_impl(
+                     },
+                 );
+ 
+-                let remote_mods_dir = join_remote_unix_path(&remote_zomboid_dir, "mods");
++                let remote_mods_roots = [
++                    remote_steamcmd_home_workshop_dir(connection),
++                    remote_default_steam_workshop_dir(connection),
++                    join_remote_unix_path(&remote_zomboid_dir, "mods"),
++                ]
++                .join("\n");
+                 let manifest_command = format!(
+-                    r#"PZMM_ROOT={} python3 - <<'PY'
++                    r#"PZMM_ROOTS={} python3 - <<'PY'
+ import json, os
+-root = os.environ.get("PZMM_ROOT", "")
++roots = [root for root in os.environ.get("PZMM_ROOTS", "").splitlines() if root]
+ out = []
+-if root and os.path.isdir(root):
++for root in roots:
++  if root and os.path.isdir(root):
+     for base, _dirs, files in os.walk(root):
+         for name in files:
+             path = os.path.join(base, name)
+@@ -747,7 +801,7 @@ if root and os.path.isdir(root):
+ print(json.dumps(out, separators=(",", ":")))
+ PY
+ "#,
+-                    linux_shell_quote(&remote_mods_dir)
++                    linux_shell_quote(&remote_mods_roots)
+                 );
+                 let manifest_output = run_ssh_capture(connection, &manifest_command)
+                     .map_err(|e| format!("Failed to read remote mods manifest: {e}"))?;
+@@ -756,17 +810,24 @@ PY
+                         .map_err(|e| format!("Failed to parse remote mods manifest: {e}"))?;
+ 
+                 let mut remote_mods_files: HashMap<String, Vec<RemoteFileItem>> = HashMap::new();
+-                for item in remote_files {
++                for mut item in remote_files {
+                     let path_lower = item.p.to_lowercase();
+-                    if let Some(idx) = path_lower.find('/') {
+-                        let mod_folder = path_lower[..idx].to_string();
++                    let mod_path = path_lower
++                        .split_once("/mods/")
++                        .map(|(_, suffix)| suffix)
++                        .unwrap_or(&path_lower)
++                        .to_string();
++                    item.p = mod_path.clone();
++                    if let Some(idx) = mod_path.find('/') {
++                        let mod_folder = mod_path[..idx].to_string();
+                         remote_mods_files.entry(mod_folder).or_default().push(item);
+                     }
+                 }
+ 
+                 let mut dirty_folders = HashSet::new();
+-                for local_folder in &folders_to_copy {
+-                    let folder_name = local_folder
++                for deploy_folder in &folders_to_copy {
++                    let folder_name = deploy_folder
++                        .path
+                         .file_name()
+                         .ok_or_else(|| "Invalid mod folder name".to_string())?
+                         .to_string_lossy()
+@@ -774,9 +835,12 @@ PY
+                     let folder_name_lower = folder_name.to_lowercase();
+ 
+                     let mut local_files = HashMap::new();
+-                    if let Some(parent) = local_folder.parent() {
+-                        let _ =
+-                            collect_local_files_recursive(local_folder, parent, &mut local_files);
++                    if let Some(parent) = deploy_folder.path.parent() {
++                        let _ = collect_local_files_recursive(
++                            &deploy_folder.path,
++                            parent,
++                            &mut local_files,
++                        );
+                     }
+ 
+                     let remote_mod_files = remote_mods_files.get(&folder_name_lower);
+@@ -813,7 +877,7 @@ PY
+                     };
+ 
+                     if is_dirty {
+-                        dirty_folders.insert(local_folder.clone());
++                        dirty_folders.insert(deploy_folder.clone());
+                     }
+                 }
+ 
+@@ -909,10 +973,14 @@ PY
+ 
+     // 5. Copy local mods
+     let total_mods = folders_to_copy.len();
+-    for (i, folder) in folders_to_copy.iter().enumerate() {
+-        let folder_name = folder
++    for (i, deploy_folder) in folders_to_copy.iter().enumerate() {
++        let folder_name = deploy_folder
++            .path
+             .file_name()
+             .ok_or_else(|| "Invalid mod folder name".to_string())?;
++        let workshop_id = deploy_folder.workshop_id.as_deref().ok_or_else(|| {
++            "A Workshop ID is required to deploy mods into the Steam folder.".to_string()
++        })?;
+ 
+         let _ = app.emit(
+             "deploy-progress",
+@@ -927,8 +995,11 @@ PY
+             },
+         );
+ 
+-        let dest = temp_mods_dir.join(folder_name);
+-        copy_dir_all(folder, &dest)?;
++        let dest = temp_mods_dir
++            .join(workshop_id)
++            .join("mods")
++            .join(folder_name);
++        copy_dir_all(&deploy_folder.path, &dest)?;
+     }
+ 
+     // 6. Zip server state and mods separately. The server archive keeps the Zomboid folder
+@@ -1046,9 +1117,9 @@ PY
+     let remote_script = format!(
+         r#"set -e
+ zomboid_dir={zomboid_dir}
++steam_mods_target={steam_mods_target}
+ server_zip={server_zip}
+ mods_zip={mods_zip}
+-mods_target="$zomboid_dir/mods"
+ overwrite={overwrite}
+ extract_archive() {{
+   zip_path="$1"
+@@ -1085,12 +1156,13 @@ with zipfile.ZipFile(zip_path) as archive:
+ PY
+ }}
+ extract_archive "$server_zip" "$zomboid_dir" 'server data'
+-extract_archive "$mods_zip" "$mods_target" 'mods'
++extract_archive "$mods_zip" "$steam_mods_target" 'mods'
+ echo 'DEPLOY_SUCCESS'
+ echo 'PZMM_STEP|Cleaning remote compressed deploy files'
+ rm -f "$server_zip" "$mods_zip"
+ "#,
+         zomboid_dir = linux_shell_quote(&remote_zomboid_dir),
++        steam_mods_target = linux_shell_quote(&remote_steamcmd_home_workshop_dir(connection)),
+         server_zip = linux_shell_quote(&remote_server_zip_path),
+         mods_zip = linux_shell_quote(&remote_mods_zip_path),
+         overwrite = overwrite_existing,
+@@ -1515,6 +1587,7 @@ pub(crate) async fn upload_local_mod_to_remote(
+     app: tauri::AppHandle,
+     connection: RemoteServerConnectionRequest,
+     mod_id: String,
++    workshop_id: Option<String>,
+     local_mod_path: String,
+ ) -> Result<(), String> {
+     run_blocking(move || {
+@@ -1551,7 +1624,16 @@ pub(crate) async fn upload_local_mod_to_remote(
+         // 5. Unzip on remote
+         let (remote_zomboid_dir, remote_data_owner) =
+             remote_zomboid_data_dir_and_owner_for_connection(connection)?;
+-        let mods_target = format!("{}/mods", remote_zomboid_dir);
++        let workshop_id = workshop_id.unwrap_or_default();
++        let workshop_id = workshop_id.trim();
++        let mods_target = if workshop_id.chars().all(|char| char.is_ascii_digit()) && !workshop_id.is_empty() {
++            join_remote_unix_path(
++                &join_remote_unix_path(&remote_steamcmd_home_workshop_dir(connection), workshop_id),
++                "mods",
++            )
++        } else {
++            join_remote_unix_path(&remote_zomboid_dir, "mods")
++        };
+ 
+         let remote_script = format!(
+             r#"set -e
+@@ -1741,11 +1823,11 @@ fn stage_remote_mod_install_source(
+     } else {
+         workshop_id.trim()
+     });
++    let (remote_zomboid_dir, data_owner) =
++        remote_zomboid_data_dir_and_owner_for_connection(connection)?;
++    let cache_root = remote_workspace_cache_dir(&remote_zomboid_dir);
+     let staged_mods_root = join_remote_unix_path(
+-        &join_remote_unix_path(
+-            &join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "cache"),
+-            "install-sources",
+-        ),
++        &join_remote_unix_path(&cache_root, "install-sources"),
+         &join_remote_unix_path(&cache_workshop_id, "mods"),
+     );
+     let staged_package_path = join_remote_unix_path(&staged_mods_root, requested_folder);
+@@ -1753,7 +1835,8 @@ fn stage_remote_mod_install_source(
+     let source_root_dot = join_remote_unix_path(&source_root, ".");
+ 
+     let command = format!(
+-        "set -e; test -d {source_root} || {{ echo {missing_prefix} {source_root} >&2; exit 2; }}; sudo -n install -d -o pzmm -g pzmm {staged_root}; sudo -n cp -a {source_dot} {staged_root}/; sudo -n chown -R pzmm:pzmm {staged_root}; printf '%s\n' {staged_package}",
++        "set -e; data_owner={data_owner}; sudo -n id -u \"$data_owner\" >/dev/null; sudo -n test -d {source_root} || {{ echo {missing_prefix} {source_root} >&2; exit 2; }}; sudo -n -u \"$data_owner\" mkdir -p {staged_root}; sudo -n cp -a {source_dot} {staged_root}/; sudo -n chown -R \"${data_owner}:${data_owner}\" {staged_root}; printf '%s\n' {staged_package}",
++        data_owner = linux_sudo_user_arg(&data_owner),
+         source_root = linux_shell_quote(&source_root),
+         missing_prefix = linux_shell_quote("Workshop mods folder not found:"),
+         staged_root = linux_shell_quote(&staged_mods_root),
+@@ -1778,6 +1861,16 @@ fn stage_remote_mod_install_source(
+     Ok(staged.to_string())
+ }
+ 
++fn remote_workspace_cache_dir(remote_zomboid_dir: &str) -> String {
++    let managed_zomboid_dir = join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "Zomboid");
++
++    if remote_zomboid_dir.trim().trim_end_matches('/') == managed_zomboid_dir {
++        join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "cache")
++    } else {
++        join_remote_unix_path(remote_zomboid_dir, ".pzmm-cache")
++    }
++}
++
+ fn safe_remote_cache_segment(value: &str) -> String {
+     let segment = value
+         .chars()
+@@ -1901,7 +1994,9 @@ fn mark_remote_setup_completed_step(
+     config.username = connection.username.clone();
+     config.auth_method = connection.auth_method.clone();
+     config.ssh_key_path = connection.ssh_key_path.clone();
+-    config.server_path = connection.server_path.clone();
++    if config.server_path.trim().is_empty() {
++        config.server_path = connection.server_path.clone();
++    }
+     config.remote_setup_completed_step = config
+         .remote_setup_completed_step
+         .max(completed_step.min(4));
+@@ -1978,8 +2073,10 @@ fn read_remote_workspace_config_at_path(
+         remote_zomboid_server_dir,
+         remote_zomboid_server_path,
+         remote_zomboid_server_owner: read_ini_value(&content, "remote_zomboid_server_owner")
++            .map(|owner| remote_workspace_owner_or_default(&owner))
+             .unwrap_or_else(|| REMOTE_LINUX_MANAGED_USER.to_string()),
+         remote_zomboid_data_owner: read_ini_value(&content, "remote_zomboid_data_owner")
++            .map(|owner| remote_workspace_owner_or_default(&owner))
+             .unwrap_or_else(|| REMOTE_LINUX_MANAGED_USER.to_string()),
+         remote_client_ram: read_ini_value(&content, "remote_client_ram")
+             .or_else(|| read_ini_value(&content, "client_ram"))
+@@ -2029,8 +2126,9 @@ fn save_remote_zomboid_server_path_impl(
+     Ok(config)
+ }
+ fn save_remote_workspace_config_impl(
+-    config: RemoteWorkspaceConfig,
++    mut config: RemoteWorkspaceConfig,
+ ) -> Result<RemoteWorkspaceConfig, String> {
++    normalize_remote_workspace_config_owners(&mut config)?;
+     write_remote_workspace_config(&config)?;
+     Ok(config)
+ }
+@@ -2065,6 +2163,168 @@ fn delete_remote_workspace_config_impl(
+     Ok(())
+ }
+ 
++fn delete_all_remote_data_impl(
++    connection: &RemoteServerConnectionRequest,
++    confirmation: &str,
++) -> Result<RemoteServerActionResult, String> {
++    const DELETE_ALL_CONFIRMATION: &str = "DELETE ALL PZMM DATA";
++
++    if !delete_all_enabled() {
++        return Err("PZMM_DELETEALL_ENABLED is not enabled.".to_string());
++    }
++
++    if confirmation.trim() != DELETE_ALL_CONFIRMATION {
++        return Err(format!("Type {DELETE_ALL_CONFIRMATION} to confirm."));
++    }
++
++    let config = get_remote_workspace_config_for_connection_impl(connection)?
++        .unwrap_or_else(default_remote_workspace_config);
++    let mut targets = Vec::new();
++
++    let server_profile_path = if config.server_path.trim().is_empty() {
++        remote_server_profile_path_or_default(&connection.server_path)
++    } else {
++        remote_server_profile_path_or_default(&config.server_path)
++    };
++    if let Some(zomboid_dir) = remote_unix_parent_path(&server_profile_path) {
++        push_safe_remote_delete_target(&mut targets, &zomboid_dir);
++        if let Some(data_parent) = remote_unix_parent_path(&zomboid_dir) {
++            push_safe_remote_delete_target(
++                &mut targets,
++                &join_remote_unix_path(&data_parent, "Steam/steamapps/workshop/content/108600"),
++            );
++            push_safe_remote_delete_target(
++                &mut targets,
++                &join_remote_unix_path(
++                    &data_parent,
++                    ".local/share/Steam/steamapps/workshop/content/108600",
++                ),
++            );
++        }
++    }
++
++    push_safe_remote_delete_target(&mut targets, &config.remote_steamcmd_dir);
++    push_safe_remote_delete_target(&mut targets, &config.remote_zomboid_server_dir);
++
++    push_safe_remote_delete_target(&mut targets, REMOTE_LINUX_HELPER_DIR);
++    push_safe_remote_delete_target(
++        &mut targets,
++        &join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "cache"),
++    );
++
++    if targets.is_empty() {
++        delete_remote_workspace_config_impl(connection)?;
++        return Ok(RemoteServerActionResult {
++            success: true,
++            message: "No remote paths found to delete.".to_string(),
++            command: String::new(),
++            logs: vec!["No remote paths found to delete.".to_string()],
++        });
++    }
++
++    targets.sort_by_key(|target| std::cmp::Reverse(target.len()));
++
++    let quoted_targets = targets
++        .iter()
++        .map(|target| linux_shell_quote(target))
++        .collect::<Vec<_>>()
++        .join(" ");
++
++    let command = format!(
++        r#"sudo -n true || {{ echo 'PZMM_REMOTE_DELETE_FAILED=sudo authentication is required' >&2; exit 1; }}
++pgrep -f '[p]zmm-helper' | sudo -n xargs -r kill 2>/dev/null || true
++pgrep -f '[s]teamcmd' | sudo -n xargs -r kill 2>/dev/null || true
++failures=0
++for target in {targets}; do
++  case "$target" in
++    ""|"/"|"/home"|"/root"|"/opt"|"/var"|"/var/lib"|"/usr"|"/tmp")
++      printf 'PZMM_REMOTE_REFUSED=%s\n' "$target" >&2
++      failures=$((failures + 1))
++      continue
++      ;;
++  esac
++  if sudo -n test -e "$target"; then
++    printf 'PZMM_REMOTE_DELETE_ATTEMPT=%s\n' "$target"
++    if sudo -n rm -rf -- "$target"; then
++      if sudo -n test -e "$target"; then
++        printf 'PZMM_REMOTE_DELETE_FAILED=%s still exists after rm\n' "$target" >&2
++        failures=$((failures + 1))
++      else
++        printf 'PZMM_REMOTE_DELETED=%s\n' "$target"
++      fi
++    else
++      printf 'PZMM_REMOTE_DELETE_FAILED=%s rm failed\n' "$target" >&2
++      failures=$((failures + 1))
++    fi
++  else
++    printf 'PZMM_REMOTE_SKIPPED=%s\n' "$target"
++  fi
++done
++if [ "$failures" -gt 0 ]; then
++  exit 1
++fi"#,
++        targets = quoted_targets,
++    );
++    let output = run_ssh_capture_raw(connection, &command)?;
++
++    if !output.success {
++        return Err(join_command_output(&[
++            "Remote delete-all command failed.",
++            output.stdout.as_str(),
++            output.stderr.as_str(),
++        ]));
++    }
++
++    delete_remote_workspace_config_impl(connection)?;
++
++    let mut logs = output
++        .stdout
++        .lines()
++        .map(|line| line.trim().to_string())
++        .filter(|line| !line.is_empty())
++        .collect::<Vec<_>>();
++    logs.push("Remote workspace config removed from this app.".to_string());
++
++    Ok(RemoteServerActionResult {
++        success: true,
++        message: "Remote PZMM data deleted. Reopen the workspace setup before using this VM again."
++            .to_string(),
++        command,
++        logs,
++    })
++}
++
++fn delete_all_enabled() -> bool {
++    std::env::var("PZMM_DELETEALL_ENABLED")
++        .ok()
++        .map(|value| {
++            let normalized = value.trim().to_ascii_lowercase();
++            !normalized.is_empty() && !matches!(normalized.as_str(), "0" | "false" | "no" | "off")
++        })
++        .unwrap_or(false)
++}
++
++fn push_safe_remote_delete_target(targets: &mut Vec<String>, path: &str) {
++    let normalized = path.trim().trim_end_matches('/');
++
++    if !looks_like_linux_path(normalized) || normalized.is_empty() || normalized == "/" {
++        return;
++    }
++
++    if matches!(
++        normalized,
++        "/home" | "/root" | "/opt" | "/var" | "/var/lib" | "/usr" | "/tmp"
++    ) {
++        return;
++    }
++
++    if targets.iter().any(|target| target == normalized) {
++        return;
++    }
++
++    targets.push(normalized.to_string());
++}
++
+ fn get_remote_app_settings_impl(
+     connection: RemoteServerConnectionRequest,
+ ) -> Result<AppSettings, String> {
+@@ -2075,6 +2335,23 @@ fn get_remote_app_settings_impl(
+ }
+ 
+ fn get_remote_system_ram_impl(connection: &RemoteServerConnectionRequest) -> Result<u32, String> {
++    let result = run_ssh_capture(
++        connection,
++        "awk '/^MemTotal:/ { print int(($2 + 1048575) / 1048576); exit }' /proc/meminfo",
++    )?;
++
++    if result.success {
++        let ram = result
++            .stdout
++            .trim()
++            .parse::<u32>()
++            .map_err(|_| "Could not parse remote system RAM.".to_string())?;
++
++        if ram > 0 {
++            return Ok(ram);
++        }
++    }
++
+     run_remote_helper_json(connection, "get-system-ram", Option::<&Value>::None)
+ }
+ 
+@@ -2102,7 +2379,7 @@ fn save_remote_app_settings_impl(request: RemoteAppSettingsRequest) -> Result<Ap
+         &request.connection,
+         &server_path,
+         &server_ram,
+-        server_owner,
++        &server_owner,
+     )?;
+ 
+     config.name = request.connection.name;
+@@ -2142,34 +2419,49 @@ fn remote_app_settings_from_config(config: &RemoteWorkspaceConfig) -> AppSetting
+     }
+ }
+ 
+-fn remote_default_steam_workshop_dir(_connection: &RemoteServerConnectionRequest) -> String {
++fn remote_data_dir_for_workshop_paths(connection: &RemoteServerConnectionRequest) -> String {
++    remote_zomboid_data_dir_and_owner_for_connection(connection)
++        .ok()
++        .and_then(|(zomboid_dir, _)| remote_unix_parent_path(&zomboid_dir))
++        .unwrap_or_else(|| REMOTE_LINUX_DATA_DIR.to_string())
++}
++
++fn remote_default_steam_workshop_dir(connection: &RemoteServerConnectionRequest) -> String {
+     join_remote_unix_path(
+-        REMOTE_LINUX_DATA_DIR,
++        &remote_data_dir_for_workshop_paths(connection),
+         "Steam/steamapps/workshop/content/108600",
+     )
+ }
+ 
+-fn remote_default_zomboid_mods_dir() -> String {
+-    format!("{}/Zomboid/mods", REMOTE_LINUX_DATA_DIR)
++fn remote_steamcmd_home_workshop_dir(connection: &RemoteServerConnectionRequest) -> String {
++    join_remote_unix_path(
++        &remote_data_dir_for_workshop_paths(connection),
++        ".local/share/Steam/steamapps/workshop/content/108600",
++    )
+ }
+ 
+-fn remote_ssh_user_home(connection: &RemoteServerConnectionRequest) -> Option<String> {
+-    let username = connection.username.trim();
+-    if username.is_empty() {
+-        None
+-    } else {
+-        Some(format!("/home/{username}"))
+-    }
++fn remote_default_zomboid_mods_dir(connection: &RemoteServerConnectionRequest) -> String {
++    join_remote_unix_path(
++        &remote_data_dir_for_workshop_paths(connection),
++        "Zomboid/mods",
++    )
+ }
+ 
+ fn remote_steam_workshop_dir_candidates(
+     connection: &RemoteServerConnectionRequest,
+ ) -> Vec<(String, String, String)> {
+-    vec![(
+-        crate::i18n::mod_location_label("steam", None),
+-        remote_default_steam_workshop_dir(connection),
+-        "steam".to_string(),
+-    )]
++    vec![
++        (
++            crate::i18n::mod_location_label("steam", None),
++            remote_steamcmd_home_workshop_dir(connection),
++            "steam".to_string(),
++        ),
++        (
++            crate::i18n::mod_location_label("steam", None),
++            remote_default_steam_workshop_dir(connection),
++            "steam".to_string(),
++        ),
++    ]
+ }
+ 
+ fn remote_extra_steam_workshop_dirs(connection: &RemoteServerConnectionRequest) -> String {
+@@ -2183,12 +2475,21 @@ fn remote_extra_steam_workshop_dirs(connection: &RemoteServerConnectionRequest)
+ fn ensure_remote_steamcmd_workshop_dir_prepared(
+     connection: &RemoteServerConnectionRequest,
+ ) -> Result<(), String> {
++    let (remote_zomboid_dir, data_owner) =
++        remote_zomboid_data_dir_and_owner_for_connection(connection)?;
++    let remote_data_dir = remote_unix_parent_path(&remote_zomboid_dir)
++        .unwrap_or_else(|| REMOTE_LINUX_DATA_DIR.to_string());
+     let target_dir = remote_default_steam_workshop_dir(connection);
+-    let steam_root = join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "Steam");
++    let home_target_dir = remote_steamcmd_home_workshop_dir(connection);
++    let steam_root = join_remote_unix_path(&remote_data_dir, "Steam");
++    let home_steam_root = join_remote_unix_path(&remote_data_dir, ".local/share/Steam");
+     let script = format!(
+-        "set -e; sudo -n install -d -o pzmm -g pzmm {}; sudo -n chown -R pzmm:pzmm {}",
++        "set -e; data_owner={}; sudo -n id -u \"$data_owner\" >/dev/null; sudo -n -u \"$data_owner\" mkdir -p {} {}; sudo -n chown -R \"${data_owner}:${data_owner}\" {} {}",
++        linux_sudo_user_arg(&data_owner),
+         linux_shell_quote(&target_dir),
++        linux_shell_quote(&home_target_dir),
+         linux_shell_quote(&steam_root),
++        linux_shell_quote(&home_steam_root),
+     );
+     let output = run_ssh_capture(connection, &script)?;
+ 
+@@ -2209,36 +2510,22 @@ fn get_remote_mod_locations_impl(
+     let mut entries = remote_steam_workshop_dir_candidates(&connection);
+     entries.push((
+         crate::i18n::mod_location_label("local", None),
+-        remote_default_zomboid_mods_dir(),
++        remote_default_zomboid_mods_dir(&connection),
+         "local".to_string(),
+     ));
+ 
+-    let steam_paths = entries
+-        .iter()
+-        .filter(|(_, _, kind)| kind == "steam")
+-        .map(|(_, path, _)| path.clone())
+-        .collect::<Vec<_>>();
+-    let managed_paths = entries
++    // Workshop folders can live inside another user's home directory. Always
++    // check them through the helper running as the saved data owner, otherwise
++    // an SSH user such as ubuntu may see a false "missing" result for /home/user.
++    let paths = entries
+         .iter()
+-        .filter(|(_, _, kind)| kind != "steam")
+         .map(|(_, path, _)| path.clone())
+         .collect::<Vec<_>>();
+-
+-    let mut remote_paths = Vec::new();
+-    if !steam_paths.is_empty() {
+-        remote_paths.extend(get_remote_path_status_as_ssh_user(
+-            &connection,
+-            &steam_paths,
+-        )?);
+-    }
+-    if !managed_paths.is_empty() {
+-        let managed_statuses: Vec<RemotePathExists> = run_remote_helper_json_with_sudo(
+-            &connection,
+-            "get-path-status",
+-            Some(&serde_json::json!({ "paths": managed_paths })),
+-        )?;
+-        remote_paths.extend(managed_statuses);
+-    }
++    let remote_paths: Vec<RemotePathExists> = run_remote_helper_json_with_sudo(
++        &connection,
++        "get-path-status",
++        Some(&serde_json::json!({ "paths": paths })),
++    )?;
+ 
+     Ok(entries
+         .into_iter()
+@@ -2309,47 +2596,6 @@ struct RemotePathExists {
+     exists: bool,
+ }
+ 
+-fn get_remote_path_status_as_ssh_user(
+-    connection: &RemoteServerConnectionRequest,
+-    paths: &[String],
+-) -> Result<Vec<RemotePathExists>, String> {
+-    if paths.is_empty() {
+-        return Ok(Vec::new());
+-    }
+-
+-    let checks = paths
+-        .iter()
+-        .map(|path| {
+-            format!(
+-                "if [ -d {path} ]; then printf '%s\t1\n' {path}; else printf '%s\t0\n' {path}; fi",
+-                path = linux_shell_quote(path),
+-            )
+-        })
+-        .collect::<Vec<_>>()
+-        .join("; ");
+-    let output = run_ssh_capture(connection, &format!("set -e; {checks}"))?;
+-
+-    if !output.success {
+-        return Err(join_command_output(&[
+-            "Could not check remote Steam folders.",
+-            output.stdout.as_str(),
+-            output.stderr.as_str(),
+-        ]));
+-    }
+-
+-    Ok(output
+-        .stdout
+-        .lines()
+-        .filter_map(|line| {
+-            let (path, exists) = line.rsplit_once('\t')?;
+-            Some(RemotePathExists {
+-                path: path.to_string(),
+-                exists: exists.trim() == "1",
+-            })
+-        })
+-        .collect())
+-}
+-
+ fn remote_workspace_config_path() -> Result<PathBuf, String> {
+     Ok(app_config_dir()?.join("remote-workspace.ini"))
+ }
+@@ -2396,6 +2642,8 @@ fn remote_workspace_config_path_for_config(
+ 
+ fn write_remote_workspace_config(config: &RemoteWorkspaceConfig) -> Result<(), String> {
+     let path = remote_workspace_config_path_for_config(config)?;
++    let mut config = config.clone();
++    normalize_remote_workspace_config_owners(&mut config)?;
+ 
+     if let Some(parent) = path.parent() {
+         fs::create_dir_all(parent)
+@@ -2451,6 +2699,18 @@ fn write_remote_workspace_config(config: &RemoteWorkspaceConfig) -> Result<(), S
+         .map_err(|error| format!("Nao foi possivel salvar {}: {error}", path.display()))
+ }
+ 
++fn normalize_remote_workspace_config_owners(
++    config: &mut RemoteWorkspaceConfig,
++) -> Result<(), String> {
++    config.remote_zomboid_server_owner =
++        remote_workspace_owner_or_default(&config.remote_zomboid_server_owner);
++    config.remote_zomboid_data_owner =
++        remote_workspace_owner_or_default(&config.remote_zomboid_data_owner);
++    validate_linux_username(&config.remote_zomboid_server_owner)?;
++    validate_linux_username(&config.remote_zomboid_data_owner)?;
++    Ok(())
++}
++
+ fn test_remote_server_connection_impl(
+     connection: RemoteServerConnectionRequest,
+ ) -> Result<RemoteServerConnectionResult, String> {
+@@ -2561,13 +2821,19 @@ fn resolve_remote_zomboid_server_launch_path(
+     } else {
+         server_launch_path.trim()
+     };
+-    let candidates = [
++    let mut candidates = [
+         launch_path.to_string(),
+         join_remote_unix_path(directory, "start-server.sh"),
+         join_remote_unix_path(directory, "ProjectZomboid64"),
+-    ];
++    ]
++    .into_iter()
++    .filter(|candidate| looks_like_linux_path(candidate))
++    .collect::<Vec<_>>();
++    candidates.sort();
++    candidates.dedup();
++
+     let test_script = format!(
+-        "set -e; for candidate in {}; do if [ -f \"$candidate\" ]; then printf 'PZMM_ZOMBOID_SERVER_PATH=%s\\n' \"$candidate\"; exit 0; fi; done; printf 'checked: {}\\n' >&2; exit 1",
++        "set -e; sudo -n true; for candidate in {}; do if sudo -n test -f \"$candidate\"; then printf 'PZMM_ZOMBOID_SERVER_PATH=%s\\n' \"$candidate\"; exit 0; fi; done; printf 'checked with sudo: {}\\n' >&2; exit 1",
+         candidates
+             .iter()
+             .map(|candidate| linux_shell_quote(candidate))
+@@ -2575,7 +2841,15 @@ fn resolve_remote_zomboid_server_launch_path(
+             .join(" "),
+         candidates.join(", ")
+     );
+-    let result = run_ssh_capture(connection, &test_script)?;
++    let result = run_ssh_capture_raw(connection, &test_script)?;
++
++    if !result.success {
++        return Err(join_command_output(&[
++            "Could not find the remote Project Zomboid Linux launcher path.",
++            result.stdout.as_str(),
++            result.stderr.as_str(),
++        ]));
++    }
+ 
+     result
+         .stdout
+@@ -2631,7 +2905,26 @@ fn build_remote_performance_settings_script(
+     format!(
+         r#"set -e
+ ram={}
+-sudo -n -u {} env HOME=/var/lib/pzmm PZMM_DATA_DIR=/var/lib/pzmm python3 - "$ram" {} <<'PY'
++server_owner={}
++for server_dir in {}; do
++  for json_name in ProjectZomboid64.json ProjectZomboid32.json; do
++    json_path="$server_dir/$json_name"
++    if sudo -n test -f "$json_path"; then
++      detected_owner=$(sudo -n stat -c '%U' "$json_path")
++      if [ -n "$detected_owner" ] && [ "$detected_owner" != UNKNOWN ]; then
++        server_owner="$detected_owner"
++        break 2
++      fi
++    fi
++  done
++done
++sudo -n id -u "$server_owner" >/dev/null
++owner_home=$(getent passwd "$server_owner" | cut -d: -f6)
++if [ -z "$owner_home" ]; then
++  owner_home=/tmp
++fi
++cd /
++sudo -n -u "$server_owner" env HOME="$owner_home" PZMM_DATA_DIR="$owner_home" python3 - "$ram" {} <<'PY'
+ import json, pathlib, re, sys
+ ram = sys.argv[1]
+ server_dirs = [pathlib.Path(value) for value in sys.argv[2:]]
+@@ -2684,7 +2977,7 @@ if not updated:
+ print("PZMM_REMOTE_PERFORMANCE_UPDATED=" + ",".join(updated))
+ PY
+ "#,
+-        server_mb, server_owner, quoted_dirs,
++        server_mb, server_owner, quoted_dirs, quoted_dirs,
+     )
+ }
+ 
+@@ -2794,18 +3087,46 @@ fn validate_linux_username(username: &str) -> Result<(), String> {
+     Ok(())
+ }
+ 
+-fn remote_workspace_owner_or_default(owner: &str) -> &str {
+-    let owner = owner.trim();
++fn remote_workspace_owner_or_default(owner: &str) -> String {
++    let owner = normalize_remote_owner_value(owner);
+ 
+     if owner.is_empty() {
+-        REMOTE_LINUX_MANAGED_USER
++        REMOTE_LINUX_MANAGED_USER.to_string()
+     } else {
+         owner
+     }
+ }
+ 
++fn normalize_remote_owner_value(owner: &str) -> String {
++    let trimmed = owner.trim();
++    if trimmed.is_empty() {
++        return String::new();
++    }
++
++    // Older builds persisted the output of shell quoting instead of the username
++    // itself, for example "$'\\''pzalt'\\'''". Recover only shell punctuation;
++    // reject any other characters later through validate_linux_username.
++    let mut normalized = String::new();
++    let mut had_shell_punctuation = false;
++    for character in trimmed.chars() {
++        if character.is_ascii_alphanumeric() || matches!(character, '_' | '-') {
++            normalized.push(character);
++        } else if matches!(character, '$' | '\'' | '"' | '\\') {
++            had_shell_punctuation = true;
++        } else {
++            return trimmed.to_string();
++        }
++    }
++
++    if had_shell_punctuation && !normalized.is_empty() {
++        normalized
++    } else {
++        trimmed.to_string()
++    }
++}
++
+ fn linux_sudo_user_arg(owner: &str) -> String {
+-    linux_shell_quote(remote_workspace_owner_or_default(owner))
++    linux_shell_quote(&remote_workspace_owner_or_default(owner))
+ }
+ 
+ fn remote_zomboid_data_dir_and_owner_for_connection(
+@@ -2820,11 +3141,105 @@ fn remote_zomboid_data_dir_and_owner_for_connection(
+     };
+     let remote_zomboid_dir = remote_unix_parent_path(&server_profile_path)
+         .unwrap_or_else(|| join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "Zomboid"));
+-    let owner = remote_workspace_owner_or_default(&config.remote_zomboid_data_owner).to_string();
++    let owner = remote_workspace_owner_or_default(&config.remote_zomboid_data_owner);
+     validate_linux_username(&owner)?;
+     Ok((remote_zomboid_dir, owner))
+ }
+ 
++fn list_remote_zomboid_server_logs_impl(
++    connection: &RemoteServerConnectionRequest,
++    _server_id: &str,
++) -> Result<Vec<crate::servers::AvailableLogFile>, String> {
++    let (remote_zomboid_dir, owner) = remote_zomboid_data_dir_and_owner_for_connection(connection)?;
++    let logs_dir = join_remote_unix_path(&remote_zomboid_dir, "Logs");
++    let command = format!(
++        r#"set -e
++logs_dir={logs_dir}
++owner={owner}
++sudo -n id -u "$owner" >/dev/null
++if ! sudo -n test -d "$logs_dir"; then printf '[]\n'; exit 0; fi
++sudo -n -u "$owner" env LOGS_DIR="$logs_dir" python3 - <<'PY'
++import json, os, pathlib
++logs_dir = pathlib.Path(os.environ["LOGS_DIR"])
++items = []
++for path in logs_dir.iterdir():
++    if not path.is_file() or path.suffix not in (".txt", ".log"):
++        continue
++    stat = path.stat()
++    items.append({{
++        "name": path.name,
++        "path": str(path),
++        "sizeBytes": stat.st_size,
++        "lastModified": int(stat.st_mtime),
++    }})
++items.sort(key=lambda item: item["lastModified"], reverse=True)
++print(json.dumps(items))
++PY"#,
++        logs_dir = linux_shell_quote(&logs_dir),
++        owner = linux_sudo_user_arg(&owner),
++    );
++    let output = run_ssh_capture(connection, &command)?;
++    serde_json::from_str(output.stdout.trim()).map_err(|error| {
++        format!(
++            "Could not parse remote server logs list: {error}\n\n{}",
++            join_command_output(&[output.stdout.as_str(), output.stderr.as_str()])
++        )
++    })
++}
++
++fn read_remote_zomboid_server_log_file_impl(
++    connection: &RemoteServerConnectionRequest,
++    server_id: &str,
++    log_name: &str,
++) -> Result<RemoteServerFileContent, String> {
++    let clean_log_name = Path::new(log_name)
++        .file_name()
++        .map(|name| name.to_string_lossy().to_string())
++        .filter(|name| !name.trim().is_empty())
++        .ok_or_else(|| "Invalid server log name.".to_string())?;
++
++    if !clean_log_name.ends_with(".txt") && !clean_log_name.ends_with(".log") {
++        return Err("Invalid server log extension.".to_string());
++    }
++
++    let (remote_zomboid_dir, owner) = remote_zomboid_data_dir_and_owner_for_connection(connection)?;
++    let logs_dir = join_remote_unix_path(&remote_zomboid_dir, "Logs");
++    let command = format!(
++        r#"set -e
++logs_dir={logs_dir}
++owner={owner}
++log_name={log_name}
++sudo -n id -u "$owner" >/dev/null
++sudo -n -u "$owner" env LOGS_DIR="$logs_dir" LOG_NAME="$log_name" SERVER_ID={server_id} python3 - <<'PY'
++import json, os, pathlib
++logs_dir = pathlib.Path(os.environ["LOGS_DIR"])
++log_name = pathlib.Path(os.environ["LOG_NAME"]).name
++if not log_name.endswith((".txt", ".log")):
++    raise SystemExit("Invalid server log extension.")
++path = logs_dir / log_name
++if not path.is_file():
++    raise SystemExit(f"Server log file not found: {{path}}")
++print(json.dumps({{
++    "serverId": os.environ["SERVER_ID"],
++    "fileName": log_name,
++    "path": str(path),
++    "content": path.read_text(encoding="utf-8", errors="replace"),
++}}))
++PY"#,
++        logs_dir = linux_shell_quote(&logs_dir),
++        owner = linux_sudo_user_arg(&owner),
++        log_name = linux_shell_quote(&clean_log_name),
++        server_id = linux_shell_quote(server_id),
++    );
++    let output = run_ssh_capture(connection, &command)?;
++    serde_json::from_str(output.stdout.trim()).map_err(|error| {
++        format!(
++            "Could not parse remote server log file: {error}\n\n{}",
++            join_command_output(&[output.stdout.as_str(), output.stderr.as_str()])
++        )
++    })
++}
++
+ fn remote_server_profile_path_or_default(path: &str) -> String {
+     let trimmed = path.trim().trim_end_matches('/');
+ 
+@@ -2924,14 +3339,6 @@ fn list_remote_zomboid_mods_impl(
+     let mut seen_keys = HashSet::new();
+     mods.retain(|mod_item| register_remote_mod_identity(&mut seen_keys, mod_item));
+ 
+-    let steam_mods: Vec<crate::models::ZomboidMod> =
+-        run_remote_helper_json_as_ssh_user(&connection, "list-mods")?;
+-    for mod_item in steam_mods {
+-        if mod_item.source == "steam" && register_remote_mod_identity(&mut seen_keys, &mod_item) {
+-            mods.push(mod_item);
+-        }
+-    }
+-
+     mods.sort_by_key(|mod_item| mod_item.name.to_lowercase());
+     hydrate_remote_mod_images(&connection, &mut mods);
+     Ok(mods)
+@@ -2998,14 +3405,17 @@ fn download_remote_steam_workshop_items_impl(
+         .unwrap_or_else(default_remote_workspace_config);
+     let steamcmd_path = required_field(&config.remote_steamcmd_path, "remote SteamCMD path")?;
+     ensure_remote_steamcmd_workshop_dir_prepared(&connection)?;
+-    let steamcmd_workshop_dir = remote_default_steam_workshop_dir(&connection);
++    let steamcmd_workshop_dirs = remote_steam_workshop_dir_candidates(&connection)
++        .into_iter()
++        .map(|(_, path, _)| path)
++        .collect::<Vec<_>>();
+ 
+     let mut skipped_ids = Vec::new();
+     let mut pending_ids = workshop_ids.clone();
+ 
+     if !force_validate {
+         let existing_ids =
+-            remote_existing_workshop_ids(&connection, &steamcmd_workshop_dir, &workshop_ids)?;
++            remote_existing_workshop_ids(&connection, &steamcmd_workshop_dirs, &workshop_ids)?;
+         skipped_ids = workshop_ids
+             .iter()
+             .filter(|workshop_id| existing_ids.contains(*workshop_id))
+@@ -3049,19 +3459,38 @@ fn download_remote_steam_workshop_items_impl(
+             force_validate,
+         )?;
+ 
+-        if result.success {
+-            for workshop_id in chunk {
++        let output = join_command_output(&[result.stdout.as_str(), result.stderr.as_str()]);
++        let failed_by_log = parse_remote_steamcmd_failed_items(&output, chunk);
++        let completed_by_log = parse_remote_steamcmd_completed_items(&output, chunk);
++        let installed_ids = remote_existing_workshop_ids_with_mod_info(
++            &connection,
++            &steamcmd_workshop_dirs,
++            chunk,
++        )?;
++
++        for workshop_id in chunk {
++            if let Some(error) = failed_by_log.get(workshop_id.as_str()) {
++                emit_workshop_download_event(app, workshop_id, "failed", Some(error));
++                failed_items.push(WorkshopDownloadFailedItem {
++                    workshop_id: workshop_id.clone(),
++                    name: workshop_id.clone(),
++                    error: error.clone(),
++                });
++            } else if completed_by_log.contains(workshop_id) || installed_ids.contains(workshop_id)
++            {
+                 completed_items.insert(workshop_id.clone());
+                 emit_workshop_download_event(app, workshop_id, "completed", None);
+-            }
+-        } else {
+-            let output = join_command_output(&[result.stdout.as_str(), result.stderr.as_str()]);
+-            for workshop_id in chunk {
+-                emit_workshop_download_event(app, workshop_id, "failed", Some(&output));
++            } else {
++                let error = if result.success {
++                    "SteamCMD finished without installing this Workshop item.".to_string()
++                } else {
++                    output.clone()
++                };
++                emit_workshop_download_event(app, workshop_id, "failed", Some(&error));
+                 failed_items.push(WorkshopDownloadFailedItem {
+                     workshop_id: workshop_id.clone(),
+                     name: workshop_id.clone(),
+-                    error: output.clone(),
++                    error,
+                 });
+             }
+         }
+@@ -3088,34 +3517,56 @@ fn run_remote_steamcmd_workshop_chunk(
+         emit_workshop_download_event(app, workshop_id, "downloading", None);
+     }
+ 
+-    let mut args = vec!["+login anonymous".to_string()];
++    let mut script_lines = vec![
++        "@ShutdownOnFailedCommand 0".to_string(),
++        "@NoPromptForPassword 1".to_string(),
++        "login anonymous".to_string(),
++    ];
+     for workshop_id in workshop_ids {
+-        args.push(format!("+workshop_download_item 108600 {workshop_id}"));
+-        if force_validate {
+-            args.push("validate".to_string());
+-        }
++        let validate = if force_validate { " validate" } else { "" };
++        script_lines.push(format!(
++            "workshop_download_item 108600 {workshop_id}{validate}"
++        ));
+     }
+-    args.push("+quit".to_string());
++    script_lines.push("quit".to_string());
++    let script_text = script_lines.join("\\n");
++    let (remote_zomboid_dir, data_owner) =
++        remote_zomboid_data_dir_and_owner_for_connection(connection)?;
++    let remote_data_dir = remote_unix_parent_path(&remote_zomboid_dir)
++        .unwrap_or_else(|| REMOTE_LINUX_DATA_DIR.to_string());
++    validate_linux_username(&data_owner)?;
++    let steam_root = join_remote_unix_path(&remote_data_dir, "Steam");
++    let steam_apps = join_remote_unix_path(&steam_root, "steamapps");
++    let home_steam_root = join_remote_unix_path(&remote_data_dir, ".local/share/Steam");
++    let home_steam_apps = join_remote_unix_path(&home_steam_root, "steamapps");
+     let command = format!(
+-        "set -e; steamcmd={}; if [ ! -x \"$steamcmd\" ] && ! command -v \"$steamcmd\" >/dev/null 2>&1; then echo \"SteamCMD not found: $steamcmd\" >&2; exit 1; fi; sudo -n install -d -o pzmm -g pzmm {} {}; sudo -n -u pzmm env HOME={} PZMM_DATA_DIR={} \"$steamcmd\" {}",
++        "set -e; steamcmd={}; data_owner={}; remote_data_dir={}; script_path=$(mktemp /tmp/pzmm-steamcmd-XXXXXX.txt); cleanup() {{ rm -f \"$script_path\"; }}; trap cleanup EXIT; if [ ! -x \"$steamcmd\" ] && ! command -v \"$steamcmd\" >/dev/null 2>&1; then echo \"SteamCMD not found: $steamcmd\" >&2; exit 1; fi; sudo -n id -u \"$data_owner\" >/dev/null; sudo -n -u \"$data_owner\" mkdir -p {} {} {} {}; sudo -n chown -R \"${data_owner}:${data_owner}\" {} {}; printf '%b\\n' {} > \"$script_path\"; chmod 0644 \"$script_path\"; sudo -n -u \"$data_owner\" env HOME=\"$remote_data_dir\" PZMM_DATA_DIR=\"$remote_data_dir\" \"$steamcmd\" +runscript \"$script_path\"",
+         linux_shell_quote(steamcmd_path),
+-        linux_shell_quote(&join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "Steam")),
+-        linux_shell_quote(&join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "Steam/steamapps")),
+-        linux_shell_quote(REMOTE_LINUX_DATA_DIR),
+-        linux_shell_quote(REMOTE_LINUX_DATA_DIR),
+-        args.join(" ")
++        linux_sudo_user_arg(&data_owner),
++        linux_shell_quote(&remote_data_dir),
++        linux_shell_quote(&steam_root),
++        linux_shell_quote(&steam_apps),
++        linux_shell_quote(&home_steam_root),
++        linux_shell_quote(&home_steam_apps),
++        linux_shell_quote(&steam_root),
++        linux_shell_quote(&home_steam_root),
++        linux_shell_quote(&script_text),
+     );
+     run_ssh_workshop_streaming(app, connection, &command)
+ }
+ fn remote_existing_workshop_ids(
+     connection: &RemoteServerConnectionRequest,
+-    workshop_dir: &str,
++    workshop_dirs: &[String],
+     workshop_ids: &[String],
+ ) -> Result<HashSet<String>, String> {
+-    let paths = workshop_ids
+-        .iter()
+-        .map(|workshop_id| join_remote_unix_path(workshop_dir, workshop_id))
+-        .collect::<Vec<_>>();
++    let mut paths = Vec::new();
++    let mut path_workshop_ids = Vec::new();
++    for workshop_dir in workshop_dirs {
++        for workshop_id in workshop_ids {
++            paths.push(join_remote_unix_path(workshop_dir, workshop_id));
++            path_workshop_ids.push(workshop_id.clone());
++        }
++    }
+     let remote_paths: Vec<RemotePathExists> = run_remote_helper_json_with_sudo(
+         connection,
+         "get-path-status",
+@@ -3124,49 +3575,102 @@ fn remote_existing_workshop_ids(
+ 
+     Ok(remote_paths
+         .into_iter()
+-        .zip(workshop_ids.iter())
++        .zip(path_workshop_ids)
+         .filter(|(item, _)| item.exists)
+-        .map(|(_, workshop_id)| workshop_id.clone())
++        .map(|(_, workshop_id)| workshop_id)
+         .collect())
+ }
+-fn run_remote_helper_json_as_ssh_user<T>(
++
++fn remote_existing_workshop_ids_with_mod_info(
+     connection: &RemoteServerConnectionRequest,
+-    helper_command: &str,
+-) -> Result<T, String>
+-where
+-    T: serde::de::DeserializeOwned,
+-{
+-    let helper_path = ensure_cached_remote_helper(connection)?;
+-    let home = remote_ssh_user_home(connection).unwrap_or_else(|| "/tmp".to_string());
+-    let command = format!(
+-        "HOME={} PZMM_EXTRA_STEAM_WORKSHOP_DIRS={} {} {}",
+-        linux_shell_quote(&home),
+-        linux_shell_quote(&remote_extra_steam_workshop_dirs(connection)),
+-        linux_shell_quote(&helper_path),
+-        linux_shell_quote(helper_command),
+-    );
+-    let output = run_ssh_capture(connection, &command).inspect_err(|_| {
+-        invalidate_remote_helper_cache(connection);
+-    })?;
+-    let stdout = output.stdout.trim();
++    workshop_dirs: &[String],
++    workshop_ids: &[String],
++) -> Result<HashSet<String>, String> {
++    let mut script = String::from("set -e\n");
++    for workshop_id in workshop_ids {
++        let safe_workshop_id = safe_remote_cache_segment(workshop_id);
++        script.push_str(&format!(
++            "found=0; item_id={id}; for root in {roots}; do if sudo -n find \"$root/$item_id/mods\" -name mod.info -type f -print -quit 2>/dev/null | grep -q .; then found=1; break; fi; done; if [ \"$found\" = 1 ]; then printf 'PZMM_WORKSHOP_READY=%s\\n' \"$item_id\"; fi\n",
++            roots = workshop_dirs
++                .iter()
++                .map(|path| linux_shell_quote(path))
++                .collect::<Vec<_>>()
++                .join(" "),
++            id = linux_shell_quote(&safe_workshop_id),
++        ));
++    }
+ 
+-    if stdout.is_empty() {
+-        invalidate_remote_helper_cache(connection);
+-        let message = format!("pzmm Linux helper returned no JSON output for {helper_command}.");
++    let output = run_ssh_capture_raw(connection, &script)?;
++    if !output.success {
+         return Err(join_command_output(&[
+-            message.as_str(),
++            "Could not verify downloaded remote Workshop items.",
++            output.stdout.as_str(),
+             output.stderr.as_str(),
+         ]));
+     }
+ 
+-    serde_json::from_str::<T>(stdout).map_err(|error| {
+-        invalidate_remote_helper_cache(connection);
+-        let message =
+-            format!("Could not parse pzmm Linux helper JSON output for {helper_command}: {error}");
+-        join_command_output(&[message.as_str(), stdout, output.stderr.as_str()])
+-    })
++    Ok(output
++        .stdout
++        .lines()
++        .filter_map(|line| line.trim().strip_prefix("PZMM_WORKSHOP_READY="))
++        .map(str::trim)
++        .filter(|value| !value.is_empty())
++        .map(ToString::to_string)
++        .collect())
+ }
+ 
++fn parse_remote_steamcmd_failed_items(
++    output: &str,
++    wanted_ids: &[String],
++) -> HashMap<String, String> {
++    let wanted = wanted_ids
++        .iter()
++        .map(String::as_str)
++        .collect::<HashSet<_>>();
++    let mut failed = HashMap::new();
++
++    for line in output.lines() {
++        let normalized = line.to_lowercase();
++        if !normalized.contains("download item")
++            || !(normalized.contains("error") || normalized.contains("failed"))
++        {
++            continue;
++        }
++
++        if let Some(workshop_id) = line
++            .split(|char: char| !char.is_ascii_digit())
++            .find(|value| wanted.contains(*value))
++        {
++            failed.insert(workshop_id.to_string(), line.trim().to_string());
++        }
++    }
++
++    failed
++}
++
++fn parse_remote_steamcmd_completed_items(output: &str, wanted_ids: &[String]) -> HashSet<String> {
++    let wanted = wanted_ids
++        .iter()
++        .map(String::as_str)
++        .collect::<HashSet<_>>();
++    let mut completed = HashSet::new();
++
++    for line in output.lines() {
++        let normalized = line.to_lowercase();
++        if !(normalized.contains("success") || normalized.contains("downloaded item")) {
++            continue;
++        }
++
++        if let Some(workshop_id) = line
++            .split(|char: char| !char.is_ascii_digit())
++            .find(|value| wanted.contains(*value))
++        {
++            completed.insert(workshop_id.to_string());
++        }
++    }
++
++    completed
++}
+ fn cancel_remote_steam_workshop_download_impl(
+     connection: RemoteServerConnectionRequest,
+ ) -> Result<(), String> {
+@@ -3239,6 +3743,7 @@ struct RemoteServerTestRequest<'a> {
+     server_launch_path: Option<&'a str>,
+     server_profile_path: Option<&'a str>,
+     no_steam: bool,
++    follow_from_end: Option<bool>,
+ }
+ 
+ #[derive(Deserialize)]
+@@ -3265,6 +3770,7 @@ fn run_remote_zomboid_server_start_streaming(
+         server_launch_path: Some(server_launch_path),
+         server_profile_path: (!server_profile_path.is_empty()).then_some(server_profile_path),
+         no_steam,
++        follow_from_end: None,
+     };
+     let json = serde_json::to_vec(&payload)
+         .map_err(|error| format!("Could not serialize remote server start payload: {error}"))?;
+@@ -3291,6 +3797,7 @@ fn run_remote_zomboid_server_logs_streaming(
+     app: &tauri::AppHandle,
+     connection: &RemoteServerConnectionRequest,
+     server_id: &str,
++    follow_from_end: bool,
+ ) -> Result<(), String> {
+     let helper_path = ensure_cached_remote_helper(connection)?;
+     let payload = RemoteServerTestRequest {
+@@ -3298,6 +3805,7 @@ fn run_remote_zomboid_server_logs_streaming(
+         server_launch_path: None,
+         server_profile_path: None,
+         no_steam: false,
++        follow_from_end: Some(follow_from_end),
+     };
+     let json = serde_json::to_vec(&payload)
+         .map_err(|error| format!("Could not serialize remote server logs payload: {error}"))?;
+@@ -3333,6 +3841,7 @@ fn run_remote_zomboid_server_test_streaming(
+         server_launch_path: Some(server_launch_path),
+         server_profile_path: (!server_profile_path.is_empty()).then_some(server_profile_path),
+         no_steam: false,
++        follow_from_end: None,
+     };
+     let json = serde_json::to_vec(&payload)
+         .map_err(|error| format!("Could not serialize remote server test payload: {error}"))?;
+@@ -3561,7 +4070,7 @@ fn hydrate_remote_mod_images_with_cache(
+         }
+ 
+         match remote_image_cache_path(connection, &remote_image_path) {
+-            Ok(cache_path) if cache_path.is_file() => {
++            Ok(cache_path) if is_valid_cached_remote_image(&cache_path) => {
+                 resolved_paths.insert(remote_image_path, cache_path);
+             }
+             Ok(_) => missing_paths.push(remote_image_path),
+@@ -3634,7 +4143,7 @@ fn ensure_cached_remote_file(
+ ) -> Result<PathBuf, String> {
+     let cache_path = remote_image_cache_path(connection, remote_path)?;
+ 
+-    if cache_path.is_file() {
++    if is_valid_cached_remote_image(&cache_path) {
+         return Ok(cache_path);
+     }
+ 
+@@ -3647,6 +4156,12 @@ fn ensure_cached_remote_file(
+     Ok(cache_path)
+ }
+ 
++fn is_valid_cached_remote_image(path: &Path) -> bool {
++    fs::metadata(path)
++        .map(|metadata| metadata.is_file() && metadata.len() > 0)
++        .unwrap_or(false)
++}
++
+ fn remote_image_cache_path(
+     connection: &RemoteServerConnectionRequest,
+     remote_path: &str,
+@@ -3753,11 +4268,20 @@ fn download_remote_file_via_base64(
+     local_path: &PathBuf,
+ ) -> Result<(), String> {
+     let command = format!(
+-        "set -e; test -f {}; base64 -w 0 {}",
++        "set -e; sudo -n test -f {}; sudo -n base64 -w 0 {}",
+         linux_shell_quote(remote_path),
+         linux_shell_quote(remote_path)
+     );
+-    let output = run_ssh_capture(connection, &command)?;
++    let output = run_ssh_capture_raw(connection, &command)?;
++
++    if !output.success {
++        return Err(join_command_output(&[
++            "Could not read remote file with sudo.",
++            output.stdout.as_str(),
++            output.stderr.as_str(),
++        ]));
++    }
++
+     let bytes = base64::engine::general_purpose::STANDARD
+         .decode(output.stdout.trim().as_bytes())
+         .map_err(|error| format!("Could not decode remote file bytes: {error}"))?;
+@@ -3772,7 +4296,7 @@ fn download_remote_file_via_base64(
+ fn ensure_cached_remote_helper(
+     connection: &RemoteServerConnectionRequest,
+ ) -> Result<String, String> {
+-    let cache_key = remote_helper_cache_key(connection)?;
++    let cache_key = remote_helper_connection_cache_key(connection);
+     let remote_path = REMOTE_LINUX_HELPER_PATH.to_string();
+     let cache = VERIFIED_REMOTE_HELPERS.get_or_init(|| Mutex::new(HashSet::new()));
+ 
+@@ -3793,29 +4317,29 @@ fn ensure_cached_remote_helper(
+     Ok(helper_path)
+ }
+ fn invalidate_remote_helper_cache(connection: &RemoteServerConnectionRequest) {
+-    if let Ok(cache_key) = remote_helper_cache_key(connection) {
+-        if let Some(cache) = VERIFIED_REMOTE_HELPERS.get() {
+-            if let Ok(mut cache) = cache.lock() {
+-                cache.remove(&cache_key);
+-            }
++    let cache_key = remote_helper_connection_cache_key(connection);
++    if let Some(cache) = VERIFIED_REMOTE_HELPERS.get() {
++        if let Ok(mut cache) = cache.lock() {
++            cache.remove(&cache_key);
+         }
+     }
+ }
+ 
+-fn remote_helper_cache_key(connection: &RemoteServerConnectionRequest) -> Result<String, String> {
+-    let mut hasher = DefaultHasher::new();
+-    local_helper_signature()?.hash(&mut hasher);
+-
+-    Ok(format!(
+-        "{}|{}|{}|{}|{:016x}",
++fn remote_helper_connection_cache_key(connection: &RemoteServerConnectionRequest) -> String {
++    format!(
++        "{}|{}|{}|{}",
+         connection.host.trim().to_lowercase(),
+         connection.port.trim(),
+         connection.username.trim().to_lowercase(),
+         REMOTE_LINUX_HELPER_PATH,
+-        hasher.finish()
+-    ))
++    )
+ }
++
+ fn ensure_remote_helper(connection: &RemoteServerConnectionRequest) -> Result<String, String> {
++    if validate_existing_remote_helper(connection)? {
++        return Ok(REMOTE_LINUX_HELPER_PATH.to_string());
++    }
++
+     let result = setup_remote_helper_impl(None, connection)?;
+ 
+     if result.success {
+@@ -3828,6 +4352,19 @@ fn ensure_remote_helper(connection: &RemoteServerConnectionRequest) -> Result<St
+         ]))
+     }
+ }
++
++fn validate_existing_remote_helper(
++    connection: &RemoteServerConnectionRequest,
++) -> Result<bool, String> {
++    let command = format!(
++        "test -x {helper_path} && {helper_command} --version >/dev/null",
++        helper_path = linux_shell_quote(REMOTE_LINUX_HELPER_PATH),
++        helper_command = remote_helper_command_prefix(REMOTE_LINUX_HELPER_PATH),
++    );
++
++    run_ssh_capture_raw(connection, &command).map(|result| result.success)
++}
++
+ fn setup_remote_helper_impl(
+     app: Option<&tauri::AppHandle>,
+     connection: &RemoteServerConnectionRequest,
+@@ -3923,14 +4460,6 @@ fn setup_remote_helper_impl(
+     })
+ }
+ 
+-fn local_helper_binary_path() -> Result<PathBuf, String> {
+-    if pzmm_dev_mode_enabled() {
+-        return local_dev_helper_binary_path();
+-    }
+-
+-    download_release_helper_binary()
+-}
+-
+ fn local_helper_binary_path_for_setup() -> Result<PathBuf, String> {
+     if pzmm_dev_mode_enabled() {
+         return local_dev_helper_binary_path();
+@@ -4273,25 +4802,6 @@ fn make_helper_executable(path: &Path) -> Result<(), String> {
+     Ok(())
+ }
+ 
+-fn local_helper_signature() -> Result<String, String> {
+-    let path = local_helper_binary_path()?;
+-    let metadata = fs::metadata(&path)
+-        .map_err(|error| format!("Could not inspect helper binary metadata: {error}"))?;
+-    let modified = metadata
+-        .modified()
+-        .ok()
+-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+-        .map(|duration| duration.as_secs())
+-        .unwrap_or_default();
+-
+-    Ok(format!(
+-        "{}|{}|{}",
+-        path.display(),
+-        metadata.len(),
+-        modified
+-    ))
+-}
+-
+ fn upload_helper_binary_to_remote(
+     connection: &RemoteServerConnectionRequest,
+     local_path: &Path,
+@@ -4395,7 +4905,7 @@ if {{ [ -z "$data_owner" ] || [ "$data_owner" = {managed_user} ]; }} && [ "$remo
+ fi
+ case "$data_owner" in ''|UNKNOWN|-*|*[!A-Za-z0-9_-]*) echo "Invalid Linux owner for $remote_zomboid_dir: $data_owner" >&2; exit 1 ;; esac
+ sudo -n id -u "$data_owner" >/dev/null
+-if [ "$data_owner" = {managed_user} ]; then
++if [ "$remote_zomboid_dir" = "$managed_zomboid_dir" ]; then
+   cache_dir={managed_cache_dir}
+   sudo -n install -d -o pzmm -g pzmm {managed_data_dir} "$cache_dir" "$managed_zomboid_dir" "$managed_profile_dir"
+ else
+@@ -4412,7 +4922,7 @@ sudo -n -u "$data_owner" env HOME="$remote_data_dir" PZMM_DATA_DIR="$remote_data
+         managed_profile_dir = linux_shell_quote(REMOTE_LINUX_SERVER_PROFILE_DIR),
+         data_owner = linux_sudo_user_arg(data_owner_value),
+         server_owner = linux_sudo_user_arg(server_owner_value),
+-        ssh_user = linux_sudo_user_arg(&connection.username),
++        ssh_user = linux_shell_quote(&connection.username),
+         managed_user = linux_shell_quote(REMOTE_LINUX_MANAGED_USER),
+         managed_cache_dir =
+             linux_shell_quote(&join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "cache")),
+@@ -5294,22 +5804,26 @@ fn upload_steamcmd_to_remote_impl(
+ steamcmd_dir={steamcmd_dir}
+ steamcmd_path="$steamcmd_dir/steamcmd.sh"
+ temp_archive=/tmp/pzmm-steamcmd-linux.tar.gz
++managed_user={managed_user}
++managed_data_dir={managed_data_dir}
+ 
+-sudo -n install -d -o pzmm -g pzmm "$steamcmd_dir"
++sudo -n install -d -o "$managed_user" -g "$managed_user" "$steamcmd_dir" "$managed_data_dir"
+ sudo -n apt-get update
+ sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y lib32gcc-s1 ca-certificates curl tar gzip
+ 
+ if [ ! -x "$steamcmd_path" ]; then
+   curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz -o "$temp_archive"
+-  sudo -n -u pzmm tar -xzf "$temp_archive" -C "$steamcmd_dir"
++  sudo -n -u "$managed_user" tar -xzf "$temp_archive" -C "$steamcmd_dir"
+   sudo -n chmod 0755 "$steamcmd_path"
+ fi
+ 
+-sudo -n chown -R pzmm:pzmm "$steamcmd_dir"
+-sudo -n -u pzmm env HOME=/var/lib/pzmm PZMM_DATA_DIR=/var/lib/pzmm "$steamcmd_path" +quit >/dev/null
++sudo -n chown -R "${managed_user}:${managed_user}" "$steamcmd_dir"
++sudo -n -u "$managed_user" env HOME="$managed_data_dir" PZMM_DATA_DIR="$managed_data_dir" "$steamcmd_path" +quit >/dev/null
+ printf 'PZMM_STEAMCMD_PATH=%s\n' "$steamcmd_path"
+ "#,
+         steamcmd_dir = linux_shell_quote(&remote_directory),
++        managed_user = linux_shell_quote(REMOTE_LINUX_MANAGED_USER),
++        managed_data_dir = linux_shell_quote(REMOTE_LINUX_DATA_DIR),
+     );
+     let result = run_ssh_streaming(app, &connection, &script, "steamcmd")?;
+     let steamcmd_executable_path = result
+@@ -5420,6 +5934,8 @@ fn install_zomboid_server_on_remote_impl(
+         r#"set -e
+ steamcmd={steamcmd}
+ install_dir={install_dir}
++managed_user={managed_user}
++managed_data_dir={managed_data_dir}
+ if [ ! -x "$steamcmd" ] && ! command -v "$steamcmd" >/dev/null 2>&1; then
+   echo "SteamCMD not found: $steamcmd" >&2
+   exit 1
+@@ -5432,9 +5948,9 @@ if [ -f "$install_dir/start-server.sh" ]; then
+   exit 0
+ fi
+ 
+-sudo -n install -d -o pzmm -g pzmm "$install_dir"
++sudo -n install -d -o "$managed_user" -g "$managed_user" "$install_dir" "$managed_data_dir"
+ echo "PZMM_STEAMCMD_APP_UPDATE={branch_label}"
+-sudo -n -u pzmm env HOME=/var/lib/pzmm PZMM_DATA_DIR=/var/lib/pzmm "$steamcmd" +force_install_dir "$install_dir" +login anonymous +app_update 380870 {branch_args} validate +quit
++sudo -n -u "$managed_user" env HOME="$managed_data_dir" PZMM_DATA_DIR="$managed_data_dir" "$steamcmd" +force_install_dir "$install_dir" +login anonymous +app_update 380870 {branch_args} validate +quit
+ if [ ! -f "$install_dir/start-server.sh" ]; then
+   echo "Linux launcher not found after install: $install_dir/start-server.sh" >&2
+   exit 1
+@@ -5444,6 +5960,8 @@ printf 'PZMM_SERVER_PATH=%s\n' "$install_dir/start-server.sh"
+ "#,
+         steamcmd = linux_shell_quote(&steamcmd_path),
+         install_dir = linux_shell_quote(&install_directory),
++        managed_user = linux_shell_quote(REMOTE_LINUX_MANAGED_USER),
++        managed_data_dir = linux_shell_quote(REMOTE_LINUX_DATA_DIR),
+         branch_args = steamcmd_branch_args,
+     );
+     let install_message = format!(
+@@ -5467,6 +5985,11 @@ printf 'PZMM_SERVER_PATH=%s\n' "$install_dir/start-server.sh"
+         let connection_for_helper = connection.clone();
+         let existing_config = get_remote_workspace_config_for_connection_impl(&connection)?
+             .unwrap_or_else(default_remote_workspace_config);
++        let server_owner = detect_remote_path_owner(&connection, &server_executable_path)
++            .unwrap_or_else(|_| REMOTE_LINUX_MANAGED_USER.to_string());
++        let managed_zomboid_dir = join_remote_unix_path(REMOTE_LINUX_DATA_DIR, "Zomboid");
++        let data_owner = detect_remote_path_owner(&connection, &managed_zomboid_dir)
++            .unwrap_or_else(|_| REMOTE_LINUX_MANAGED_USER.to_string());
+         write_remote_workspace_config(&RemoteWorkspaceConfig {
+             name: connection.name,
+             host: connection.host,
+@@ -5474,13 +5997,13 @@ printf 'PZMM_SERVER_PATH=%s\n' "$install_dir/start-server.sh"
+             username: connection.username,
+             auth_method: connection.auth_method,
+             ssh_key_path: connection.ssh_key_path,
+-            server_path: connection.server_path,
++            server_path: REMOTE_LINUX_SERVER_PROFILE_DIR.to_string(),
+             remote_steamcmd_dir: existing_config.remote_steamcmd_dir,
+             remote_steamcmd_path: steamcmd_path,
+             remote_zomboid_server_dir: install_directory,
+             remote_zomboid_server_path: server_executable_path,
+-            remote_zomboid_server_owner: REMOTE_LINUX_MANAGED_USER.to_string(),
+-            remote_zomboid_data_owner: REMOTE_LINUX_MANAGED_USER.to_string(),
++            remote_zomboid_server_owner: server_owner,
++            remote_zomboid_data_owner: data_owner,
+             remote_client_ram: existing_config.remote_client_ram,
+             remote_server_ram: existing_config.remote_server_ram,
+             remote_setup_completed_step: existing_config.remote_setup_completed_step.max(3),
+@@ -5913,7 +6436,9 @@ mod tests {
+ 
+         assert!(script.contains("ProjectZomboid64.json"));
+         assert!(script.contains("ProjectZomboid32.json"));
+-        assert!(script.contains("sudo -n -u 'steam'"));
++        assert!(script.contains("server_owner='steam'"));
++        assert!(script.contains("detected_owner=$(sudo -n stat -c '%U' \"$json_path\")"));
++        assert!(script.contains("sudo -n -u \"$server_owner\""));
+         assert!(script.contains("-Xms\" + ram + \"m"));
+         assert!(script.contains("-Xmx\" + ram + \"m"));
+         assert!(!script.contains("path.write_text(text)"));
+@@ -5935,6 +6460,27 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn remote_steam_workshop_candidates_include_steamcmd_home_library() {
++        let connection = RemoteServerConnectionRequest {
++            name: "test".to_string(),
++            host: "example.com".to_string(),
++            port: "22".to_string(),
++            username: "ubuntu".to_string(),
++            auth_method: "key".to_string(),
++            password: String::new(),
++            ssh_key_path: String::new(),
++            server_path: String::new(),
++        };
++        let paths = remote_steam_workshop_dir_candidates(&connection)
++            .into_iter()
++            .map(|(_, path, _)| path)
++            .collect::<Vec<_>>();
++
++        assert!(paths.contains(&remote_steamcmd_home_workshop_dir(&connection)));
++        assert!(paths.contains(&remote_default_steam_workshop_dir(&connection)));
++    }
++
+     #[test]
+     fn remote_workspace_owner_defaults_to_managed_user() {
+         assert_eq!(
+@@ -5943,6 +6489,22 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn remote_workspace_owner_strips_shell_quotes() {
++        assert_eq!(remote_workspace_owner_or_default("'pzalt'"), "pzalt");
++        assert_eq!(remote_workspace_owner_or_default("\"pzalt\""), "pzalt");
++        assert_eq!(remote_workspace_owner_or_default("$'pzalt'"), "pzalt");
++        assert_eq!(
++            remote_workspace_owner_or_default("$'\\''pzalt'\\''"),
++            "pzalt"
++        );
++        assert_eq!(
++            remote_workspace_owner_or_default("'$\\''pzalt'\\'''"),
++            "pzalt"
++        );
++        assert_eq!(linux_sudo_user_arg("'$\\''pzalt'\\'''"), "'pzalt'");
++    }
++
+     #[test]
+     fn linux_username_validation_rejects_unknown_owner() {
+         assert!(validate_linux_username("UNKNOWN").is_err());
+diff --git a/src-tauri/src/server_test.rs b/src-tauri/src/server_test.rs
+index 5a5614c..d42f8e6 100644
+--- a/src-tauri/src/server_test.rs
++++ b/src-tauri/src/server_test.rs
+@@ -28,8 +28,7 @@ pub(crate) use ports::server_ports_for_id;
+ use process::kill_processes_by_pid_impl;
+ pub(crate) use process::{kill_process_tree, spawn_output_reader};
+ pub(crate) use runner::{
+-    test_zomboid_server_impl,
+-    test_zomboid_server_impl_with_line_callback_and_cancel,
++    test_zomboid_server_impl, test_zomboid_server_impl_with_line_callback_and_cancel,
+ };
+ 
+ static ACTIVE_SERVER_TESTS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+diff --git a/src-tauri/src/settings.rs b/src-tauri/src/settings.rs
+index 172d5a3..317c877 100644
+--- a/src-tauri/src/settings.rs
++++ b/src-tauri/src/settings.rs
+@@ -86,6 +86,11 @@ pub(crate) async fn open_mod_location(path: String) -> Result<(), String> {
+     run_blocking(move || open_mod_location_impl(&path)).await
+ }
+ 
++#[tauri::command]
++pub(crate) async fn is_delete_all_enabled() -> Result<bool, String> {
++    run_blocking(|| Ok(delete_all_enabled())).await
++}
++
+ #[cfg(windows)]
+ fn install_linux_steamcmd_impl() -> Result<AppSettings, String> {
+     Err("A instalacao automatica do SteamCMD pelo app esta disponivel apenas no Linux.".to_string())
+@@ -183,8 +188,7 @@ fn load_app_settings() -> Result<AppSettings, String> {
+ }
+ 
+ fn resolve_game_executable_setting_value(saved_path: &str) -> Option<String> {
+-    resolve_zomboid_executable_path(Some(saved_path))
+-        .map(|path| path.display().to_string())
++    resolve_zomboid_executable_path(Some(saved_path)).map(|path| path.display().to_string())
+ }
+ 
+ fn get_mod_locations_impl() -> Result<Vec<ModLocation>, String> {
+@@ -467,6 +471,16 @@ fn save_app_settings_impl(
+     load_app_settings()
+ }
+ 
++fn delete_all_enabled() -> bool {
++    env::var("PZMM_DELETEALL_ENABLED")
++        .ok()
++        .map(|value| {
++            let normalized = value.trim().to_ascii_lowercase();
++            !normalized.is_empty() && !matches!(normalized.as_str(), "0" | "false" | "no" | "off")
++        })
++        .unwrap_or(false)
++}
++
+ fn add_mod_location_impl(path: &str) -> Result<Vec<ModLocation>, String> {
+     let path = path.trim();
+ 
+diff --git a/src/App.tsx b/src/App.tsx
+index 66fb2ff..97791ff 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -275,6 +275,7 @@ function LocalWorkspaceApp({
+     useState<ZomboidServer | null>(null);
+   const activeStartServerRef = useRef<ZomboidServer | null>(null);
+   const confirmedOnlineServerIdsRef = useRef<Set<string>>(new Set());
++  const remoteConsoleLogStreamsRef = useRef<Set<string>>(new Set());
+   const [syncError, setSyncError] = useState<string | null>(null);
+   const [workshopMappings, setWorkshopMappings] = useState<Record<string, string>>({});
+   const autoUploadedModIdsRef = useRef<Set<string>>(new Set());
+@@ -1184,6 +1185,30 @@ function LocalWorkspaceApp({
+     });
+   }
+ 
++  async function ensureRemoteConsoleLogStream(server: ZomboidServer) {
++    if (!remoteConnection) return;
++
++    const streamKey = `${remoteConnection.username}@${remoteConnection.host}:${remoteConnection.port}:${server.id}`;
++    if (remoteConsoleLogStreamsRef.current.has(streamKey)) {
++      return;
++    }
++
++    remoteConsoleLogStreamsRef.current.add(streamKey);
++    try {
++      await invokeTauri<RemoteServerActionResult>(
++        "stream_remote_zomboid_server_logs",
++        {
++          connection: remoteConnection,
++          serverId: server.id,
++          followFromEnd: true,
++        },
++      );
++    } catch (error) {
++      remoteConsoleLogStreamsRef.current.delete(streamKey);
++      console.error("Could not attach remote console log stream:", error);
++    }
++  }
++
+   function isRemoteStartupPending(result: RemoteServerActionResult | null) {
+     if (!result?.success) return false;
+ 
+@@ -1328,6 +1353,7 @@ function LocalWorkspaceApp({
+     appendRemoteStartLogs([`> ${command}`]);
+ 
+     try {
++      await ensureRemoteConsoleLogStream(server);
+       const result = await invokeTauri<RemoteServerActionResult>(
+         "send_remote_zomboid_server_command",
+         {
+@@ -1348,6 +1374,19 @@ function LocalWorkspaceApp({
+   }
+ 
+   async function stopRemoteServer(server: ZomboidServer) {
++    if (remoteConnection) {
++      await invokeTauri<RemoteServerActionResult>(
++        "stream_remote_zomboid_server_logs",
++        {
++          connection: remoteConnection,
++          serverId: server.id,
++          followFromEnd: true,
++        },
++      ).catch((error) => {
++        console.error("Could not attach remote shutdown log stream:", error);
++      });
++    }
++
+     await sendRemoteServerCommand(server, "quit");
+     setRemoteStartResult({
+       success: false,
+@@ -1360,7 +1399,6 @@ function LocalWorkspaceApp({
+       t("remoteStart.stopQueuedLog"),
+     ]);
+     window.setTimeout(() => {
+-      updateServerStatus(server.id, "offline");
+       void loadServers();
+     }, 5000);
+   }
+@@ -1385,6 +1423,10 @@ function LocalWorkspaceApp({
+       return;
+     }
+ 
++    if (remoteStartResult?.command === "quit") {
++      return;
++    }
++
+     const isSameServer = activeStartServerRef.current?.id === server.id;
+     setActiveStartServer(server);
+     setIsRemoteStartOpen(true);
+@@ -1475,6 +1517,7 @@ function LocalWorkspaceApp({
+       await invokeTauri("upload_local_mod_to_remote", {
+         connection: remoteConnection,
+         modId: mod.id,
++        workshopId: mod.workshopId,
+         localModPath: mod.packagePath,
+       });
+       addNotification({
+@@ -1649,6 +1692,11 @@ function LocalWorkspaceApp({
+ 
+       if (payload.event === "finished") {
+         updateServerStatus(payload.serverId, "offline");
++        for (const streamKey of Array.from(remoteConsoleLogStreamsRef.current)) {
++          if (streamKey.endsWith(`:${payload.serverId}`)) {
++            remoteConsoleLogStreamsRef.current.delete(streamKey);
++          }
++        }
+         setIsStartingRemoteServer(false);
+         setRemoteStartResult({
+           success: false,
+diff --git a/src/components/AppHeader.tsx b/src/components/AppHeader.tsx
+index aa77a26..8d0b59b 100644
+--- a/src/components/AppHeader.tsx
++++ b/src/components/AppHeader.tsx
+@@ -105,7 +105,7 @@ export function AppHeader({
+               onClick={onOpenRemoteTerminal}
+             >
+               <SquareTerminal size={20} />
+-              <span>Terminal</span>
++              <span>{t("remoteTerminal.title")}</span>
+             </button>
+           </>
+         )}
+diff --git a/src/components/AppSidebar.tsx b/src/components/AppSidebar.tsx
+index 674a592..a21a62e 100644
+--- a/src/components/AppSidebar.tsx
++++ b/src/components/AppSidebar.tsx
+@@ -40,14 +40,14 @@ export function AppSidebar({ activeTab, items, onTabChange, onChangeWorkspace }:
+           type="button"
+           onClick={onChangeWorkspace}
+           className="mb-3 flex w-full items-center gap-3 rounded-xl border border-white/5 bg-[#171b1f]/70 px-3 py-2.5 text-left text-gray-300 transition-all hover:border-cyan-300/30 hover:bg-cyan-500/10 hover:text-cyan-100"
+-          title="Trocar workspace"
++          title={t("workspace.switch")}
+         >
+           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#22272b] text-cyan-200">
+             <Network size={17} />
+           </span>
+           <span className="min-w-0">
+-            <span className="block text-[9px] font-black uppercase tracking-widest text-gray-500">Workspace</span>
+-            <span className="block truncate text-xs font-bold">Trocar workspace</span>
++            <span className="block text-[9px] font-black uppercase tracking-widest text-gray-500">{t("workspace.label")}</span>
++            <span className="block truncate text-xs font-bold">{t("workspace.switch")}</span>
+           </span>
+         </button>
+ 
+diff --git a/src/components/ModsList.tsx b/src/components/ModsList.tsx
+index 1b7f5b8..a20e6a9 100644
+--- a/src/components/ModsList.tsx
++++ b/src/components/ModsList.tsx
+@@ -55,6 +55,7 @@ export function ModsList({
+   const modsListRef = useRef<HTMLDivElement>(null)
+   const [isUploadLocalModsModalOpen, setIsUploadLocalModsModalOpen] = useState(false)
+   const [pendingInstall, setPendingInstall] = useState<{ mod: ZomboidMod; dependencies: ZomboidMod[] } | null>(null)
++  const [isConfirmingDependencyInstall, setIsConfirmingDependencyInstall] = useState(false)
+   const [missingDependency, setMissingDependency] = useState<{ mod: ZomboidMod; dependencyId: string } | null>(null)
+   const [pendingDeleteMod, setPendingDeleteMod] = useState<ZomboidMod | null>(null)
+   const [selectedModForDetails, setSelectedModForDetails] = useState<ZomboidMod | null>(null)
+@@ -119,8 +120,15 @@ export function ModsList({
+ 
+   const confirmBulkInstall = async () => {
+     if (pendingInstall) {
+-      await onInstall([...pendingInstall.dependencies, pendingInstall.mod])
++      const modsToInstall = [...pendingInstall.dependencies, pendingInstall.mod]
++      setIsConfirmingDependencyInstall(true)
+       setPendingInstall(null)
++
++      try {
++        await onInstall(modsToInstall)
++      } finally {
++        setIsConfirmingDependencyInstall(false)
++      }
+     }
+   }
+ 
+@@ -329,15 +337,23 @@ export function ModsList({
+ 
+               <div className="flex flex-col gap-3">
+                 <button
++                  disabled={isConfirmingDependencyInstall}
+                   onClick={confirmBulkInstall}
+-                  className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl transition-all shadow-lg shadow-orange-500/20 flex items-center justify-center gap-2"
++                  className={`w-full py-3 text-white font-bold rounded-xl transition-all shadow-lg shadow-orange-500/20 flex items-center justify-center gap-2 ${
++                    isConfirmingDependencyInstall
++                      ? "bg-orange-500/60 cursor-not-allowed"
++                      : "bg-orange-500 hover:bg-orange-600"
++                  }`}
+                 >
+                   <CheckCircle2 size={18} />
+-                  {t("library.bringAllLocal")}
++                  {isConfirmingDependencyInstall
++                    ? t("library.installingAllLocal")
++                    : t("library.bringAllLocal")}
+                 </button>
+                 <button
++                  disabled={isConfirmingDependencyInstall}
+                   onClick={() => setPendingInstall(null)}
+-                  className="w-full py-3 bg-transparent border border-white/10 text-gray-400 hover:text-white hover:bg-white/5 font-bold rounded-xl transition-all"
++                  className="w-full py-3 bg-transparent border border-white/10 text-gray-400 hover:text-white hover:bg-white/5 font-bold rounded-xl transition-all disabled:cursor-not-allowed disabled:opacity-50"
+                 >
+                   {t("common.cancel")}
+                 </button>
+diff --git a/src/components/RemoteSteamCmdModal.tsx b/src/components/RemoteSteamCmdModal.tsx
+index 6dc59f0..952f51f 100644
+--- a/src/components/RemoteSteamCmdModal.tsx
++++ b/src/components/RemoteSteamCmdModal.tsx
+@@ -210,7 +210,7 @@ export function RemoteSteamCmdModal({
+   const [zomboidStatus, setZomboidStatus] = useState<StepStatus>("idle");
+   const [clientRam, setClientRam] = useState("4.00");
+   const [serverRam, setServerRam] = useState("4.00");
+-  const [remoteSystemRam, setRemoteSystemRam] = useState<number>(16);
++  const [remoteSystemRam, setRemoteSystemRam] = useState<number | null>(null);
+   const [ramStatus, setRamStatus] = useState<StepStatus>("idle");
+   const [isSavingRam, setIsSavingRam] = useState(false);
+   const [uploadResult, setUploadResult] =
+@@ -230,10 +230,16 @@ export function RemoteSteamCmdModal({
+   const [zomboidElapsedSeconds, setZomboidElapsedSeconds] = useState(0);
+   const [error, setError] = useState<string | null>(null);
+   const ramOptions = useMemo(() => {
+-    return Array.from({ length: Math.ceil(remoteSystemRam * 4) }, (_, i) =>
++    const configuredRam = Math.max(
++      Number.parseFloat(clientRam) || 0,
++      Number.parseFloat(serverRam) || 0,
++      4,
++    );
++    const optionLimit = remoteSystemRam ?? configuredRam;
++    return Array.from({ length: Math.ceil(optionLimit * 4) }, (_, i) =>
+       ((i + 1) * 0.25).toFixed(2),
+     );
+-  }, [remoteSystemRam]);
++  }, [clientRam, remoteSystemRam, serverRam]);
+   const isRunning =
+     helperStatus === "running" ||
+     steamcmdStatus === "running" ||
+@@ -463,7 +469,7 @@ export function RemoteSteamCmdModal({
+       if (result.success) {
+         try {
+           const nextConfig = await refreshConfig();
+-          const ramGb = await invokeTauri<number>("get_remote_system_ram", { connection }).catch(() => 16);
++          const ramGb = await invokeTauri<number>("get_remote_system_ram", { connection });
+           setRemoteSystemRam(ramGb);
+           if (!nextConfig?.remoteServerRam || nextConfig.remoteServerRam === "4.00") {
+             setServerRam((ramGb * 0.70).toFixed(2));
+@@ -762,6 +768,24 @@ export function RemoteSteamCmdModal({
+       { connection },
+     );
+     setConfig(nextConfig);
++    if (nextConfig) {
++      const nextSteamcmdDir = cleanRemoteLinuxPath(nextConfig.remoteSteamcmdDir);
++      const nextSteamcmdPath = cleanRemoteLinuxPath(nextConfig.remoteSteamcmdPath);
++      const nextZomboidServerDir = cleanRemoteLinuxPath(
++        nextConfig.remoteZomboidServerDir,
++      );
++      const nextZomboidServerPath = cleanRemoteLinuxPath(
++        nextConfig.remoteZomboidServerPath,
++      );
++      const nextZomboidDataDir = remoteZomboidDataDirFromServerProfilePath(
++        nextConfig.serverPath,
++      );
++      if (nextSteamcmdDir) setSteamcmdDir(nextSteamcmdDir);
++      if (nextSteamcmdPath) setSteamcmdPath(nextSteamcmdPath);
++      if (nextZomboidServerDir) setZomboidServerDir(nextZomboidServerDir);
++      if (nextZomboidServerPath) setZomboidServerPath(nextZomboidServerPath);
++      if (nextZomboidDataDir) setZomboidDataDir(nextZomboidDataDir);
++    }
+     return nextConfig;
+   }
+ 
+@@ -1170,12 +1194,20 @@ export function RemoteSteamCmdModal({
+                 </div>
+ 
+                 <div className="rounded-2xl border border-white/5 bg-[#1e2327] p-4 text-sm text-gray-400">
+-                  <p>
+-                    Mem├│ria total detectada no servidor: <strong className="text-white">{remoteSystemRam} GB</strong>
+-                  </p>
+-                  <p className="mt-1 text-xs text-gray-500">
+-                    Recomendado (70%): <strong className="text-cyan-400">{(remoteSystemRam * 0.70).toFixed(2)} GB</strong>
+-                  </p>
++                  {remoteSystemRam === null ? (
++                    <p>
++                      Mem├│ria total do servidor ainda n├úo detectada.
++                    </p>
++                  ) : (
++                    <>
++                      <p>
++                        Mem├│ria total detectada no servidor: <strong className="text-white">{remoteSystemRam} GB</strong>
++                      </p>
++                      <p className="mt-1 text-xs text-gray-500">
++                        Recomendado (70%): <strong className="text-cyan-400">{(remoteSystemRam * 0.70).toFixed(2)} GB</strong>
++                      </p>
++                    </>
++                  )}
+                 </div>
+ 
+                 <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+diff --git a/src/components/ServerDetail.tsx b/src/components/ServerDetail.tsx
+index 4f36911..7697161 100644
+--- a/src/components/ServerDetail.tsx
++++ b/src/components/ServerDetail.tsx
+@@ -192,11 +192,11 @@ export function ServerDetail({
+   const [showFixWorkshopIdsModal, setShowFixWorkshopIdsModal] = useState(false)
+   const [showLogsModal, setShowLogsModal] = useState(false)
+   const [pendingActivation, setPendingActivation] = useState<PendingActivation | null>(null)
+-  const [isConfirmingPendingActivation, setIsConfirmingPendingActivation] = useState(false)
+   const [contextMenu, setContextMenu] = useState<{ mod: ZomboidMod; x: number; y: number } | null>(null)
+   const [showMoveWarning, setShowMoveWarning] = useState<MoveModRequest | null>(null)
+   const [dontShowAgainMove, setDontShowAgainMove] = useState(false)
+   const [mapInstallError, setMapInstallError] = useState<string | null>(null)
++  const [activationError, setActivationError] = useState<string | null>(null)
+   const [serverFileOpenError, setServerFileOpenError] = useState<string | null>(null)
+   const [serverFilePreview, setServerFilePreview] = useState<ServerFilePreview | null>(null)
+   const [isOpeningServerFile, setIsOpeningServerFile] = useState(false)
+@@ -363,7 +363,7 @@ export function ServerDetail({
+   }
+ 
+   const confirmActivationWithDependencies = async () => {
+-    if (!pendingActivation || isConfirmingPendingActivation) {
++    if (!pendingActivation) {
+       return
+     }
+ 
+@@ -379,42 +379,33 @@ export function ServerDetail({
+ 
+     const activation = pendingActivation
+ 
+-    setIsConfirmingPendingActivation(true)
+     setPendingActivation(null)
+-    try {
+-      const modsToInstall = uniqueMods(
+-        activation.modNeedsInstall
+-          ? [...activation.dependenciesToInstall, activation.mod]
+-          : activation.dependenciesToInstall,
+-      )
+-      const modsToActivate = uniqueMods([
+-        ...activation.dependenciesToActivate,
+-        activation.mod,
+-      ])
+-
+-      let installedMods: ZomboidMod[] = []
++    setActivationError(null)
+ 
+-      if (modsToInstall.length > 0) {
+-        installedMods = (await onInstallMods(modsToInstall)) ?? []
+-      }
++    const modsToInstall = uniqueMods(
++      activation.modNeedsInstall
++        ? [...activation.dependenciesToInstall, activation.mod]
++        : activation.dependenciesToInstall,
++    )
++    const modsToActivate = uniqueMods([
++      ...activation.dependenciesToActivate,
++      activation.mod,
++    ])
++
++    void (async () => {
++      try {
++        if (modsToInstall.length > 0) {
++          await onInstallMods(modsToInstall)
++        }
+ 
+-      const installedModsById = new Map(
+-        installedMods.flatMap((installedMod) => [
+-          [normalizeModId(installedMod.id), installedMod] as const,
+-          ...installedMod.variants.map((variant) => [
+-            normalizeModId(variant.id),
+-            { ...installedMod, id: variant.id, path: variant.path, dependencies: variant.dependencies, mapNames: variant.mapNames },
+-          ] as const),
+-        ]),
+-      )
+-      const optimisticModsToActivate = modsToActivate.map(
+-        (mod) => installedModsById.get(normalizeModId(mod.id)) ?? mod,
+-      )
+-
+-      await onActivateMods(optimisticModsToActivate)
+-    } finally {
+-      setIsConfirmingPendingActivation(false)
+-    }
++        await onActivateMods(modsToActivate)
++      } catch (error) {
++        setActivationError(getErrorMessage(error))
++        if (onRefreshMods) {
++          await onRefreshMods()
++        }
++      }
++    })()
+   }
+ 
+   const installMap = async (mod: ZomboidMod) => {
+@@ -581,7 +572,7 @@ export function ServerDetail({
+                   className="flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold text-gray-400 hover:text-cyan-400 disabled:cursor-not-allowed disabled:opacity-50 transition-all"
+                 >
+                   <Terminal size={14} />
+-                  <span>Console</span>
++                  <span>{t("serverDetail.console")}</span>
+                 </button>
+                 <div className="h-4 w-[1px] bg-white/10" />
+                 {isServerOnline ? (
+@@ -591,7 +582,7 @@ export function ServerDetail({
+                     className="flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold text-red-400 hover:text-red-300 transition-all"
+                   >
+                     <Square size={12} />
+-                    <span>Parar</span>
++                    <span>{t("serverDetail.stop")}</span>
+                   </button>
+                 ) : (
+                   <button
+@@ -611,7 +602,7 @@ export function ServerDetail({
+                     ) : (
+                       <Play size={14} />
+                     )}
+-                    <span>Iniciar</span>
++                    <span>{t("serverDetail.start")}</span>
+                   </button>
+                 )}
+               </div>
+@@ -657,7 +648,7 @@ export function ServerDetail({
+               className="flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2.5 text-xs font-bold text-cyan-200 transition-all hover:bg-cyan-500/20 hover:border-cyan-500/50 shadow-md shadow-cyan-950/20"
+             >
+               <FileText size={16} className="text-cyan-400" />
+-              <span>Ver Logs do Servidor</span>
++              <span>{t("serverDetail.viewLogs")}</span>
+             </button>
+ 
+             <button
+@@ -666,7 +657,7 @@ export function ServerDetail({
+               className="flex items-center gap-2 rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-2.5 text-xs font-bold text-orange-200 transition-all hover:bg-orange-500/20 hover:border-orange-500/50 shadow-md shadow-orange-950/20"
+             >
+               <Wand2 size={16} className="text-orange-400" />
+-              <span>Organizar Workshop IDs</span>
++              <span>{t("serverDetail.organizeWorkshopIds")}</span>
+             </button>
+           </div>
+         )}
+@@ -680,6 +671,12 @@ export function ServerDetail({
+           </div>
+         )}
+ 
++        {activationError && (
++          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-5 py-4 text-sm text-red-300">
++            {activationError}
++          </div>
++        )}
++
+         {serverFileOpenError && (
+           <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-5 py-4 text-sm text-red-300">
+             {serverFileOpenError}
+@@ -873,9 +870,8 @@ export function ServerDetail({
+       {pendingActivation && (
+         <PendingActivationModal
+           activation={pendingActivation}
+-          isConfirming={isConfirmingPendingActivation}
+           onCancel={() => {
+-            if (!isConfirmingPendingActivation) setPendingActivation(null)
++            setPendingActivation(null)
+           }}
+           onConfirm={() => void confirmActivationWithDependencies()}
+         />
+diff --git a/src/components/Settings.tsx b/src/components/Settings.tsx
+index cba9787..9d89c84 100644
+--- a/src/components/Settings.tsx
++++ b/src/components/Settings.tsx
+@@ -1,4 +1,4 @@
+-import { Cpu, Folder, RefreshCw, Save } from "lucide-react";
++import { AlertTriangle, Cpu, Folder, RefreshCw, Save, Trash2 } from "lucide-react";
+ import { useEffect, useState } from "react";
+ import { useTranslation } from "react-i18next";
+ 
+@@ -20,6 +20,7 @@ import type {
+ const SETTINGS_VIEW_CACHE_KEY = "pzmm:settings-view";
+ const REMOTE_SETTINGS_VIEW_CACHE_PREFIX = "pzmm:settings-view:remote";
+ const SETTINGS_VIEW_CACHE_VERSION = 3;
++const DELETE_ALL_CONFIRMATION = "DELETE ALL PZMM DATA";
+ 
+ type SettingsViewCache = {
+   version: number;
+@@ -33,6 +34,13 @@ type SettingsProps = {
+   remoteConnection?: RemoteConnectionDraft | null;
+ };
+ 
++type DeleteAllRemoteDataResult = {
++  success: boolean;
++  message: string;
++  command: string;
++  logs: string[];
++};
++
+ export function Settings({
+   onRescanMods,
+   remoteConnection = null,
+@@ -81,6 +89,8 @@ export function Settings({
+   const [isAddingFolder, setIsAddingFolder] = useState(false);
+   const [isRescanningMods, setIsRescanningMods] = useState(false);
+   const [isScanningZomboid, setIsScanningZomboid] = useState(false);
++  const [isDeleteAllEnabled, setIsDeleteAllEnabled] = useState(false);
++  const [isDeletingAll, setIsDeletingAll] = useState(false);
+   const [zomboidStatus, setZomboidStatus] =
+     useState<ZomboidInstallationStatus | null>(null);
+   const [message, setMessage] = useState<string | null>(null);
+@@ -102,7 +112,7 @@ export function Settings({
+               }),
+               invokeTauri<number>("get_remote_system_ram", {
+                 connection: remoteConnection,
+-              }).catch(() => 16),
++              }),
+             ])
+           : await Promise.all([
+               invokeTauri<AppSettings>("get_app_settings"),
+@@ -126,6 +136,15 @@ export function Settings({
+     }
+   }
+ 
++  async function loadDeleteAllFlag() {
++    try {
++      const enabled = await invokeTauri<boolean>("is_delete_all_enabled");
++      setIsDeleteAllEnabled(enabled);
++    } catch {
++      setIsDeleteAllEnabled(false);
++    }
++  }
++
+   async function saveSettings() {
+     setIsSaving(true);
+     setMessage(null);
+@@ -172,6 +191,60 @@ export function Settings({
+     }
+   }
+ 
++  async function deleteAllRemoteData() {
++    if (isDeletingAll) return;
++    if (!remoteConnection) {
++      setError(t("remoteSetup.noActiveConnection"));
++      return;
++    }
++
++    const confirmation = window.prompt(
++      t("settings.danger.confirmPrompt", {
++        phrase: DELETE_ALL_CONFIRMATION,
++      }),
++    );
++
++    if (confirmation !== DELETE_ALL_CONFIRMATION) {
++      setMessage(null);
++      setError(t("settings.danger.confirmMismatch"));
++      return;
++    }
++
++    setIsDeletingAll(true);
++    setMessage(null);
++    setError(null);
++
++    try {
++      const result = await invokeTauri<DeleteAllRemoteDataResult>(
++        "delete_all_remote_data",
++        {
++          connection: remoteConnection,
++          confirmation,
++        },
++      );
++      clearPzmmBrowserStorage();
++      setLoadedSettings(null);
++      setGameExecutablePath("");
++      setClientRam("4.00");
++      setServerRam("4.00");
++      setMaxConcurrentDownloads(1);
++      setModLocations([]);
++      setResolvedPath(null);
++      setIsConfigured(false);
++      setZomboidStatus(null);
++      setMessage(
++        result.message ||
++          t("settings.danger.deleted", {
++            count: result.logs.length,
++          }),
++      );
++    } catch (deleteError) {
++      setError(getErrorMessage(deleteError));
++    } finally {
++      setIsDeletingAll(false);
++    }
++  }
++
+   async function browseGameExecutable() {
+     setMessage(null);
+     setError(null);
+@@ -454,6 +527,10 @@ export function Settings({
+     void loadSettings();
+   }, [cacheKey]);
+ 
++  useEffect(() => {
++    void loadDeleteAllFlag();
++  }, []);
++
+   useEffect(() => {
+     if (activeTab === "ram") {
+       void scanZomboidInstallation();
+@@ -581,6 +658,38 @@ export function Settings({
+                   </span>
+                 </button>
+               </div>
++
++              {isDeleteAllEnabled && isRemoteWorkspace && (
++                <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-5">
++                  <div className="flex items-start gap-3">
++                    <AlertTriangle className="mt-0.5 text-red-300" size={22} />
++                    <div className="min-w-0 flex-1">
++                      <h3 className="text-sm font-black uppercase tracking-wide text-red-200">
++                        {t("settings.danger.title")}
++                      </h3>
++                      <p className="mt-1 text-sm text-red-100/80">
++                        {t("settings.danger.description")}
++                      </p>
++                    </div>
++                  </div>
++                  <button
++                    disabled={isDeletingAll}
++                    onClick={() => void deleteAllRemoteData()}
++                    className="mt-4 flex items-center justify-center gap-2 rounded-2xl border border-red-400/40 bg-red-500/20 px-5 py-3 text-sm font-black uppercase italic tracking-wider text-red-100 transition-all hover:bg-red-500/30 disabled:opacity-60"
++                  >
++                    {isDeletingAll ? (
++                      <RefreshCw size={18} className="animate-spin" />
++                    ) : (
++                      <Trash2 size={18} />
++                    )}
++                    <span>
++                      {isDeletingAll
++                        ? t("settings.danger.deleting")
++                        : t("settings.danger.button")}
++                    </span>
++                  </button>
++                </div>
++              )}
+             </div>
+           </div>
+         </div>
+@@ -592,6 +701,18 @@ export function Settings({
+   );
+ }
+ 
++function clearPzmmBrowserStorage() {
++  try {
++    for (const key of Object.keys(window.localStorage)) {
++      if (key.startsWith("pzmm:")) {
++        window.localStorage.removeItem(key);
++      }
++    }
++  } catch {
++    // Backend deletion already did the real cleanup.
++  }
++}
++
+ function getErrorMessage(error: unknown) {
+   if (error instanceof Error) {
+     return error.message;
+diff --git a/src/components/WorkspaceSelector.tsx b/src/components/WorkspaceSelector.tsx
+index 64e312c..4ba5399 100644
+--- a/src/components/WorkspaceSelector.tsx
++++ b/src/components/WorkspaceSelector.tsx
+@@ -71,13 +71,9 @@ const initialRemoteConnection: RemoteConnectionDraft = {
+   authMethod: "key",
+   password: "",
+   sshKeyPath: "",
+-  serverPath: "/var/lib/pzmm/Zomboid/Server",
++  serverPath: "",
+ };
+ 
+-function remoteAppDataBase(_username: string) {
+-  return "/var/lib/pzmm";
+-}
+-
+ function isLegacyPzManagerPath(path?: string) {
+   return Boolean(
+     path
+@@ -115,7 +111,7 @@ export function remoteConfigToDraft(
+     authMethod: "key",
+     password: "",
+     sshKeyPath: config.sshKeyPath ?? "",
+-    serverPath: config.serverPath || "/var/lib/pzmm/Zomboid/Server",
++    serverPath: cleanLegacyPath(config.serverPath),
+   };
+ }
+ 
+@@ -127,13 +123,12 @@ function defaultRemoteConfig(
+     ...connection,
+     password: "",
+     sshKeyPath: connection.authMethod === "key" ? connection.sshKeyPath : "",
+-    remoteSteamcmdDir:
+-      cleanLegacyPath(existing?.remoteSteamcmdDir) ||
+-      `${remoteAppDataBase(connection.username)}/steamcmd`,
++    serverPath:
++      cleanLegacyPath(existing?.serverPath) ||
++      cleanLegacyPath(connection.serverPath),
++    remoteSteamcmdDir: cleanLegacyPath(existing?.remoteSteamcmdDir),
+     remoteSteamcmdPath: cleanLegacyPath(existing?.remoteSteamcmdPath),
+-    remoteZomboidServerDir:
+-      cleanLegacyPath(existing?.remoteZomboidServerDir) ||
+-      `${remoteAppDataBase(connection.username)}/zomboid-server`,
++    remoteZomboidServerDir: cleanLegacyPath(existing?.remoteZomboidServerDir),
+     remoteZomboidServerPath: cleanLegacyPath(existing?.remoteZomboidServerPath),
+     remoteZomboidServerOwner: existing?.remoteZomboidServerOwner || "pzmm",
+     remoteZomboidDataOwner: existing?.remoteZomboidDataOwner || "pzmm",
+@@ -725,9 +720,13 @@ function RemoteWorkspaceSetup({
+         "get_remote_workspace_config",
+         { connection: connectedConnection },
+       );
++      const mergedExistingConfig = {
++        ...(savedConfigToUse ?? {}),
++        ...(savedConfig ?? {}),
++      };
+       const configToSave = defaultRemoteConfig(
+         connectedConnection,
+-        savedConfigToUse ?? savedConfig ?? undefined,
++        mergedExistingConfig,
+       );
+ 
+       const persistedConfig = await invokeTauri<RemoteWorkspaceConfig>(
+@@ -744,12 +743,14 @@ function RemoteWorkspaceSetup({
+               connectedConnection.authMethod === "key"
+                 ? connectedConnection.sshKeyPath
+                 : "",
+-            serverPath: result.serverPath,
++            serverPath: configToSave.serverPath || result.serverPath,
+           },
+         },
+       );
++      const persistedConnection = remoteConfigToDraft(persistedConfig);
+       const nextConnections = upsertSavedRemoteConnection(savedConnections, persistedConfig);
+       setSavedConnections(nextConnections);
++      setConnection(persistedConnection);
+       setConnectionStatuses((currentStatuses) => ({
+         ...currentStatuses,
+         [remoteConnectionId(persistedConfig)]: {
+@@ -761,7 +762,7 @@ function RemoteWorkspaceSetup({
+         LAST_WORKSPACE_KEY,
+         `remote:${remoteConnectionId(persistedConfig)}`,
+       );
+-      onConnected(connectedConnection);
++      onConnected(persistedConnection);
+     } catch (error) {
+       setStatus("error");
+       setFeedback(formatConnectionError(getErrorMessage(error)));
+diff --git a/src/components/server/FixWorkshopIdsModal.tsx b/src/components/server/FixWorkshopIdsModal.tsx
+index 5da1407..2279010 100644
+--- a/src/components/server/FixWorkshopIdsModal.tsx
++++ b/src/components/server/FixWorkshopIdsModal.tsx
+@@ -67,7 +67,7 @@ export function FixWorkshopIdsModal({
+ 
+     const cleanId = inputWorkshopId.trim()
+     if (!cleanId || !/^\d+$/.test(cleanId)) {
+-      setErrorMessage("Por favor, digite um ID num├®rico v├ílido.")
++      setErrorMessage(t("fixWorkshopIds.invalidId"))
+       return
+     }
+ 
+@@ -85,7 +85,7 @@ export function FixWorkshopIdsModal({
+         setIsFinished(true)
+       }
+     } catch (err) {
+-      setErrorMessage("Erro ao salvar o ID. Tente novamente.")
++      setErrorMessage(t("fixWorkshopIds.saveIdError"))
+     } finally {
+       setIsSaving(false)
+     }
+@@ -127,7 +127,7 @@ export function FixWorkshopIdsModal({
+       }
+       onClose()
+     } catch (err) {
+-      setErrorMessage("Erro ao salvar a configura├º├úo no servidor.")
++      setErrorMessage(t("fixWorkshopIds.saveServerError"))
+     } finally {
+       setIsSaving(false)
+     }
+@@ -151,9 +151,9 @@ export function FixWorkshopIdsModal({
+               <Wand2 size={20} />
+             </div>
+             <div>
+-              <h3 className="text-lg font-bold text-white">Organizar Workshop IDs</h3>
++              <h3 className="text-lg font-bold text-white">{t("fixWorkshopIds.title")}</h3>
+               <p className="text-xs text-gray-400">
+-                Alinha os IDs da Workshop na ordem exata dos Mod IDs no servidor
++                {t("fixWorkshopIds.subtitle")}
+               </p>
+             </div>
+           </div>
+@@ -174,20 +174,20 @@ export function FixWorkshopIdsModal({
+               <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-500/20 text-green-400 border border-green-500/30">
+                 <CheckCircle2 size={36} />
+               </div>
+-              <h4 className="text-xl font-bold text-white">Tudo Pronto!</h4>
++              <h4 className="text-xl font-bold text-white">{t("fixWorkshopIds.doneTitle")}</h4>
+               <p className="mt-2 max-w-md text-xs text-gray-300 leading-relaxed">
+                 {missingModsQueue.length === 0
+-                  ? "Todos os mods ativos no servidor j├í possuem ID da Workshop associado. A ordem no arquivo .ini ser├í alinhada perfeitamente!"
+-                  : "Todos os mods da fila foram processados. Clique no bot├úo abaixo para regravar o arquivo servertest.ini na ordem exata!"}
++                  ? t("fixWorkshopIds.doneAllMapped")
++                  : t("fixWorkshopIds.doneProcessed")}
+               </p>
+ 
+               <div className="mt-6 w-full rounded-2xl border border-white/5 bg-[#1e2327] p-4 text-left">
+                 <div className="flex justify-between items-center text-xs text-gray-400 mb-2">
+-                  <span>Total de Mods Ativos:</span>
++                  <span>{t("fixWorkshopIds.totalActive")}</span>
+                   <span className="font-bold text-white">{activeModsList.length}</span>
+                 </div>
+                 <div className="flex justify-between items-center text-xs text-gray-400">
+-                  <span>Mods Pulados sem Workshop ID:</span>
++                  <span>{t("fixWorkshopIds.skippedWithoutId")}</span>
+                   <span className="font-bold text-amber-400">{skippedModIds.size}</span>
+                 </div>
+               </div>
+@@ -199,7 +199,7 @@ export function FixWorkshopIdsModal({
+                   disabled={isSaving}
+                   className="flex-1 rounded-xl bg-orange-500 py-3 text-xs font-bold text-white shadow-lg shadow-orange-500/20 transition-all hover:bg-orange-600 disabled:opacity-50"
+                 >
+-                  {isSaving ? "Gravando no Servidor..." : "Aplicar e Salvar no Servidor"}
++                  {isSaving ? t("fixWorkshopIds.saving") : t("fixWorkshopIds.applySave")}
+                 </button>
+               </div>
+             </div>
+@@ -209,10 +209,10 @@ export function FixWorkshopIdsModal({
+               {/* Indicador de Progresso */}
+               <div className="mb-6 flex items-center justify-between">
+                 <span className="text-xs font-bold uppercase tracking-wider text-orange-400">
+-                  Mod {currentIndex + 1} de {missingModsQueue.length} sem ID
++                  {t("fixWorkshopIds.progress", { current: currentIndex + 1, total: missingModsQueue.length })}
+                 </span>
+                 <span className="text-xs text-gray-500">
+-                  {Math.round(((currentIndex) / missingModsQueue.length) * 100)}% conclu├¡do
++                  {t("fixWorkshopIds.percentDone", { percent: Math.round((currentIndex / missingModsQueue.length) * 100) })}
+                 </span>
+               </div>
+ 
+@@ -235,7 +235,7 @@ export function FixWorkshopIdsModal({
+                 {/* Campo de Input para o Workshop ID */}
+                 <div className="mt-4">
+                   <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-gray-400">
+-                    Digite o Workshop ID deste mod:
++                    {t("fixWorkshopIds.inputLabel")}
+                   </label>
+                   <div className="flex gap-2">
+                     <div className="relative flex-1">
+@@ -247,7 +247,7 @@ export function FixWorkshopIdsModal({
+                         onKeyDown={(e) => {
+                           if (e.key === "Enter") void handleSaveCurrentMod()
+                         }}
+-                        placeholder="Ex: 2460154815"
++                        placeholder={t("fixWorkshopIds.placeholder")}
+                         disabled={isSaving}
+                         autoFocus
+                         className="w-full rounded-xl border border-white/10 bg-black/40 py-2.5 pl-9 pr-3 text-xs font-mono text-white placeholder-gray-600 focus:border-orange-400/50 focus:outline-none"
+@@ -259,7 +259,7 @@ export function FixWorkshopIdsModal({
+                       disabled={isSaving}
+                       className="flex items-center gap-1 rounded-xl bg-orange-500 px-4 py-2.5 text-xs font-bold text-white transition-all hover:bg-orange-600 shadow-md shadow-orange-500/20 disabled:opacity-50"
+                     >
+-                      <span>{isSaving ? "Salvando..." : "Salvar"}</span>
++                      <span>{isSaving ? t("fixWorkshopIds.savingShort") : t("fixWorkshopIds.save")}</span>
+                       <ChevronRight size={14} />
+                     </button>
+                   </div>
+@@ -278,7 +278,7 @@ export function FixWorkshopIdsModal({
+                   className="flex items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-[#2b3238] px-4 py-2.5 text-xs font-bold text-gray-300 transition-colors hover:bg-[#353c42] hover:text-white"
+                 >
+                   <SkipForward size={14} />
+-                  <span>Pular este mod</span>
++                  <span>{t("fixWorkshopIds.skipCurrent")}</span>
+                 </button>
+ 
+                 <button
+@@ -288,7 +288,7 @@ export function FixWorkshopIdsModal({
+                   className="flex items-center justify-center gap-1.5 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-2.5 text-xs font-bold text-amber-300 transition-colors hover:bg-amber-500/20"
+                 >
+                   <SkipForward size={14} />
+-                  <span>Pular todos os mods sem ID</span>
++                  <span>{t("fixWorkshopIds.skipAllMissing")}</span>
+                 </button>
+               </div>
+             </div>
+diff --git a/src/components/server/RemoteServerStartModal.tsx b/src/components/server/RemoteServerStartModal.tsx
+index 9cb18e6..933fb72 100644
+--- a/src/components/server/RemoteServerStartModal.tsx
++++ b/src/components/server/RemoteServerStartModal.tsx
+@@ -1,5 +1,6 @@
+ import { CheckCircle2, Play, RefreshCw, Send, ShieldAlert, ShieldCheck, Square, Terminal, X, XCircle } from "lucide-react"
+ import { useEffect, useRef, useState, type ReactNode } from "react"
++import { useTranslation } from "react-i18next"
+ 
+ import type { ZomboidServer } from "@/types/server"
+ 
+@@ -60,6 +61,7 @@ export function RemoteServerStartModal({
+   onSendCommand,
+   onStopServer,
+ }: RemoteServerStartModalProps) {
++  const { t } = useTranslation()
+   const [commandText, setCommandText] = useState("")
+   const [isSendingCommand, setIsSendingCommand] = useState(false)
+   const [isStoppingServer, setIsStoppingServer] = useState(false)
+@@ -119,9 +121,9 @@ export function RemoteServerStartModal({
+               {firewallCheck?.isConfigured ? <ShieldCheck size={20} /> : <ShieldAlert size={20} />}
+             </div>
+             <div>
+-              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-300">Server startup</p>
++              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-300">{t("remoteStart.title")}</p>
+               <h3 className="mt-1 text-lg font-black text-white">{server.name}</h3>
+-              <p className="mt-1 text-xs text-gray-400">Close only hides this window; it does not stop the server.</p>
++              <p className="mt-1 text-xs text-gray-400">{t("remoteStart.closeHint")}</p>
+             </div>
+           </div>
+           <button
+@@ -136,15 +138,15 @@ export function RemoteServerStartModal({
+         <div className="grid min-h-0 flex-1 gap-4 overflow-hidden p-5 lg:grid-cols-[260px_minmax(0,1fr)]">
+           <div className="min-h-0 space-y-3 overflow-auto pr-1 custom-scrollbar">
+             <div className="rounded-xl border border-white/10 bg-[#20262b] p-4">
+-              <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Firewall</p>
++              <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">{t("remoteStart.firewall")}</p>
+               {isChecking ? (
+-                <StatusLine icon={<RefreshCw size={16} className="animate-spin" />} text="Checking rules" tone="muted" />
++                <StatusLine icon={<RefreshCw size={16} className="animate-spin" />} text={t("remoteStart.checkingRules")} tone="muted" />
+               ) : firewallCheck?.isConfigured ? (
+-                <StatusLine icon={<CheckCircle2 size={16} />} text="Ready" tone="success" />
++                <StatusLine icon={<CheckCircle2 size={16} />} text={t("remoteStart.ready")} tone="success" />
+               ) : firewallCheck ? (
+-                <StatusLine icon={<ShieldAlert size={16} />} text={`${firewallCheck.missingRules.length} missing setup item(s)`} tone="warning" />
++                <StatusLine icon={<ShieldAlert size={16} />} text={t("remoteStart.missingSetupItems", { count: firewallCheck.missingRules.length })} tone="warning" />
+               ) : (
+-                <StatusLine icon={<RefreshCw size={16} />} text="Pending" tone="muted" />
++                <StatusLine icon={<RefreshCw size={16} />} text={t("remoteStart.pending")} tone="muted" />
+               )}
+               <div className="mt-3 flex flex-wrap gap-2">
+                 {(firewallCheck?.ports.length ? firewallCheck.ports : [Number(server.port || 16261)]).map((port) => (
+@@ -156,28 +158,28 @@ export function RemoteServerStartModal({
+             </div>
+ 
+             <div className="rounded-xl border border-white/10 bg-[#20262b] p-4">
+-              <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Server</p>
++              <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">{t("remoteStart.server")}</p>
+               {isStarting ? (
+-                <StatusLine icon={<RefreshCw size={16} className="animate-spin" />} text="Starting" tone="muted" />
++                <StatusLine icon={<RefreshCw size={16} className="animate-spin" />} text={t("remoteStart.starting")} tone="muted" />
+               ) : isServerOnline ? (
+-                <StatusLine icon={<CheckCircle2 size={16} />} text="Running" tone="success" />
++                <StatusLine icon={<CheckCircle2 size={16} />} text={t("remoteStart.running")} tone="success" />
+               ) : startResult?.success ? (
+-                <StatusLine icon={<RefreshCw size={16} />} text="Waiting for running signal" tone="muted" />
++                <StatusLine icon={<RefreshCw size={16} />} text={t("remoteStart.waitingRunningSignal")} tone="muted" />
+               ) : error ? (
+-                <StatusLine icon={<XCircle size={16} />} text="Needs attention" tone="error" />
++                <StatusLine icon={<XCircle size={16} />} text={t("remoteStart.needsAttention")} tone="error" />
+               ) : (
+-                <StatusLine icon={<Terminal size={16} />} text="Ready to start server" tone="muted" />
++                <StatusLine icon={<Terminal size={16} />} text={t("remoteStart.readyToStart")} tone="muted" />
+               )}
+             </div>
+ 
+             <div className="rounded-xl border border-white/10 bg-[#20262b] p-4">
+-              <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Terminal</p>
++              <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">{t("remoteStart.terminal")}</p>
+               {isServerOnline ? (
+-                <StatusLine icon={<Terminal size={16} />} text="Command channel ready" tone="success" />
++                <StatusLine icon={<Terminal size={16} />} text={t("remoteStart.commandChannelReady")} tone="success" />
+               ) : isStarting || isStartupWatchPending ? (
+-                <StatusLine icon={<RefreshCw size={16} className="animate-spin" />} text="Waiting for server" tone="muted" />
++                <StatusLine icon={<RefreshCw size={16} className="animate-spin" />} text={t("remoteStart.waitingServer")} tone="muted" />
+               ) : (
+-                <StatusLine icon={<Terminal size={16} />} text="Available when online" tone="muted" />
++                <StatusLine icon={<Terminal size={16} />} text={t("remoteStart.availableWhenOnline")} tone="muted" />
+               )}
+             </div>
+ 
+@@ -191,8 +193,8 @@ export function RemoteServerStartModal({
+           <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-[#101417]">
+             <div className="shrink-0 flex items-start justify-between gap-3 border-b border-white/10 px-4 py-3">
+               <div>
+-                <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Logs</p>
+-                <p className="max-w-[520px] break-words text-xs text-gray-400">{startResult?.message ?? "Server startup workflow"}</p>
++                <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">{t("remoteStart.logs")}</p>
++                <p className="max-w-[520px] break-words text-xs text-gray-400">{startResult?.message ?? t("remoteStart.workflow")}</p>
+               </div>
+               <button
+                 type="button"
+@@ -200,7 +202,7 @@ export function RemoteServerStartModal({
+                 disabled={isBusy}
+                 className="rounded-lg border border-white/10 px-3 py-2 text-xs font-black text-gray-300 transition-colors hover:border-cyan-300/30 hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+               >
+-                Recheck
++                {t("remoteStart.recheck")}
+               </button>
+             </div>
+ 
+@@ -233,7 +235,7 @@ export function RemoteServerStartModal({
+                     <input
+                       value={commandText}
+                       onChange={(event) => setCommandText(event.target.value)}
+-                      placeholder="save, servermsg hello, quit..."
++                      placeholder={t("remoteStart.commandPlaceholder")}
+                       disabled={isSendingCommand || isStoppingServer}
+                       className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-gray-600 disabled:opacity-60"
+                     />
+@@ -244,7 +246,7 @@ export function RemoteServerStartModal({
+                     className="flex items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm font-black text-cyan-200 transition-colors hover:bg-cyan-400 hover:text-[#071014] disabled:cursor-not-allowed disabled:opacity-50"
+                   >
+                     {isSendingCommand ? <RefreshCw size={18} className="animate-spin" /> : <Send size={18} />}
+-                    <span>Send command</span>
++                    <span>{t("remoteStart.sendCommand")}</span>
+                   </button>
+                 </form>
+               </div>
+@@ -258,7 +260,7 @@ export function RemoteServerStartModal({
+                   className="flex items-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm font-black text-cyan-200 transition-colors hover:bg-cyan-400 hover:text-[#071014]"
+                 >
+                   <ShieldCheck size={18} />
+-                  <span>Configure firewall</span>
++                  <span>{t("remoteStart.configureFirewall")}</span>
+                 </button>
+               )}
+               {isServerOnline && (
+@@ -269,7 +271,7 @@ export function RemoteServerStartModal({
+                   className="flex items-center gap-2 rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-2 text-sm font-black text-red-200 transition-colors hover:bg-red-400 hover:text-[#160b0b] disabled:cursor-not-allowed disabled:opacity-50"
+                 >
+                   {isStoppingServer ? <RefreshCw size={18} className="animate-spin" /> : <Square size={18} />}
+-                  <span>Stop server</span>
++                  <span>{t("remoteStart.stopServer")}</span>
+                 </button>
+               )}
+               <button
+@@ -279,7 +281,7 @@ export function RemoteServerStartModal({
+                 className="flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 text-sm font-black text-emerald-200 transition-colors hover:bg-emerald-400 hover:text-[#071014] disabled:cursor-not-allowed disabled:opacity-50"
+               >
+                 {isStarting ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
+-                <span>Start server</span>
++                <span>{t("remoteStart.startServer")}</span>
+               </button>
+               <button
+                 type="button"
+@@ -288,7 +290,7 @@ export function RemoteServerStartModal({
+                 className="flex items-center gap-2 rounded-xl border border-orange-400/30 bg-orange-400/10 px-4 py-2 text-sm font-black text-orange-200 transition-colors hover:bg-orange-400 hover:text-[#140d05] disabled:cursor-not-allowed disabled:opacity-50"
+               >
+                 {isStarting ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
+-                <span>Start -nosteam</span>
++                <span>{t("remoteStart.startNoSteam")}</span>
+               </button>
+             </div>
+           </div>
+diff --git a/src/components/server/ServerLogsModal.tsx b/src/components/server/ServerLogsModal.tsx
+index fc74225..79d031f 100644
+--- a/src/components/server/ServerLogsModal.tsx
++++ b/src/components/server/ServerLogsModal.tsx
+@@ -52,11 +52,18 @@ export function ServerLogsModal({
+     setError(null)
+     try {
+       if (remoteConnection) {
+-        setLogFiles([
+-          { name: "DebugLog-server.txt", path: "/home/ubuntu/Zomboid/Logs/DebugLog-server.txt", sizeBytes: 0, lastModified: Date.now() / 1000 },
+-          { name: "coop-console.txt", path: "/home/ubuntu/Zomboid/Logs/coop-console.txt", sizeBytes: 0, lastModified: Date.now() / 1000 },
+-        ])
+-        setSelectedLogName("DebugLog-server.txt")
++        const list = await invokeTauri<AvailableLogFile[]>("list_remote_zomboid_server_logs", {
++          connection: remoteConnection,
++          serverId: server.id,
++        })
++        setLogFiles(list || [])
++        if (list && list.length > 0) {
++          setSelectedLogName(list[0].name)
++        } else {
++          setSelectedLogName("")
++          setLogContent("")
++          setLogPath("")
++        }
+       } else {
+         const list = await invokeTauri<AvailableLogFile[]>("list_zomboid_server_logs", {
+           serverId: server.id,
+@@ -64,11 +71,15 @@ export function ServerLogsModal({
+         setLogFiles(list || [])
+         if (list && list.length > 0) {
+           setSelectedLogName(list[0].name)
++        } else {
++          setSelectedLogName("")
++          setLogContent("")
++          setLogPath("")
+         }
+       }
+     } catch (err) {
+       console.error("Erro ao listar logs:", err)
+-      setError("N├úo foi poss├¡vel carregar a lista de arquivos de log.")
++      setError(t("serverLogs.listError"))
+     } finally {
+       setIsLoadingList(false)
+     }
+@@ -81,9 +92,10 @@ export function ServerLogsModal({
+     setError(null)
+     try {
+       if (remoteConnection) {
+-        const preview = await invokeTauri<LogFilePreview>("read_remote_zomboid_server_file", {
++        const preview = await invokeTauri<LogFilePreview>("read_remote_zomboid_server_log_file", {
+           connection: remoteConnection,
+           serverId: server.id,
++          logName,
+         })
+         setLogContent(preview.content || "")
+         setLogPath(preview.path || "")
+@@ -97,7 +109,7 @@ export function ServerLogsModal({
+       }
+     } catch (err) {
+       console.error("Erro ao ler log:", err)
+-      setError("N├úo foi poss├¡vel ler o arquivo de log selecionado.")
++      setError(t("serverLogs.readError"))
+     } finally {
+       setIsLoadingContent(false)
+     }
+@@ -105,13 +117,16 @@ export function ServerLogsModal({
+ 
+   useEffect(() => {
+     void loadLogFilesList()
+-  }, [server.id])
++  }, [server.id, remoteConnection])
+ 
+   useEffect(() => {
+     if (selectedLogName) {
+       void loadLogContent(selectedLogName)
++    } else {
++      setLogContent("")
++      setLogPath("")
+     }
+-  }, [selectedLogName])
++  }, [selectedLogName, remoteConnection])
+ 
+   // Contagem e filtragem de categorias
+   const lines = useMemo(() => (logContent ?? "").split("\n"), [logContent])
+@@ -209,7 +224,7 @@ export function ServerLogsModal({
+               <FileText size={20} />
+             </div>
+             <div className="min-w-0">
+-              <h3 className="truncate text-lg font-bold text-white">Logs do Servidor</h3>
++              <h3 className="truncate text-lg font-bold text-white">{t("serverLogs.title")}</h3>
+               <p className="truncate font-mono text-[10px] text-gray-400">{logPath || server.name}</p>
+             </div>
+           </div>
+@@ -224,7 +239,7 @@ export function ServerLogsModal({
+                 className="appearance-none rounded-xl border border-white/10 bg-black/40 py-2 pl-3 pr-8 text-xs font-mono text-cyan-300 focus:border-cyan-500/50 focus:outline-none disabled:opacity-50 cursor-pointer"
+               >
+                 {logFiles.length === 0 ? (
+-                  <option value="">Sem arquivos de log</option>
++                  <option value="">{t("serverLogs.noFiles")}</option>
+                 ) : (
+                   logFiles.map((file) => (
+                     <option key={file.name} value={file.name} className="bg-[#22272b] text-white">
+@@ -240,7 +255,7 @@ export function ServerLogsModal({
+               type="button"
+               onClick={() => loadLogContent(selectedLogName)}
+               disabled={isLoadingContent}
+-              title="Atualizar Logs"
++              title={t("serverLogs.refreshTitle")}
+               className="rounded-xl border border-white/10 bg-[#1e2327] p-2 text-gray-300 hover:text-white transition-colors disabled:opacity-50"
+             >
+               <RefreshCw size={16} className={isLoadingContent ? "animate-spin text-cyan-400" : ""} />
+@@ -267,7 +282,7 @@ export function ServerLogsModal({
+                 : "text-gray-400 hover:text-white hover:bg-white/5"
+             }`}
+           >
+-            Todos ({categoryCounts.ALL})
++            {t("serverLogs.all")} ({categoryCounts.ALL})
+           </button>
+ 
+           <button
+@@ -279,7 +294,7 @@ export function ServerLogsModal({
+                 : "text-red-400/70 hover:text-red-300 hover:bg-red-500/10"
+             }`}
+           >
+-            Errors ({categoryCounts.ERROR})
++            {t("serverLogs.errors")} ({categoryCounts.ERROR})
+           </button>
+ 
+           <button
+@@ -291,7 +306,7 @@ export function ServerLogsModal({
+                 : "text-amber-400/70 hover:text-amber-300 hover:bg-amber-500/10"
+             }`}
+           >
+-            Warnings ({categoryCounts.WARN})
++            {t("serverLogs.warnings")} ({categoryCounts.WARN})
+           </button>
+ 
+           <button
+@@ -303,7 +318,7 @@ export function ServerLogsModal({
+                 : "text-sky-400/70 hover:text-sky-300 hover:bg-sky-500/10"
+             }`}
+           >
+-            Lua & Mods ({categoryCounts.LUA})
++            {t("serverLogs.luaMods")} ({categoryCounts.LUA})
+           </button>
+ 
+           <button
+@@ -315,7 +330,7 @@ export function ServerLogsModal({
+                 : "text-green-400/70 hover:text-green-300 hover:bg-green-500/10"
+             }`}
+           >
+-            Boot / Servidor ({categoryCounts.BOOT})
++            {t("serverLogs.bootServer")} ({categoryCounts.BOOT})
+           </button>
+ 
+           <button
+@@ -327,7 +342,7 @@ export function ServerLogsModal({
+                 : "text-gray-400 hover:text-gray-200 hover:bg-white/5"
+             }`}
+           >
+-            Logs / Info ({categoryCounts.LOG})
++            {t("serverLogs.info")} ({categoryCounts.LOG})
+           </button>
+         </div>
+ 
+@@ -337,7 +352,7 @@ export function ServerLogsModal({
+             <Search className="absolute left-3 top-2.5 text-gray-500" size={14} />
+             <input
+               type="text"
+-              placeholder="Filtrar por texto (ex: WARN, ERROR, mod...)"
++              placeholder={t("serverLogs.searchPlaceholder")}
+               value={search}
+               onChange={(e) => setSearch(e.target.value)}
+               className="w-full rounded-xl border border-white/10 bg-black/40 py-1.5 pl-8 pr-3 text-xs font-mono text-white placeholder-gray-600 focus:border-cyan-500/50 focus:outline-none"
+@@ -346,7 +361,7 @@ export function ServerLogsModal({
+ 
+           <div className="flex items-center gap-2">
+             <span className="text-[10px] font-mono text-gray-500">
+-              Exibindo {filteredLines.length} de {lines.length} linha(s)
++              {t("serverLogs.showing", { visible: filteredLines.length, total: lines.length })}
+             </span>
+ 
+             <button
+@@ -355,7 +370,7 @@ export function ServerLogsModal({
+               className="flex items-center gap-1 rounded-xl border border-white/10 bg-[#2b3238] px-3 py-1.5 text-xs font-bold text-gray-300 hover:bg-white/5 hover:text-white transition-colors"
+             >
+               <ArrowDown size={14} />
+-              <span>Rolar para Fim</span>
++              <span>{t("serverLogs.scrollBottom")}</span>
+             </button>
+ 
+             <button
+@@ -364,7 +379,7 @@ export function ServerLogsModal({
+               className="flex items-center gap-1 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-bold text-cyan-200 hover:bg-cyan-500/20 transition-all shadow-sm"
+             >
+               {isCopied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+-              <span>{isCopied ? "Copiado!" : "Copiar"}</span>
++              <span>{isCopied ? t("serverLogs.copied") : t("serverLogs.copy")}</span>
+             </button>
+           </div>
+         </div>
+@@ -382,11 +397,11 @@ export function ServerLogsModal({
+           ) : isLoadingContent ? (
+             <div className="flex flex-col items-center justify-center p-12 text-center text-gray-500">
+               <RefreshCw size={24} className="animate-spin text-cyan-400 mb-2" />
+-              <p className="text-xs font-mono">Carregando arquivo de log...</p>
++              <p className="text-xs font-mono">{t("serverLogs.loading")}</p>
+             </div>
+           ) : filteredLines.length === 0 ? (
+             <div className="flex items-center justify-center p-12 text-gray-500 italic text-xs font-mono">
+-              Nenhuma linha encontrada para o filtro ou categoria selecionada.
++              {t("serverLogs.empty")}
+             </div>
+           ) : (
+             filteredLines.map((line, index) => {
+diff --git a/src/components/server/ServerModDetailsModal.tsx b/src/components/server/ServerModDetailsModal.tsx
+index b90894d..f9a5a0d 100644
+--- a/src/components/server/ServerModDetailsModal.tsx
++++ b/src/components/server/ServerModDetailsModal.tsx
+@@ -136,13 +136,13 @@ export function ServerModDetailsModal({
+             
+             {isEditing ? (
+               <div className="min-w-0 rounded-xl border border-orange-400/25 bg-[#1e2327] p-3 col-span-1 sm:col-span-2">
+-                <p className="text-[10px] font-bold uppercase tracking-widest text-orange-400">Workshop ID (Editando)</p>
++                <p className="text-[10px] font-bold uppercase tracking-widest text-orange-400">{t("modDetails.workshopEditing")}</p>
+                 <div className="mt-1 flex items-center gap-2">
+                   <input
+                     type="text"
+                     value={tempWorkshopId}
+                     onChange={(e) => setTempWorkshopId(e.target.value.replace(/\D/g, ""))}
+-                    placeholder="Digite o ID da Workshop"
++                    placeholder={t("modDetails.workshopPlaceholder")}
+                     disabled={isSaving}
+                     className="flex-1 bg-black/35 border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white font-mono focus:outline-none focus:border-orange-400/50"
+                   />
+@@ -151,7 +151,7 @@ export function ServerModDetailsModal({
+                       setSaveError(null)
+                       const cleanId = tempWorkshopId.trim()
+                       if (cleanId && !/^\d+$/.test(cleanId)) {
+-                        setSaveError("Apenas n├║meros s├úo v├ílidos")
++                        setSaveError(t("modDetails.numbersOnly"))
+                         return
+                       }
+                       setIsSaving(true)
+@@ -161,7 +161,7 @@ export function ServerModDetailsModal({
+                         }
+                         setIsEditing(false)
+                       } catch (err) {
+-                        setSaveError("Erro ao salvar")
++                        setSaveError(t("modDetails.saveError"))
+                       } finally {
+                         setIsSaving(false)
+                       }
+@@ -169,7 +169,7 @@ export function ServerModDetailsModal({
+                     disabled={isSaving}
+                     className="rounded-lg bg-orange-400 px-3 py-1 text-xs font-bold text-black hover:bg-orange-300 disabled:opacity-50 transition-colors"
+                   >
+-                    {isSaving ? "Salvando..." : "Salvar"}
++                    {isSaving ? t("fixWorkshopIds.savingShort") : t("common.save")}
+                   </button>
+                   <button
+                     onClick={() => {
+@@ -180,7 +180,7 @@ export function ServerModDetailsModal({
+                     disabled={isSaving}
+                     className="rounded-lg bg-[#2b3238] border border-white/5 px-2.5 py-1 text-xs font-bold text-gray-300 hover:bg-[#353c42] transition-colors"
+                   >
+-                    Cancelar
++                    {t("common.cancel")}
+                   </button>
+                 </div>
+                 {saveError && <p className="mt-1 text-[10px] text-red-400">{saveError}</p>}
+@@ -191,16 +191,16 @@ export function ServerModDetailsModal({
+                   <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">Workshop ID</p>
+                   <p className="mt-1 flex items-center gap-1.5 break-all font-mono text-xs text-gray-300">
+                     <Hash size={14} className="text-orange-400 shrink-0" />
+-                    {resolvedWorkshopId || <span className="text-gray-500 italic">N├úo associado</span>}
++                    {resolvedWorkshopId || <span className="text-gray-500 italic">{t("modDetails.notAssociated")}</span>}
+                   </p>
+                   <div className="mt-2">
+                     {isModInCloud(mod, workshopMappings) ? (
+                       <span className="inline-flex items-center gap-1 text-[10px] font-bold text-sky-300 bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded-full">
+-                        Ôÿü Found in Cloud Database
++                        {t("modDetails.foundCloud")}
+                       </span>
+                     ) : (
+                       <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
+-                        ÔÜá Not found in cloud database
++                        {t("modDetails.notFoundCloud")}
+                       </span>
+                     )}
+                   </div>
+@@ -210,7 +210,7 @@ export function ServerModDetailsModal({
+                     onClick={() => setIsEditing(true)}
+                     className="mt-2 text-left text-[10px] font-bold text-orange-400/80 hover:text-orange-400 hover:underline transition-colors"
+                   >
+-                    {resolvedWorkshopId ? "Editar ID" : "Vincular ID"}
++                    {resolvedWorkshopId ? t("modDetails.editId") : t("modDetails.linkId")}
+                   </button>
+                 )}
+               </div>
+diff --git a/src/components/server/UploadLocalModsModal.tsx b/src/components/server/UploadLocalModsModal.tsx
+index 31df3d6..c24a80c 100644
+--- a/src/components/server/UploadLocalModsModal.tsx
++++ b/src/components/server/UploadLocalModsModal.tsx
+@@ -129,6 +129,7 @@ export function UploadLocalModsModal({
+         await invokeTauri("upload_local_mod_to_remote", {
+           connection,
+           modId: mod.id,
++          workshopId: mod.workshopId,
+           localModPath: mod.packagePath,
+         })
+         setCompletedCount((prev) => prev + 1)
+@@ -172,7 +173,7 @@ export function UploadLocalModsModal({
+               type="button"
+               onClick={() => setIsMinimized(false)}
+               className="rounded-lg bg-white/5 p-1.5 text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
+-              title="Expandir"
++              title={t("common.expand")}
+             >
+               <Maximize2 size={12} />
+             </button>
+@@ -222,7 +223,7 @@ export function UploadLocalModsModal({
+                 type="button"
+                 onClick={() => setIsMinimized(true)}
+                 className="rounded-full bg-white/5 p-2 text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
+-                title="Minimizar"
++                title={t("common.minimize")}
+               >
+                 <Minus size={18} />
+               </button>
+@@ -405,7 +406,7 @@ export function UploadLocalModsModal({
+                         )}
+                       </div>
+                       <div className="flex items-center gap-2 shrink-0">
+-                        {state.status === 'pending' && <span className="text-gray-500 font-bold uppercase tracking-wider text-[10px]">Pendente</span>}
++                        {state.status === 'pending' && <span className="text-gray-500 font-bold uppercase tracking-wider text-[10px]">{t("common.pending")}</span>}
+                         {state.status === 'uploading' && (
+                           <span className="text-orange-400 flex items-center gap-1 font-bold uppercase tracking-wider text-[10px]">
+                             <Loader2 size={12} className="animate-spin" />
+@@ -421,7 +422,7 @@ export function UploadLocalModsModal({
+                         {state.status === 'failed' && (
+                           <span className="text-red-400 flex items-center gap-1 font-bold uppercase tracking-wider text-[10px]">
+                             <X size={12} />
+-                            Erro
++                            {t("common.error")}
+                           </span>
+                         )}
+                       </div>
+diff --git a/src/components/settings/GamePerformanceSection.tsx b/src/components/settings/GamePerformanceSection.tsx
+index 05a8053..4464b9c 100644
+--- a/src/components/settings/GamePerformanceSection.tsx
++++ b/src/components/settings/GamePerformanceSection.tsx
+@@ -108,7 +108,7 @@ export function GamePerformanceSection({
+                   type="text"
+                   value={path}
+                   onChange={(event) => onPathChange(event.target.value)}
+-                  placeholder={isRemoteWorkspace ? "/var/lib/pzmm/zomboid-server/start-server.sh" : "C:\\SteamLibrary\\steamapps\\common\\ProjectZomboid\\ProjectZomboid64.exe"}
++                  placeholder={isRemoteWorkspace ? "/path/to/zomboid-server/start-server.sh" : "C:\\SteamLibrary\\steamapps\\common\\ProjectZomboid\\ProjectZomboid64.exe"}
+                   className="w-full bg-[#1e2327] border border-white/5 rounded-2xl py-3.5 pl-12 pr-4 text-sm focus:outline-none focus:border-orange-400/50 focus:ring-1 focus:ring-orange-400/20 transition-all placeholder:text-gray-700"
+                 />
+               </div>
+diff --git a/src/hooks/useModsLibrary.ts b/src/hooks/useModsLibrary.ts
+index 10dd99d..4f671d2 100644
+--- a/src/hooks/useModsLibrary.ts
++++ b/src/hooks/useModsLibrary.ts
+@@ -81,12 +81,30 @@ export function useModsLibrary({
+ 
+   async function installMods(modsToInstall: ZomboidMod[]) {
+     setModsError(null)
++    const optimisticMods = modsToInstall.filter((mod) => !mod.isInstalled && mod.source !== "local")
++    let previousModsSnapshot: ZomboidMod[] | null = null
++
++    if (optimisticMods.length > 0) {
++      const optimisticModIds = new Set(optimisticMods.map((mod) => mod.id.toLowerCase()))
++
++      setMods((currentMods) => {
++        previousModsSnapshot = currentMods
++        const updatedMods = currentMods.map((mod) =>
++          optimisticModIds.has(mod.id.toLowerCase()) ? markModInstalled(mod) : mod,
++        )
++
++        if (useCache) {
++          void writeModsLibraryCache(updatedMods, cacheKey)
++        }
++        return updatedMods
++      })
++    }
+ 
+     try {
+-      const modsToMove = modsToInstall.filter((mod) => !mod.isInstalled && mod.source !== "local")
++      const modsToCopy = modsToInstall.filter((mod) => !mod.isInstalled && mod.source !== "local")
+       const installResults = new Map<string, ZomboidModInstallResult>()
+ 
+-      for (const mod of modsToMove) {
++      for (const mod of modsToCopy) {
+         const result = await invokeTauri<ZomboidModInstallResult | null>(installCommand, {
+           ...(installArgs ?? {}),
+           packagePath: mod.packagePath,
+@@ -100,7 +118,7 @@ export function useModsLibrary({
+       }
+ 
+       // Envia os mapeamentos descobertos para a API central de forma ass├¡ncrona
+-      const mappingsToSend = modsToMove
++      const mappingsToSend = modsToCopy
+         .filter((mod) => mod.id && mod.workshopId && mod.workshopId.trim() !== "")
+         .map((mod) => ({
+           modId: mod.id,
+@@ -129,7 +147,7 @@ export function useModsLibrary({
+         await invokeTauri<void>(clearCacheCommand, clearCacheArgs)
+       }
+ 
+-      const installedModIds = new Set(modsToMove.map((mod) => mod.id.toLowerCase()))
++      const installedModIds = new Set(modsToCopy.map((mod) => mod.id.toLowerCase()))
+       const installedMods = modsToInstall.map((mod) => {
+         const installKey = mod.id.toLowerCase()
+         const installResult = installResults.get(installKey)
+@@ -168,20 +186,25 @@ export function useModsLibrary({
+ 
+       return installedMods
+     } catch (error) {
++      if (previousModsSnapshot) {
++        setMods(previousModsSnapshot)
++        if (useCache) {
++          void writeModsLibraryCache(previousModsSnapshot, cacheKey)
++        }
++      }
+       setModsError(getErrorMessage(error))
+       throw error
+     }
+   }
+ 
+-  function markModInstalled(mod: ZomboidMod, installResult?: ZomboidModInstallResult) {
++  function markModInstalled(mod: ZomboidMod, _installResult?: ZomboidModInstallResult) {
+     return {
+       ...mod,
+       isInstalled: true,
+-      source: mod.source === "steam" || mod.source === "steamcmd" ? "local" : mod.source,
+-      path: installResult?.targetPath ?? mod.path,
++      path: mod.path,
+       variants: mod.variants.map((variant) => ({
+         ...variant,
+-        path: installResult?.targetPath ?? variant.path,
++        path: variant.path,
+       })),
+     }
+   }
+diff --git a/src/i18n/resources.ts b/src/i18n/resources.ts
+index e7bf2c0..77f0104 100644
+--- a/src/i18n/resources.ts
++++ b/src/i18n/resources.ts
+@@ -11,16 +11,25 @@ export const resources = {
+         cancel: "Cancel",
+         close: "Close",
+         confirm: "Confirm",
++        current: "Current",
++        delete: "Delete",
++        deselectAll: "Clear",
+         error: "Error",
++        expand: "Expand",
+         detect: "Detect",
+         download: "Download",
++        failures: "Failures",
+         loading: "Loading...",
++        minimize: "Minimize",
+         mods: "Mods",
++        pending: "Pending",
+         refresh: "Refresh",
+         retry: "Try again",
+         save: "Save",
++        selectAll: "Select all",
+         settings: "Settings",
+         servers: "Servers",
++        upload: "Upload",
+       },
+       nav: {
+         mainMenu: "Main menu",
+@@ -31,6 +40,10 @@ export const resources = {
+       app: {
+         version: "Version",
+       },
++      workspace: {
++        label: "Workspace",
++        switch: "Switch workspace",
++      },
+       header: {
+         search: "Search servers or mods...",
+         scanMods: "Scan mods",
+@@ -60,6 +73,17 @@ export const resources = {
+         saving: "Saving",
+         clearPath: "Clear path",
+         loadError: "Could not load the settings.",
++        danger: {
++          title: "Danger zone",
++          description:
++            "Deletes the selected remote workspace setup, remote Zomboid data, remote SteamCMD data, the remote server installation, and PZMM helper/cache files on the VM.",
++          button: "Delete remote workspace",
++          deleting: "Deleting",
++          confirmPrompt:
++            "This will permanently delete the selected remote workspace data, Zomboid folder, SteamCMD data, server installation, and helper/cache files on the VM. Type {{phrase}} to continue.",
++          confirmMismatch: "Deletion cancelled. The confirmation phrase did not match.",
++          deleted: "Deleted {{count}} remote path(s). Reopen the workspace setup before configuring again.",
++        },
+         modLocations: {
+           title: "Mod locations",
+           description: "Folders scanned when building the mod library.",
+@@ -122,9 +146,13 @@ export const resources = {
+         uploadToServer: "Upload to Server",
+         uploading: "Uploading...",
+         uploadSuccess: "Mod uploaded successfully!",
++        uploadSuccessHeader: "Mod uploaded",
+         uploadError: "Failed to upload mod: {{error}}",
++        uploadErrorHeader: "Upload failed",
++        uploadComplete: "Upload complete!",
+         install: "Install",
+         installAll: "Install all",
++        completed: "completed",
+         compatible: "Compatible",
+         incompatible: "Incompatible",
+         noResults: "No mods found.",
+@@ -148,6 +176,11 @@ export const resources = {
+         maps: "Maps",
+         deleteConfirmTitle: "Delete Mod",
+         deleteConfirmBody: "Are you sure you want to delete the mod {{name}}? This action will permanently remove the files and cannot be undone.",
++        deleteSuccessTitle: "Mod deleted",
++        deleteSuccessMessage: "The mod was deleted from the workspace.",
++        deleteErrorTitle: "Could not delete mod",
++        deleteErrorMessage: "Could not delete the mod: {{error}}",
++        uploadedSuccessfully: "mods uploaded successfully!",
+       },
+       dashboard: {
+         title: "Servers",
+@@ -266,10 +299,16 @@ export const resources = {
+         notFound: "Server not found.",
+         openFile: "Open file in the default editor",
+         port: "Port",
++        players: "Players",
+         checkingPorts: "Checking ports",
+         testing: "Testing",
+         test: "Test server",
+         start: "Start server",
++        stop: "Stop",
++        console: "Console",
++        viewLogs: "View server logs",
++        organizeWorkshopIds: "Organize Workshop IDs",
++        selected: "selected",
+         configure: "Configure",
+         activeMods: "Active mods",
+         maxPlayers: "Max players",
+@@ -425,6 +464,8 @@ export const resources = {
+         all: "All",
+         builds: "Builds",
+         bringLocal: "Bring Steam mods to local",
++        bringAllLocal: "Install all dependencies",
++        installingAllLocal: "Installing dependencies...",
+         dependencies: "Dependencies",
+         dependenciesBody:
+           "The mod {{name}} requires the following additional mods before installation:",
+@@ -507,6 +548,32 @@ export const resources = {
+         noOutput: "(no output)",
+       },
+       remoteStart: {
++        title: "Server startup",
++        closeHint: "Close only hides this window; it does not stop the server.",
++        firewall: "Firewall",
++        server: "Server",
++        terminal: "Terminal",
++        logs: "Logs",
++        commandPlaceholder: "save, servermsg hello, quit...",
++        sendCommand: "Send command",
++        configureFirewall: "Configure firewall",
++        stopServer: "Stop server",
++        startServer: "Start server",
++        startNoSteam: "Start -nosteam",
++        checkingRules: "Checking rules",
++        ready: "Ready",
++        missingSetupItems: "{{count}} missing setup item(s)",
++        pending: "Pending",
++        starting: "Starting",
++        running: "Running",
++        waitingRunningSignal: "Waiting for running signal",
++        needsAttention: "Needs attention",
++        readyToStart: "Ready to start server",
++        commandChannelReady: "Command channel ready",
++        waitingServer: "Waiting for server",
++        availableWhenOnline: "Available when online",
++        workflow: "Server startup workflow",
++        recheck: "Recheck",
+         checkingSetup: "Checking server setup for {{name}}...",
+         firewallReady: "Firewall is configured. You can run the server.",
+         firewallNeedsConfig: "Firewall needs configuration before running the server.",
+@@ -526,6 +593,59 @@ export const resources = {
+         processExited: "Server process exited.",
+         startFailed: "Server start failed.",
+       },
++      serverLogs: {
++        title: "Server logs",
++        noFiles: "No log files",
++        refreshTitle: "Refresh logs",
++        all: "All",
++        errors: "Errors",
++        warnings: "Warnings",
++        luaMods: "Lua & Mods",
++        bootServer: "Boot / Server",
++        info: "Logs / Info",
++        searchPlaceholder: "Filter by text (ex: WARN, ERROR, mod...)",
++        showing: "Showing {{visible}} of {{total}} line(s)",
++        scrollBottom: "Scroll to bottom",
++        copy: "Copy",
++        copied: "Copied!",
++        loading: "Loading log file...",
++        empty: "No lines found for the selected filter or category.",
++        listError: "Could not load the log file list.",
++        readError: "Could not read the selected log file.",
++      },
++      fixWorkshopIds: {
++        title: "Organize Workshop IDs",
++        subtitle: "Align Workshop IDs with the exact Mod ID order on the server",
++        doneTitle: "All set!",
++        doneAllMapped: "All active server mods already have an associated Workshop ID. The .ini order will be aligned perfectly.",
++        doneProcessed: "All queued mods were processed. Click the button below to rewrite servertest.ini in the exact order.",
++        totalActive: "Total active mods:",
++        skippedWithoutId: "Skipped mods without Workshop ID:",
++        saving: "Saving on server...",
++        applySave: "Apply and save on server",
++        inputLabel: "Enter this mod's Workshop ID:",
++        invalidId: "Enter a valid numeric ID.",
++        saveIdError: "Could not save the ID. Try again.",
++        saveServerError: "Could not save the server configuration.",
++        skipCurrent: "Skip this mod",
++        skipAllMissing: "Skip all mods without ID",
++        placeholder: "Ex: 2460154815",
++        progress: "Mod {{current}} of {{total}} without ID",
++        percentDone: "{{percent}}% done",
++        savingShort: "Saving...",
++        save: "Save",
++      },
++      modDetails: {
++        workshopEditing: "Workshop ID (Editing)",
++        workshopPlaceholder: "Enter the Workshop ID",
++        numbersOnly: "Only numbers are valid",
++        saveError: "Could not save",
++        notAssociated: "Not associated",
++        foundCloud: "Found in cloud database",
++        notFoundCloud: "Not found in cloud database",
++        editId: "Edit ID",
++        linkId: "Link ID",
++      },
+       downloads: {
+         cancelledTitle: "Workshop download cancelled",
+         failedTitle: "Download completed with errors",
+@@ -611,6 +731,9 @@ export const resources = {
+         fallbackError: "Could not perform the action.",
+       },
+       remoteSetup: {
++        errorHeader: "Error",
++        noActiveConnection: "No active remote connection.",
++        connectionFailedNotice: "Could not contact the remote VM. Returning to the selector.",
+         autoConnectFailed: "Could not automatically connect to the last server.",
+         connecting: "Connecting to remote server...",
+         modalTitle: "Server setup",
+@@ -795,16 +918,25 @@ export const resources = {
+         cancel: "Cancelar",
+         close: "Fechar",
+         confirm: "Confirmar",
++        current: "Atual",
++        delete: "Excluir",
++        deselectAll: "Limpar",
+         error: "Erro",
++        expand: "Expandir",
+         detect: "Detectar",
+         download: "Baixar",
++        failures: "Falhas",
+         loading: "Carregando...",
++        minimize: "Minimizar",
+         mods: "Mods",
++        pending: "Pendente",
+         refresh: "Atualizar",
+         retry: "Tentar novamente",
+         save: "Salvar",
++        selectAll: "Selecionar todos",
+         settings: "Configura├º├Áes",
+         servers: "Servidores",
++        upload: "Upload",
+       },
+       nav: {
+         mainMenu: "Menu principal",
+@@ -815,6 +947,10 @@ export const resources = {
+       app: {
+         version: "Vers├úo",
+       },
++      workspace: {
++        label: "Workspace",
++        switch: "Trocar workspace",
++      },
+       header: {
+         search: "Buscar servidores ou mods...",
+         scanMods: "Escanear mods",
+@@ -844,6 +980,17 @@ export const resources = {
+         saving: "Salvando",
+         clearPath: "Limpar caminho",
+         loadError: "N├úo foi poss├¡vel carregar as configura├º├Áes.",
++        danger: {
++          title: "Zona de perigo",
++          description:
++            "Apaga a configura├º├úo do workspace remoto selecionado, a pasta Zomboid remota, dados do SteamCMD remoto, a instala├º├úo do servidor e arquivos helper/cache do PZMM na VM.",
++          button: "Apagar workspace remoto",
++          deleting: "Apagando",
++          confirmPrompt:
++            "Isso vai apagar permanentemente os dados do workspace remoto selecionado, a pasta Zomboid, dados do SteamCMD, instala├º├úo do servidor e arquivos helper/cache na VM. Digite {{phrase}} para continuar.",
++          confirmMismatch: "Exclus├úo cancelada. A frase de confirma├º├úo n├úo confere.",
++          deleted: "{{count}} caminho(s) remoto(s) apagado(s). Abra novamente o setup do workspace antes de configurar.",
++        },
+         modLocations: {
+           title: "Locais de mods",
+           description: "Pastas escaneadas ao montar a biblioteca de mods.",
+@@ -906,9 +1053,13 @@ export const resources = {
+         uploadToServer: "Enviar para o Servidor",
+         uploading: "Enviando...",
+         uploadSuccess: "Mod enviado com sucesso!",
++        uploadSuccessHeader: "Mod enviado",
+         uploadError: "Falha ao enviar mod: {{error}}",
++        uploadErrorHeader: "Falha no envio",
++        uploadComplete: "Upload concluido!",
+         install: "Instalar",
+         installAll: "Instalar todos",
++        completed: "concluidos",
+         compatible: "Compat├¡vel",
+         incompatible: "Incompat├¡vel",
+         noResults: "Nenhum mod encontrado.",
+@@ -932,6 +1083,11 @@ export const resources = {
+         maps: "Mapas",
+         deleteConfirmTitle: "Excluir Mod",
+         deleteConfirmBody: "Tem certeza que deseja excluir o mod {{name}}? Esta a├º├úo remover├í os arquivos permanentemente e n├úo poder├í ser desfeita.",
++        deleteSuccessTitle: "Mod excluido",
++        deleteSuccessMessage: "O mod foi excluido do workspace.",
++        deleteErrorTitle: "Nao foi possivel excluir o mod",
++        deleteErrorMessage: "Nao foi possivel excluir o mod: {{error}}",
++        uploadedSuccessfully: "mods enviados com sucesso!",
+       },
+       dashboard: {
+         title: "Servidores",
+@@ -1051,10 +1207,16 @@ export const resources = {
+         notFound: "Servidor n├úo encontrado.",
+         openFile: "Abrir arquivo no editor padr├úo",
+         port: "Porta",
++        players: "Jogadores",
+         checkingPorts: "Verificando portas",
+         testing: "Testando",
+         test: "Testar servidor",
+         start: "Iniciar servidor",
++        stop: "Parar",
++        console: "Console",
++        viewLogs: "Ver logs do servidor",
++        organizeWorkshopIds: "Organizar Workshop IDs",
++        selected: "selecionado(s)",
+         configure: "Configurar",
+         activeMods: "Mods ativos",
+         maxPlayers: "Jogadores m├íx.",
+@@ -1213,6 +1375,8 @@ export const resources = {
+         all: "Todos",
+         builds: "Builds",
+         bringLocal: "Trazer Steam para local",
++        bringAllLocal: "Instalar todas as depend├¬ncias",
++        installingAllLocal: "Instalando depend├¬ncias...",
+         dependencies: "Depend├¬ncias",
+         dependenciesBody:
+           "O mod {{name}} requer os seguintes mods adicionais antes da instala├º├úo:",
+@@ -1295,6 +1459,32 @@ export const resources = {
+         noOutput: "(sem sa├¡da)",
+       },
+       remoteStart: {
++        title: "Inicializacao do servidor",
++        closeHint: "Fechar apenas oculta esta janela; isso nao para o servidor.",
++        firewall: "Firewall",
++        server: "Servidor",
++        terminal: "Terminal",
++        logs: "Logs",
++        commandPlaceholder: "save, servermsg hello, quit...",
++        sendCommand: "Enviar comando",
++        configureFirewall: "Configurar firewall",
++        stopServer: "Parar servidor",
++        startServer: "Iniciar servidor",
++        startNoSteam: "Iniciar -nosteam",
++        checkingRules: "Verificando regras",
++        ready: "Pronto",
++        missingSetupItems: "{{count}} item(ns) de configuracao ausente(s)",
++        pending: "Pendente",
++        starting: "Iniciando",
++        running: "Rodando",
++        waitingRunningSignal: "Aguardando sinal de execucao",
++        needsAttention: "Precisa de atencao",
++        readyToStart: "Pronto para iniciar o servidor",
++        commandChannelReady: "Canal de comandos pronto",
++        waitingServer: "Aguardando servidor",
++        availableWhenOnline: "Disponivel quando online",
++        workflow: "Fluxo de inicializacao do servidor",
++        recheck: "Verificar novamente",
+         checkingSetup: "Verificando configura├º├úo do servidor {{name}}...",
+         firewallReady: "Firewall configurado. Voc├¬ pode iniciar o servidor.",
+         firewallNeedsConfig: "O firewall precisa ser configurado antes de iniciar o servidor.",
+@@ -1314,6 +1504,59 @@ export const resources = {
+         processExited: "Processo do servidor encerrado.",
+         startFailed: "Falha ao iniciar servidor.",
+       },
++      serverLogs: {
++        title: "Logs do servidor",
++        noFiles: "Sem arquivos de log",
++        refreshTitle: "Atualizar logs",
++        all: "Todos",
++        errors: "Erros",
++        warnings: "Avisos",
++        luaMods: "Lua e Mods",
++        bootServer: "Boot / Servidor",
++        info: "Logs / Info",
++        searchPlaceholder: "Filtrar por texto (ex: WARN, ERROR, mod...)",
++        showing: "Exibindo {{visible}} de {{total}} linha(s)",
++        scrollBottom: "Rolar para o fim",
++        copy: "Copiar",
++        copied: "Copiado!",
++        loading: "Carregando arquivo de log...",
++        empty: "Nenhuma linha encontrada para o filtro ou categoria selecionada.",
++        listError: "Nao foi possivel carregar a lista de arquivos de log.",
++        readError: "Nao foi possivel ler o arquivo de log selecionado.",
++      },
++      fixWorkshopIds: {
++        title: "Organizar Workshop IDs",
++        subtitle: "Alinha os IDs da Workshop na ordem exata dos Mod IDs no servidor",
++        doneTitle: "Tudo pronto!",
++        doneAllMapped: "Todos os mods ativos no servidor ja possuem ID da Workshop associado. A ordem no arquivo .ini sera alinhada perfeitamente.",
++        doneProcessed: "Todos os mods da fila foram processados. Clique no botao abaixo para regravar o servertest.ini na ordem exata.",
++        totalActive: "Total de mods ativos:",
++        skippedWithoutId: "Mods pulados sem Workshop ID:",
++        saving: "Gravando no servidor...",
++        applySave: "Aplicar e salvar no servidor",
++        inputLabel: "Digite o Workshop ID deste mod:",
++        invalidId: "Digite um ID numerico valido.",
++        saveIdError: "Erro ao salvar o ID. Tente novamente.",
++        saveServerError: "Erro ao salvar a configuracao no servidor.",
++        skipCurrent: "Pular este mod",
++        skipAllMissing: "Pular todos os mods sem ID",
++        placeholder: "Ex: 2460154815",
++        progress: "Mod {{current}} de {{total}} sem ID",
++        percentDone: "{{percent}}% concluido",
++        savingShort: "Salvando...",
++        save: "Salvar",
++      },
++      modDetails: {
++        workshopEditing: "Workshop ID (Editando)",
++        workshopPlaceholder: "Digite o ID da Workshop",
++        numbersOnly: "Apenas numeros sao validos",
++        saveError: "Erro ao salvar",
++        notAssociated: "Nao associado",
++        foundCloud: "Encontrado no banco de dados da nuvem",
++        notFoundCloud: "Nao encontrado no banco de dados da nuvem",
++        editId: "Editar ID",
++        linkId: "Vincular ID",
++      },
+       downloads: {
+         cancelledTitle: "Download da Workshop cancelado",
+         failedTitle: "Download conclu├¡do com falhas",
+@@ -1400,6 +1643,9 @@ export const resources = {
+         fallbackError: "N├úo foi poss├¡vel executar a a├º├úo.",
+       },
+       remoteSetup: {
++        errorHeader: "Erro",
++        noActiveConnection: "Nenhuma conexao remota ativa.",
++        connectionFailedNotice: "Nao foi possivel estabelecer contato com a VM remota. Retornando ao seletor.",
+         autoConnectFailed: "N├úo foi poss├¡vel conectar automaticamente ao ├║ltimo servidor.",
+         connecting: "Conectando ao servidor remoto...",
+         modalTitle: "Configura├º├úo do servidor",

@@ -1360,11 +1360,11 @@ fn server_status(server_id: String) -> Result<models::RemoteServerActionResult, 
 
         let usage_summary = format_port_usages(&port_usages);
         return Ok(models::RemoteServerActionResult {
-            success: true,
-            message: format!("Remote server appears to be running on port {primary_port}."),
+            success: false,
+            message: format!("Port {primary_port} is in use, but no controller state was found for {server_id}."),
             command: "server-status".to_string(),
             logs: vec![format!(
-                "Detected port usage without controller state: {usage_summary}."
+                "Detected port usage without controller state: {usage_summary}. This means another server or process is using this port."
             )],
         });
     }

@@ -15,7 +15,7 @@ type ModsListProps = {
   mods: ZomboidMod[]
   isLoading: boolean
   error: string | null
-  onRefresh: () => void
+  onRefresh: () => Promise<ZomboidMod[] | void> | void
   onInstall: (mods: ZomboidMod[]) => Promise<void>
   onInstallAll: () => Promise<void>
   isInstallingAll: boolean
@@ -369,7 +369,29 @@ export function ModsList({
           mod={missingDependency.mod}
           dependencyId={missingDependency.dependencyId}
           onClose={() => setMissingDependency(null)}
-          onDownloaded={onRefresh}
+          onDownloaded={async (dependencyId, originalModId) => {
+            const freshMods = (await onRefresh()) || mods
+            
+            const normalizedDependencyId = dependencyId.trim().toLowerCase()
+            const dependency = freshMods.find((m) => m.id.toLowerCase() === normalizedDependencyId)
+            
+            const modsToInstall: ZomboidMod[] = []
+            if (dependency && !dependency.isInstalled) {
+              modsToInstall.push(dependency)
+            }
+
+            if (originalModId) {
+              const normalizedOriginalModId = originalModId.trim().toLowerCase()
+              const originalMod = freshMods.find((m) => m.id.toLowerCase() === normalizedOriginalModId)
+              if (originalMod && !originalMod.isInstalled) {
+                modsToInstall.push(originalMod)
+              }
+            }
+
+            if (modsToInstall.length > 0) {
+              await onInstall(modsToInstall)
+            }
+          }}
           onOpenSettings={onOpenSettings}
         />
       )}

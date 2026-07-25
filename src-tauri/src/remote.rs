@@ -2084,6 +2084,8 @@ fn read_remote_workspace_config_at_path(
         remote_server_ram: read_ini_value(&content, "remote_server_ram")
             .or_else(|| read_ini_value(&content, "server_ram"))
             .unwrap_or_else(|| "4.00".to_string()),
+        remote_server_version: read_ini_value(&content, "remote_server_version")
+            .unwrap_or_else(|| "b41".to_string()),
         remote_setup_completed_step: parse_remote_setup_completed_step(&content),
         remote_mod_locations: read_ini_values(&content, "remote_mod_location"),
     }))
@@ -2679,6 +2681,7 @@ fn write_remote_workspace_config(config: &RemoteWorkspaceConfig) -> Result<(), S
         ),
         ("remote_client_ram", config.remote_client_ram.as_str()),
         ("remote_server_ram", config.remote_server_ram.as_str()),
+        ("remote_server_version", config.remote_server_version.as_str()),
     ] {
         content = replace_or_append_ini_value(&content, key, value);
     }
@@ -5730,6 +5733,7 @@ printf 'PZMM_STEAMCMD_PATH=%s
             remote_zomboid_data_owner: existing_config.remote_zomboid_data_owner,
             remote_client_ram: existing_config.remote_client_ram,
             remote_server_ram: existing_config.remote_server_ram,
+            remote_server_version: existing_config.remote_server_version,
             remote_setup_completed_step: existing_config.remote_setup_completed_step.max(2),
             remote_mod_locations: existing_config.remote_mod_locations,
         })?;
@@ -5836,6 +5840,7 @@ printf 'PZMM_STEAMCMD_PATH=%s\n' "$steamcmd_path"
             remote_zomboid_data_owner: existing_config.remote_zomboid_data_owner,
             remote_client_ram: existing_config.remote_client_ram,
             remote_server_ram: existing_config.remote_server_ram,
+            remote_server_version: existing_config.remote_server_version,
             remote_setup_completed_step: existing_config.remote_setup_completed_step.max(2),
             remote_mod_locations: existing_config.remote_mod_locations,
         })?;
@@ -5979,6 +5984,7 @@ printf 'PZMM_SERVER_PATH=%s\n' "$install_dir/start-server.sh"
             remote_zomboid_data_owner: data_owner,
             remote_client_ram: existing_config.remote_client_ram,
             remote_server_ram: existing_config.remote_server_ram,
+            remote_server_version: existing_config.remote_server_version,
             remote_setup_completed_step: existing_config.remote_setup_completed_step.max(3),
             remote_mod_locations: existing_config.remote_mod_locations,
         })?;
@@ -6071,6 +6077,7 @@ fn default_remote_workspace_config() -> RemoteWorkspaceConfig {
         remote_zomboid_data_owner: REMOTE_LINUX_MANAGED_USER.to_string(),
         remote_client_ram: "4.00".to_string(),
         remote_server_ram: "4.00".to_string(),
+        remote_server_version: "b41".to_string(),
         remote_setup_completed_step: 0,
         remote_mod_locations: Vec::new(),
     }

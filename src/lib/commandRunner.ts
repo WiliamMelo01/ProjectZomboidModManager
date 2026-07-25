@@ -22,6 +22,7 @@ export type RemoteWorkspaceConfig = RemoteConnectionDraft & {
   remoteZomboidDataOwner: string;
   remoteClientRam: string;
   remoteServerRam: string;
+  remoteServerVersion: string;
   remoteSetupCompletedStep: number;
   remoteModLocations: string[];
 };

@@ -3562,37 +3562,58 @@ fn remote_existing_workshop_ids_with_mod_info(
     workshop_dirs: &[String],
     workshop_ids: &[String],
 ) -> Result<HashSet<String>, String> {
-    let mut script = String::from("set -e\n");
-    for workshop_id in workshop_ids {
-        let safe_workshop_id = safe_remote_cache_segment(workshop_id);
+    let mut found_ids = HashSet::new();
+    let roots = workshop_dirs
+        .iter()
+        .map(|path| linux_shell_quote(path))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    for chunk in workshop_ids.chunks(500) {
+        let mut script = String::from("set -e\n");
+        let safe_ids = chunk
+            .iter()
+            .map(|id| linux_shell_quote(&safe_remote_cache_segment(id)))
+            .collect::<Vec<_>>()
+            .join(" ");
+
         script.push_str(&format!(
-            "found=0; item_id={id}; for root in {roots}; do if sudo -n find \"$root/$item_id/mods\" -name mod.info -type f -print -quit 2>/dev/null | grep -q .; then found=1; break; fi; done; if [ \"$found\" = 1 ]; then printf 'PZMM_WORKSHOP_READY=%s\\n' \"$item_id\"; fi\n",
-            roots = workshop_dirs
-                .iter()
-                .map(|path| linux_shell_quote(path))
-                .collect::<Vec<_>>()
-                .join(" "),
-            id = linux_shell_quote(&safe_workshop_id),
+            "for item_id in {safe_ids}; do \
+                found=0; \
+                for root in {roots}; do \
+                    if sudo -n find \"$root/$item_id/mods\" -name mod.info -type f -print -quit 2>/dev/null | grep -q .; then \
+                        found=1; \
+                        break; \
+                    fi; \
+                done; \
+                if [ \"$found\" = 1 ]; then \
+                    printf 'PZMM_WORKSHOP_READY=%s\\n' \"$item_id\"; \
+                fi; \
+            done\n"
         ));
+
+        let output = run_ssh_capture_raw(connection, &script)?;
+        if !output.success {
+            return Err(join_command_output(&[
+                "Could not verify downloaded remote Workshop items.",
+                output.stdout.as_str(),
+                output.stderr.as_str(),
+            ]));
+        }
+
+        let chunk_found: HashSet<String> = output
+            .stdout
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("PZMM_WORKSHOP_READY="))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .collect();
+
+        found_ids.extend(chunk_found);
     }
 
-    let output = run_ssh_capture_raw(connection, &script)?;
-    if !output.success {
-        return Err(join_command_output(&[
-            "Could not verify downloaded remote Workshop items.",
-            output.stdout.as_str(),
-            output.stderr.as_str(),
-        ]));
-    }
-
-    Ok(output
-        .stdout
-        .lines()
-        .filter_map(|line| line.trim().strip_prefix("PZMM_WORKSHOP_READY="))
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-        .collect())
+    Ok(found_ids)
 }
 
 fn parse_remote_steamcmd_failed_items(

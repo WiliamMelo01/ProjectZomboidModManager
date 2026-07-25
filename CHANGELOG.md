@@ -16,6 +16,10 @@ Release v0.6.0 - Automated Server Versioning, Setup UI Simplification and Depend
 ### Added
 - Automated Server Versioning: the app now remembers the server version (B41/B42) during remote setup and persists it, streamlining the "Create Server" UI for remote workspaces.
 
+### Improved
+- Remote Server Compatibility: Drastically improved tolerance and detection of pre-existing Project Zomboid installations on Linux. The setup process now correctly identifies existing setups without forcing reinstalls or overwriting custom paths.
+- Setup UI: Improved the Remote Setup modal to be more intuitive regarding existing installations and version detection.
+
 ### Fixed
 - Dependency Resolution: Fixed a bug where downloading a missing dependency for a mod would install the dependency but fail to activate the original mod.
 - Server Status: Addressed issues with false positives in server running state.

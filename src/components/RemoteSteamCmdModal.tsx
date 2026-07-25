@@ -15,6 +15,7 @@ import type {
   RemoteConnectionDraft,
   RemoteWorkspaceConfig,
 } from "@/lib/commandRunner";
+import type { AppSettings } from "@/types/settings";
 import { getErrorMessage } from "@/lib/errors";
 import { invokeTauri } from "@/lib/tauri";
 import { RamDropdown } from "@/components/settings/RamDropdown";

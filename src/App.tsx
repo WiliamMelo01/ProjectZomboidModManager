@@ -37,6 +37,8 @@ import { useWorkshopDownloadManager } from "@/hooks/useWorkshopDownloadManager";
 import type {
   RemoteConnectionDraft,
   RemoteWorkspaceConfig,
+  RemoteServerConnectionResult,
+  TerminalCommandResult,
 } from "@/lib/commandRunner";
 import { getErrorMessage } from "@/lib/errors";
 import { findModForServerId, resolveModForBuild } from "@/lib/modBuilds";
@@ -582,7 +584,7 @@ function LocalWorkspaceApp({
       if (selectedServer) {
         const currentServer = servers.find((s) => s.id === selectedServer.id);
         if (currentServer) {
-          await updateServerMods(currentServer, currentServer.modIds);
+          await updateServerMods(currentServer, currentServer.activeModIds);
         }
       }
     } catch (err) {

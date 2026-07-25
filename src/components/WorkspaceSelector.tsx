@@ -26,6 +26,7 @@ import { useTranslation } from "react-i18next";
 import type {
   RemoteConnectionDraft,
   RemoteWorkspaceConfig,
+  RemoteServerConnectionResult,
 } from "@/lib/commandRunner";
 import { getErrorMessage } from "@/lib/errors";
 import { invokeTauri } from "@/lib/tauri";
@@ -34,16 +35,6 @@ type WorkspaceSelectorProps = {
   onSelectLocal: () => void;
   onSelectRemote: (connection: RemoteConnectionDraft) => void;
   initialError?: string | null;
-};
-
-type RemoteServerConnectionResult = {
-  name: string;
-  host: string;
-  port: number;
-  serverPath: string;
-  message: string;
-  latencyMs: number;
-  diagnosticLog: string;
 };
 
 type RemoteServerLatencyResult = {
@@ -1279,6 +1270,7 @@ function PublicKeyModal({
   publicKey: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   async function copyPublicKey() {

@@ -26,6 +26,15 @@ export type RemoteWorkspaceConfig = RemoteConnectionDraft & {
   remoteModLocations: string[];
 };
 
+export type RemoteServerConnectionResult = {
+  name: string;
+  host: string;
+  port: number;
+  serverPath: string;
+  message: string;
+  latencyMs: number;
+  diagnosticLog: string;
+};
 export type TerminalCommandResult = {
   target: TerminalCommandTarget;
   command: string;

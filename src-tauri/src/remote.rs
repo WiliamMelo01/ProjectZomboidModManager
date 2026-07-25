@@ -3415,7 +3415,7 @@ fn download_remote_steam_workshop_items_impl(
 
     if !force_validate {
         let existing_ids =
-            remote_existing_workshop_ids(&connection, &steamcmd_workshop_dirs, &workshop_ids)?;
+            remote_existing_workshop_ids_with_mod_info(&connection, &steamcmd_workshop_dirs, &workshop_ids)?;
         skipped_ids = workshop_ids
             .iter()
             .filter(|workshop_id| existing_ids.contains(*workshop_id))
@@ -3554,33 +3554,6 @@ fn run_remote_steamcmd_workshop_chunk(
     );
     run_ssh_workshop_streaming(app, connection, &command)
 }
-fn remote_existing_workshop_ids(
-    connection: &RemoteServerConnectionRequest,
-    workshop_dirs: &[String],
-    workshop_ids: &[String],
-) -> Result<HashSet<String>, String> {
-    let mut paths = Vec::new();
-    let mut path_workshop_ids = Vec::new();
-    for workshop_dir in workshop_dirs {
-        for workshop_id in workshop_ids {
-            paths.push(join_remote_unix_path(workshop_dir, workshop_id));
-            path_workshop_ids.push(workshop_id.clone());
-        }
-    }
-    let remote_paths: Vec<RemotePathExists> = run_remote_helper_json_with_sudo(
-        connection,
-        "get-path-status",
-        Some(&serde_json::json!({ "paths": paths })),
-    )?;
-
-    Ok(remote_paths
-        .into_iter()
-        .zip(path_workshop_ids)
-        .filter(|(item, _)| item.exists)
-        .map(|(_, workshop_id)| workshop_id)
-        .collect())
-}
-
 fn remote_existing_workshop_ids_with_mod_info(
     connection: &RemoteServerConnectionRequest,
     workshop_dirs: &[String],
@@ -6369,14 +6342,26 @@ fn collect_local_files_recursive(
 #[tauri::command]
 pub(crate) async fn delete_zomboid_mod_command(
     package_path: String,
+    workshop_id: Option<String>,
     connection: Option<RemoteServerConnectionRequest>,
 ) -> Result<(), String> {
     crate::run_blocking(move || {
         let is_remote = connection.is_some();
         if let Some(conn) = connection {
-            let escaped_path = linux_shell_quote(&package_path);
-            let cmd = format!("sudo -n rm -rf {}", escaped_path);
-            let _ = run_ssh_capture(&conn, &cmd)?;
+            let mut paths_to_delete = vec![linux_shell_quote(&package_path)];
+
+            if let Some(ref ws_id) = workshop_id {
+                let candidates = remote_steam_workshop_dir_candidates(&conn);
+                for (_, ws_dir, _) in candidates {
+                    let full_path = format!("{}/{}", ws_dir, ws_id);
+                    paths_to_delete.push(linux_shell_quote(&full_path));
+                }
+            }
+
+            for path in paths_to_delete {
+                let cmd = format!("sudo -n rm -rf {}", path);
+                let _ = run_ssh_capture(&conn, &cmd)?;
+            }
         } else {
             let path = std::path::PathBuf::from(&package_path);
             if path.exists() {
@@ -6394,6 +6379,17 @@ pub(crate) async fn delete_zomboid_mod_command(
                             path.display()
                         )
                     })?;
+                }
+            }
+
+            if let Some(ref ws_id) = workshop_id {
+                let mut ws_paths = crate::mods::steam_workshop_dirs();
+                ws_paths.extend(crate::mods::steamcmd_workshop_dirs());
+                for ws_root in ws_paths {
+                    let ws_item_dir = ws_root.join(ws_id);
+                    if ws_item_dir.exists() {
+                        let _ = std::fs::remove_dir_all(&ws_item_dir);
+                    }
                 }
             }
         }

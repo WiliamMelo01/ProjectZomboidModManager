@@ -45,7 +45,7 @@ type ServerDetailProps = {
   onToggleMod: (mod: ZomboidMod, action: "activate" | "deactivate") => Promise<void>
   onMoveActiveMod: (mod: ZomboidMod, position: "start" | "end") => Promise<void>
   onRefreshMods?: () => Promise<void>
-  onDependencyDownloaded?: (dependencyId: string) => Promise<void>
+  onDependencyDownloaded?: (dependencyId: string, originalModId?: string) => Promise<void>
   onOpenSettings?: () => void
   runningServerTestId?: string | null
   onChangeBuild: (gameBuild: "b41" | "b42") => Promise<void>
@@ -774,7 +774,6 @@ export function ServerDetail({
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-md animate-in fade-in duration-200"
           onClick={() => {
             setServerFilePreview(null)
-            setActiveScrollTarget(null)
           }}
         >
           <div
@@ -924,6 +923,7 @@ export function ServerDetail({
           onClose={() => setMissingDependency(null)}
           onDownloaded={onDependencyDownloaded ?? onRefreshMods}
           onOpenSettings={onOpenSettings}
+          remoteConnection={remoteConnection}
         />
       )}
       </div>

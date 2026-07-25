@@ -125,6 +125,7 @@ function defaultRemoteConfig(
     remoteZomboidDataOwner: existing?.remoteZomboidDataOwner || "pzmm",
     remoteClientRam: existing?.remoteClientRam || "4.00",
     remoteServerRam: existing?.remoteServerRam || "4.00",
+    remoteServerVersion: existing?.remoteServerVersion || "b41",
     remoteSetupCompletedStep: existing?.remoteSetupCompletedStep ?? 0,
     remoteModLocations: existing?.remoteModLocations || [],
   };

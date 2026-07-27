@@ -9,6 +9,13 @@ improved, and fixed in each public release.
 
 - No changes recorded yet.
 
+## [0.6.1] - 2026-07-27
+
+Release v0.6.1 - Build 42 Mod Detection Hotfix
+
+### Fixed
+- **Mod Discovery Engine**: Fixed an issue where Build 42 mods with their `mod.info` file located in the `common/` subdirectory were ignored. They are now correctly discovered and loaded by the application.
+
 ## [0.6.0] - 2026-07-25
 
 Release v0.6.0 - Automated Server Versioning, Setup UI Simplification and Dependency Fixes
@@ -203,6 +210,7 @@ First public release of PZ Manager.
 
 ## Links
 
+- [0.6.1](https://github.com/WiliamMelo01/ProjectZomboidModManager/releases/tag/v0.6.1)
 - [0.6.0](https://github.com/WiliamMelo01/ProjectZomboidModManager/releases/tag/v0.6.0)
 - [0.5.0](https://github.com/WiliamMelo01/ProjectZomboidModManager/releases/tag/v0.5.0)
 - [0.4.0](https://github.com/WiliamMelo01/ProjectZomboidModManager/releases/tag/v0.4.0)

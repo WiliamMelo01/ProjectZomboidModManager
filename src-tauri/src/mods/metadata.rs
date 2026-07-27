@@ -101,7 +101,7 @@ fn read_variant(mod_info: &Path, game_build: &str) -> Result<ZomboidModVariant, 
 fn is_b42_dir(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .map(|name| name == "42" || name.starts_with("42."))
+        .map(|name| name == "42" || name.starts_with("42.") || name == "common")
         .unwrap_or(false)
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "zomboid_server_mod_manager"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 default-run = "zomboid_server_mod_manager"
 description = "Desktop mod manager for Project Zomboid servers"

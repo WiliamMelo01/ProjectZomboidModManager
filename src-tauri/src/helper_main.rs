@@ -923,7 +923,7 @@ fn run_server_start_streaming(
     let server_ports =
         server_test::server_ports_for_id(&server_id).unwrap_or_else(|_| vec![16261, 16262]);
     let primary_port = server_ports.first().copied().unwrap_or(16261);
-    let watch_timeout = Duration::from_secs(120);
+    let watch_timeout = Duration::from_secs(900);
     let watch_start = Instant::now();
     let mut seen_lines = 0usize;
     let mut server_started = false;
@@ -1099,7 +1099,7 @@ fn start_server(
         format!("Watching startup output and ports {watched_ports} for up to 45 seconds..."),
     ];
     let started_at = Instant::now();
-    let watch_timeout = Duration::from_secs(45);
+    let watch_timeout = Duration::from_secs(180);
     let mut seen_lines = 0usize;
     let mut server_started = false;
     let mut controller_exited = false;

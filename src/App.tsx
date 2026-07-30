@@ -132,6 +132,10 @@ function App() {
   );
   const [remoteConnection, setRemoteConnection] =
     useState<RemoteConnectionDraft | null>(initialWorkspace.connection);
+  const remoteConnectionRef = useRef(remoteConnection);
+  useEffect(() => {
+    remoteConnectionRef.current = remoteConnection;
+  }, [remoteConnection]);
   const [autoConnectError, setAutoConnectError] = useState<string | null>(null);
 
   const { t } = useTranslation();
@@ -1584,6 +1588,7 @@ function LocalWorkspaceApp({
     if (notification.action?.type === "download-result") {
       setSelectedServer(null);
       setActiveTab("download");
+      setSearchQuery("");
       downloadManager.openResultDetails(notification.action.result);
     }
   }
@@ -1696,12 +1701,20 @@ function LocalWorkspaceApp({
             success: true,
             message:
               t("remoteStart.runningConsoleReady"),
-            command: "start-server-streaming",
+            command: "send-server-command",
             logs: [],
           });
           window.setTimeout(() => {
             void loadServers();
           }, 1500);
+
+          if (remoteConnectionRef.current) {
+            invokeTauri("stream_remote_zomboid_server_logs", {
+              connection: remoteConnectionRef.current,
+              serverId: payload.serverId,
+              followFromEnd: true,
+            }).catch(console.error);
+          }
         }
         return;
       }
@@ -1714,12 +1727,20 @@ function LocalWorkspaceApp({
           success: true,
           message:
             t("remoteStart.runningConsoleReady"),
-          command: "start-server-streaming",
+          command: "send-server-command",
           logs: [],
         });
         window.setTimeout(() => {
           void loadServers();
         }, 1500);
+
+        if (remoteConnectionRef.current) {
+          invokeTauri("stream_remote_zomboid_server_logs", {
+            connection: remoteConnectionRef.current,
+            serverId: payload.serverId,
+            followFromEnd: true,
+          }).catch(console.error);
+        }
         return;
       }
 
@@ -1854,10 +1875,12 @@ function LocalWorkspaceApp({
         case "show_dashboard":
           setSelectedServer(null);
           setActiveTab("dashboard");
+          setSearchQuery("");
           break;
         case "show_mods":
           setSelectedServer(null);
           setActiveTab("mods");
+          setSearchQuery("");
           void ensureModsLoaded();
           break;
         case "show_downloads":
@@ -1867,10 +1890,12 @@ function LocalWorkspaceApp({
           }
           setSelectedServer(null);
           setActiveTab("download");
+          setSearchQuery("");
           break;
         case "show_settings":
           setSelectedServer(null);
           setActiveTab("settings");
+          setSearchQuery("");
           break;
         case "scan_mods":
           void scanData();
@@ -1902,6 +1927,7 @@ function LocalWorkspaceApp({
         onTabChange={(tabId) => {
           setActiveTab(tabId);
           setSelectedServer(null);
+          setSearchQuery("");
           if (!isRemoteWorkspace && tabId === "mods") {
             void ensureModsLoaded();
           }
@@ -1955,7 +1981,10 @@ function LocalWorkspaceApp({
                 <ServerDetail
                   server={selectedServer}
                   allMods={serverDetailMods ?? []}
-                  onBack={() => setSelectedServer(null)}
+                  onBack={() => {
+                    setSelectedServer(null);
+                    setSearchQuery("");
+                  }}
                   onInstallMods={installMods}
                   workshopMappings={workshopMappings}
                   onSaveWorkshopMapping={saveWorkshopMappingAndSync}

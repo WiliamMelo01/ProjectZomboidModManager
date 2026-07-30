@@ -58,8 +58,7 @@ export function UploadLocalModsModal({
       setIsLoadingLocalMods(true)
       invokeTauri<ZomboidMod[]>("list_zomboid_mods")
         .then((fetchedMods) => {
-          const filtered = fetchedMods.filter((mod) => mod.source === "local" || mod.isInstalled)
-          setLocalMods(filtered)
+          setLocalMods(fetchedMods)
         })
         .catch((err) => {
           setError(getErrorMessage(err))

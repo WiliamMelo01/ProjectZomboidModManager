@@ -75,20 +75,47 @@ fn hydrate_server_statuses(servers: &mut [ZomboidServer]) {
         .map(|usage| usage.port)
         .collect::<HashSet<_>>();
 
-    for server in servers {
-        if server
-            .port
-            .parse::<u16>()
-            .ok()
-            .is_some_and(|port| active_ports.contains(&port))
-        {
-            server.status = "online".to_string();
-            server.ping_ms = Some(1); // Localhost ping is always < 1 ms
-            server.connected_players = Some(0);
+    let mut running_server_ids_with_state = HashSet::new();
+    for server in servers.iter() {
+        if let Ok(state_path) = server_controller_state_path(&server.id) {
+            if state_path.is_file() {
+                running_server_ids_with_state.insert(server.id.clone());
+            }
+        }
+    }
 
-            if let Ok(state_path) = server_controller_state_path(&server.id) {
-                if state_path.is_file() {
-                    let _ = queue_players_status_query(&server.id);
+    for i in 0..servers.len() {
+        let port_result = servers[i].port.parse::<u16>().ok();
+        let is_port_active = port_result.is_some_and(|port| active_ports.contains(&port));
+
+        let mut should_be_online = false;
+
+        if is_port_active {
+            if running_server_ids_with_state.contains(&servers[i].id) {
+                should_be_online = true;
+            } else {
+                let port = port_result.unwrap();
+                let other_server_has_state = servers.iter().any(|s| {
+                    s.port.parse::<u16>().ok() == Some(port)
+                        && running_server_ids_with_state.contains(&s.id)
+                });
+
+                if other_server_has_state {
+                    should_be_online = false;
+                } else {
+                    should_be_online = true;
+                }
+            }
+        }
+
+        if should_be_online {
+            servers[i].status = "online".to_string();
+            servers[i].ping_ms = Some(1); // Localhost ping is always < 1 ms
+            servers[i].connected_players = Some(0);
+
+            if running_server_ids_with_state.contains(&servers[i].id) {
+                let _ = queue_players_status_query(&servers[i].id);
+                if let Ok(state_path) = server_controller_state_path(&servers[i].id) {
                     if let Ok(state_content) = fs::read_to_string(&state_path) {
                         if let Some(log_path) =
                             state_value(&state_content, "logPath").map(PathBuf::from)
@@ -96,7 +123,7 @@ fn hydrate_server_statuses(servers: &mut [ZomboidServer]) {
                             if log_path.is_file() {
                                 if let Some(connected_players) = parse_connected_players(&log_path)
                                 {
-                                    server.connected_players = Some(connected_players);
+                                    servers[i].connected_players = Some(connected_players);
                                 }
                             }
                         }
@@ -104,9 +131,9 @@ fn hydrate_server_statuses(servers: &mut [ZomboidServer]) {
                 }
             }
         } else {
-            server.status = "offline".to_string();
-            server.ping_ms = None;
-            server.connected_players = None;
+            servers[i].status = "offline".to_string();
+            servers[i].ping_ms = None;
+            servers[i].connected_players = None;
         }
     }
 }

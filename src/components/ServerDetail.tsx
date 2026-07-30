@@ -949,7 +949,7 @@ function dedupeModsForServer(mods: ZomboidMod[]) {
 }
 
 function modIdentityKeys(mod: ZomboidMod) {
-  const keys = [mod.id, mod.workshopId, ...(mod.variants ?? []).map((variant) => variant.id)]
+  const keys = [mod.id, ...(mod.variants ?? []).map((variant) => variant.id)]
     .map((value) => String(value ?? "").trim().toLowerCase())
     .filter(Boolean)
 

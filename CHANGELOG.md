@@ -9,6 +9,17 @@ improved, and fixed in each public release.
 
 - No changes recorded yet.
 
+## [0.6.2] - 2026-07-29
+
+Release v0.6.2 - Sub-Mods & Upload QoL Patch
+
+### Fixed
+- **Mod Deduplication**: Fixed an issue where sub-mods sharing the same Steam Workshop ID were incorrectly hidden from the Server Details screen. All sub-mods inside a workshop item are now properly displayed and can be enabled.
+- **Search State**: The search bar is now automatically cleared when switching between the Mods and Servers tabs, preventing confusion when filtering servers with mod names.
+
+### Changed
+- **Mod Uploading**: The "Upload Local Mods" modal now allows uploading mods downloaded via Steam Workshop in addition to mods located in the local `Zomboid/mods` folder.
+
 ## [0.6.1] - 2026-07-27
 
 Release v0.6.1 - Build 42 Mod Detection Hotfix

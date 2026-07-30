@@ -6,7 +6,7 @@
 
 ### Manage Project Zomboid server mods, downloads, configs, and remote Linux servers from one desktop app.
 
-[![Version](https://img.shields.io/badge/version-0.6.0-6d5dfc?style=for-the-badge)](package.json)
+[![Version](https://img.shields.io/badge/version-0.6.2-6d5dfc?style=for-the-badge)](package.json)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D4?style=for-the-badge&logo=windows)
 ![Desktop](https://img.shields.io/badge/desktop-Tauri-24C8D8?style=for-the-badge&logo=tauri&logoColor=white)
 ![Status](https://img.shields.io/badge/status-active%20development-F59E0B?style=for-the-badge)

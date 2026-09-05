@@ -108,10 +108,116 @@ fn zomboid_server_dir() -> Result<PathBuf, String> {
     Ok(PathBuf::from(home).join("Zomboid").join("Server"))
 }
 
-fn server_example_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+const SERVER_EXAMPLE_FILES: [(&str, &[u8], &str); 3] = [
+    (
+        "servertest.ini",
+        include_bytes!("../../resources/server-example/server_example/servertest.ini"),
+        "https://raw.githubusercontent.com/WiliamMelo01/ProjectZomboidModManager/main/resources/server-example/server_example/servertest.ini",
+    ),
+    (
+        "servertest_SandboxVars.lua",
+        include_bytes!("../../resources/server-example/server_example/servertest_SandboxVars.lua"),
+        "https://raw.githubusercontent.com/WiliamMelo01/ProjectZomboidModManager/main/resources/server-example/server_example/servertest_SandboxVars.lua",
+    ),
+    (
+        "servertest_spawnregions.lua",
+        include_bytes!("../../resources/server-example/server_example/servertest_spawnregions.lua"),
+        "https://raw.githubusercontent.com/WiliamMelo01/ProjectZomboidModManager/main/resources/server-example/server_example/servertest_spawnregions.lua",
+    ),
+];
+
+fn download_file_from_url(url: &str, destination: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("powershell.exe");
+        let output = hide_command_window(&mut command)
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "& { param($u, $d) $ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri $u -OutFile $d -UseBasicParsing }",
+            ])
+            .arg(url)
+            .arg(destination)
+            .output()
+            .map_err(|error| format!("Falha ao baixar {url}: {error}"))?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).to_string())
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        let output = Command::new("curl")
+            .args(["-fsSL", url, "-o"])
+            .arg(destination)
+            .output()
+            .map_err(|error| format!("Falha ao baixar {url}: {error}"))?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).to_string())
+        }
+    }
+}
+
+pub(crate) fn ensure_server_example_cache_dir() -> Result<PathBuf, String> {
+    let cache_dir = app_config_dir()?.join("server-example");
+    fs::create_dir_all(&cache_dir).map_err(|error| {
+        format!(
+            "Nao foi possivel criar a pasta de cache do servidor de exemplo em {}: {error}",
+            cache_dir.display()
+        )
+    })?;
+
+    for (file_name, embedded_bytes, _) in SERVER_EXAMPLE_FILES {
+        let file_path = cache_dir.join(file_name);
+        if !file_path.is_file() || file_path.metadata().map(|m| m.len() == 0).unwrap_or(true) {
+            let _ = fs::write(&file_path, embedded_bytes);
+        }
+    }
+
+    Ok(cache_dir)
+}
+
+fn start_background_server_example_sync() {
+    std::thread::spawn(|| {
+        let Ok(cache_dir) = ensure_server_example_cache_dir() else {
+            return;
+        };
+
+        for (file_name, _, url) in SERVER_EXAMPLE_FILES {
+            let temp_file = cache_dir.join(format!("{file_name}.download"));
+            if download_file_from_url(url, &temp_file).is_ok() {
+                if let Ok(metadata) = temp_file.metadata() {
+                    if metadata.len() > 0 {
+                        let _ = fs::rename(&temp_file, cache_dir.join(file_name));
+                    }
+                }
+                let _ = fs::remove_file(&temp_file);
+            }
+        }
+    });
+}
+
+pub(crate) fn server_example_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    // 1. Primary: Cached folder in user config dir (embedded fallback + background github sync)
+    if let Ok(cache_dir) = ensure_server_example_cache_dir() {
+        let ini = cache_dir.join("servertest.ini");
+        let sandbox = cache_dir.join("servertest_SandboxVars.lua");
+        let spawn = cache_dir.join("servertest_spawnregions.lua");
+        if ini.is_file() && sandbox.is_file() && spawn.is_file() {
+            return Ok(cache_dir);
+        }
+    }
+
+    // 2. Secondary: Resource resolution via Tauri bundle
     let mut candidates = Vec::new();
 
-    // Primary: explicit mapped path (object mapping in tauri.conf.json)
     if let Ok(path) = app
         .path()
         .resolve("server-example/server_example", BaseDirectory::Resource)
@@ -119,7 +225,6 @@ fn server_example_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         candidates.push(path);
     }
 
-    // Fallback: _up_ encoded path from older array-notation bundling (../resources/...)
     if let Ok(path) = app
         .path()
         .resolve("_up_/resources/server-example/server_example", BaseDirectory::Resource)
@@ -155,6 +260,15 @@ fn server_example_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         if candidate.exists() && candidate.is_dir() {
             return Ok(candidate);
         }
+    }
+
+    // 3. Fallback: Force recreate into temp dir if permissions issue in config dir
+    let fallback_dir = env::temp_dir().join("pzmm-server-example");
+    if fs::create_dir_all(&fallback_dir).is_ok() {
+        for (file_name, embedded_bytes, _) in SERVER_EXAMPLE_FILES {
+            let _ = fs::write(fallback_dir.join(file_name), embedded_bytes);
+        }
+        return Ok(fallback_dir);
     }
 
     Err("Pasta de exemplo do servidor nao encontrada nos resources.".to_string())
@@ -650,6 +764,11 @@ fn main() {
                 eprintln!("Nao foi possivel preparar o pool SteamCMD gerenciado: {error}");
             }
 
+            if let Err(error) = ensure_server_example_cache_dir() {
+                eprintln!("Nao foi possivel inicializar cache do servidor de exemplo: {error}");
+            }
+            start_background_server_example_sync();
+
             refresh_native_menu(app.handle())?;
             Ok(())
         })
@@ -760,4 +879,27 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_example_cache_extracts_embedded_files() {
+        let cache_dir = ensure_server_example_cache_dir().expect("Failed to ensure cache dir");
+        assert!(cache_dir.is_dir());
+
+        let ini = cache_dir.join("servertest.ini");
+        let sandbox = cache_dir.join("servertest_SandboxVars.lua");
+        let spawn = cache_dir.join("servertest_spawnregions.lua");
+
+        assert!(ini.is_file(), "servertest.ini must exist");
+        assert!(sandbox.is_file(), "servertest_SandboxVars.lua must exist");
+        assert!(spawn.is_file(), "servertest_spawnregions.lua must exist");
+
+        assert!(ini.metadata().unwrap().len() > 0, "servertest.ini must not be empty");
+        assert!(sandbox.metadata().unwrap().len() > 0, "SandboxVars must not be empty");
+        assert!(spawn.metadata().unwrap().len() > 0, "spawnregions must not be empty");
+    }
 }

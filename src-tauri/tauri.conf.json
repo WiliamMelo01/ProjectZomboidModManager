@@ -65,7 +65,6 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../resources/server-example/server_example": "server-example/server_example",
       "../resources/steacmd/steamcmd.zip": "steacmd/steamcmd.zip"
     }
   }

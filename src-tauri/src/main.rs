@@ -1,13 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-#[cfg(windows)]
 use std::process::Command;
 use std::{
     collections::HashSet,
     env, fs,
     path::{Path, PathBuf},
 };
-use tauri::{path::BaseDirectory, Emitter, Manager};
+use tauri::Emitter;
+#[cfg(windows)]
+use tauri::{path::BaseDirectory, Manager};
 #[cfg(windows)]
 use util::hide_command_window;
 

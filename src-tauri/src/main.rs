@@ -111,9 +111,18 @@ fn zomboid_server_dir() -> Result<PathBuf, String> {
 fn server_example_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
 
+    // Primary: explicit mapped path (object mapping in tauri.conf.json)
     if let Ok(path) = app
         .path()
         .resolve("server-example/server_example", BaseDirectory::Resource)
+    {
+        candidates.push(path);
+    }
+
+    // Fallback: _up_ encoded path from older array-notation bundling (../resources/...)
+    if let Ok(path) = app
+        .path()
+        .resolve("_up_/resources/server-example/server_example", BaseDirectory::Resource)
     {
         candidates.push(path);
     }
@@ -150,6 +159,7 @@ fn server_example_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
     Err("Pasta de exemplo do servidor nao encontrada nos resources.".to_string())
 }
+
 
 fn zomboid_mods_dir() -> Result<PathBuf, String> {
     let home = env::var_os("USERPROFILE")

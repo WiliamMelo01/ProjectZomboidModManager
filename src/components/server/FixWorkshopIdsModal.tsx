@@ -3,6 +3,7 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { findModForServerId } from "@/lib/modBuilds"
+import { getWorkshopIdsForModIds } from "@/lib/serverMods"
 import type { ZomboidMod } from "@/types/mod"
 import type { ZomboidServer } from "@/types/server"
 
@@ -12,7 +13,7 @@ type FixWorkshopIdsModalProps = {
   workshopMappings?: Record<string, string>
   onClose: () => void
   onSaveWorkshopMapping?: (modId: string, workshopId: string) => Promise<void>
-  onApplyServerMods?: (server: ZomboidServer, activeModIds: string[]) => Promise<void>
+  onApplyServerMods?: (server: ZomboidServer, activeModIds: string[], explicitWorkshopIds?: string[]) => Promise<void>
 }
 
 export function FixWorkshopIdsModal({
@@ -123,7 +124,13 @@ export function FixWorkshopIdsModal({
     setIsSaving(true)
     try {
       if (onApplyServerMods && server) {
-        await onApplyServerMods(server, server.activeModIds ?? [])
+        const computedWorkshopIds = getWorkshopIdsForModIds(
+          server.activeModIds ?? [],
+          allMods,
+          gameBuild,
+          workshopMappings,
+        )
+        await onApplyServerMods(server, server.activeModIds ?? [], computedWorkshopIds)
       }
       onClose()
     } catch (err) {

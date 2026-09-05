@@ -21,6 +21,7 @@ import { ServerModDetailsModal } from "@/components/server/ServerModDetailsModal
 import { ServerModList } from "@/components/server/ServerModList"
 import { buildActivationDependencyPlan, isLocalMod, normalizeModId } from "@/lib/modDependencies"
 import { resolveModForBuild } from "@/lib/modBuilds"
+import { getWorkshopIdsForModIds } from "@/lib/serverMods"
 import { invokeTauri } from "@/lib/tauri"
 import type { RemoteConnectionDraft } from "@/lib/commandRunner"
 import { i18n } from "@/i18n"
@@ -62,7 +63,7 @@ type ServerDetailProps = {
   onStopRemoteServer?: (server: ZomboidServer) => void
   workshopMappings?: Record<string, string>
   onSaveWorkshopMapping?: (modId: string, workshopId: string) => Promise<void>
-  onUpdateServerMods?: (server: ZomboidServer, activeModIds: string[]) => Promise<void>
+  onUpdateServerMods?: (server: ZomboidServer, activeModIds: string[], explicitWorkshopIds?: string[]) => Promise<void>
 }
 
 const MOVE_MOD_WARNING_KEY = "pzmm_move_mod_warning_modal_seen"
@@ -205,6 +206,8 @@ export function ServerDetail({
   const [pendingBuild, setPendingBuild] = useState<"b41" | "b42" | null>(null)
   const [showIncompatibleMods, setShowIncompatibleMods] = useState(false)
   const [selectedMod, setSelectedMod] = useState<ZomboidMod | null>(null)
+  const [isFillingWorkshopIds, setIsFillingWorkshopIds] = useState(false)
+  const [fillFeedback, setFillFeedback] = useState<string | null>(null)
 
   const [isActivatedExpanded, setIsActivatedExpanded] = useState(true)
   const [isAvailableExpanded, setIsAvailableExpanded] = useState(true)
@@ -475,6 +478,27 @@ export function ServerDetail({
     }
   }
 
+  const handleFillWorkshopIds = async () => {
+    if (!server || !onUpdateServerMods) return
+    setIsFillingWorkshopIds(true)
+    setFillFeedback(null)
+    try {
+      const computedWorkshopIds = getWorkshopIdsForModIds(
+        server.activeModIds ?? [],
+        allMods,
+        server.gameBuild,
+        workshopMappings,
+      )
+      await onUpdateServerMods(server, server.activeModIds ?? [], computedWorkshopIds)
+      setFillFeedback(t("serverDetail.fillWorkshopIdsSuccess", { count: computedWorkshopIds.length }))
+      setTimeout(() => setFillFeedback(null), 4000)
+    } catch (err) {
+      setFillFeedback(getErrorMessage(err))
+    } finally {
+      setIsFillingWorkshopIds(false)
+    }
+  }
+
   return (
     <div className="h-full min-h-0 overflow-y-auto bg-[#22272b] p-8 text-white custom-scrollbar">
       <div className="flex min-h-full flex-col gap-6 relative">
@@ -651,6 +675,23 @@ export function ServerDetail({
               <span>{t("serverDetail.viewLogs")}</span>
             </button>
 
+            {!remoteConnection && (
+              <button
+                type="button"
+                onClick={() => void handleFillWorkshopIds()}
+                disabled={isFillingWorkshopIds || !server.activeModIds?.length}
+                title={t("serverDetail.fillWorkshopIdsTooltip")}
+                className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-xs font-bold text-emerald-200 transition-all hover:bg-emerald-500/20 hover:border-emerald-500/50 shadow-md shadow-emerald-950/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isFillingWorkshopIds ? (
+                  <RefreshCw size={16} className="text-emerald-400 animate-spin" />
+                ) : (
+                  <Hash size={16} className="text-emerald-400" />
+                )}
+                <span>{t("serverDetail.fillWorkshopIds")}</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => setShowFixWorkshopIdsModal(true)}
@@ -665,6 +706,19 @@ export function ServerDetail({
 
       {/* Lists */}
       <div className="flex flex-col gap-6 pb-10">
+        {fillFeedback && (
+          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-5 py-4 text-sm text-emerald-300 flex items-center justify-between">
+            <span>{fillFeedback}</span>
+            <button
+              type="button"
+              onClick={() => setFillFeedback(null)}
+              className="text-emerald-400 hover:text-emerald-200 text-xs font-bold"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         {mapInstallError && (
           <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-5 py-4 text-sm text-red-300">
             {mapInstallError}
@@ -753,9 +807,9 @@ export function ServerDetail({
           workshopMappings={workshopMappings}
           onClose={() => setShowFixWorkshopIdsModal(false)}
           onSaveWorkshopMapping={onSaveWorkshopMapping || (async () => {})}
-          onApplyServerMods={async (srv, activeModIds) => {
+          onApplyServerMods={async (srv, activeModIds, explicitWsIds) => {
             if (onUpdateServerMods) {
-              await onUpdateServerMods(srv, activeModIds)
+              await onUpdateServerMods(srv, activeModIds, explicitWsIds)
             }
           }}
         />

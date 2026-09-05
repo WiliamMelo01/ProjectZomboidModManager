@@ -6,7 +6,7 @@
 
 ### Gerencie mods, downloads, configurações e servidores Linux remotos de Project Zomboid em um app desktop.
 
-[![Versão](https://img.shields.io/badge/versão-0.6.0-6d5dfc?style=for-the-badge)](package.json)
+[![Versão](https://img.shields.io/badge/versão-0.6.3-6d5dfc?style=for-the-badge)](package.json)
 ![Plataforma](https://img.shields.io/badge/plataforma-Windows%20%7C%20Linux-0078D4?style=for-the-badge&logo=windows)
 ![Desktop](https://img.shields.io/badge/desktop-Tauri-24C8D8?style=for-the-badge&logo=tauri&logoColor=white)
 ![Status](https://img.shields.io/badge/status-desenvolvimento%20ativo-F59E0B?style=for-the-badge)

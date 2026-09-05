@@ -1,4 +1,4 @@
-import { Check, ChevronRight, Hash, Lock, MessageSquareText, RotateCcw, Save, Search, Server, Shield, SlidersHorizontal, Users, Volume2, X, Puzzle, Settings2 } from "lucide-react"
+import { Check, ChevronRight, RotateCcw, Save, Search, Server, SlidersHorizontal, X, Puzzle, Settings2 } from "lucide-react"
 import { useEffect, useState, useMemo } from "react"
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next"
 import { i18n } from "@/i18n"
 import type { RemoteConnectionDraft } from "@/lib/commandRunner"
 import { invokeTauri } from "@/lib/tauri"
-import type { ServerIniSettings, ServerLuaSetting, ServerLuaSettings, ZomboidServer } from "@/types/server"
+import type { ServerConfigSetting, ServerIniSettings, ServerLuaSetting, ServerLuaSettings, ZomboidServer } from "@/types/server"
 
 type ServerConfigurationModalProps = {
   isOpen: boolean
@@ -41,6 +41,7 @@ const FALLBACK_SETTINGS: ServerIniSettings = {
   backupsCount: 5,
   backupsOnStart: true,
   backupsPeriod: 0,
+  settings: [],
 }
 
 const VANILLA_SECTIONS = [
@@ -56,8 +57,9 @@ export function ServerConfigurationModal({ isOpen, server, remoteConnection = nu
   const [settings, setSettings] = useState<ServerIniSettings>(FALLBACK_SETTINGS)
   const [luaSettings, setLuaSettings] = useState<ServerLuaSetting[]>([])
   const [luaFileName, setLuaFileName] = useState("")
-  const [luaSearch, setLuaSearch] = useState("")
-  const [selectedSection, setSelectedSection] = useState<string | null>(null)
+  const [configSearch, setConfigSearch] = useState("")
+  const [selectedIniCategory, setSelectedIniCategory] = useState<string | null>(null)
+  const [selectedLuaSection, setSelectedLuaSection] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -70,8 +72,9 @@ export function ServerConfigurationModal({ isOpen, server, remoteConnection = nu
     setActiveConfigTab("server")
     setLuaSettings([])
     setLuaFileName("")
-    setLuaSearch("")
-    setSelectedSection(null)
+    setConfigSearch("")
+    setSelectedIniCategory(null)
+    setSelectedLuaSection(null)
     setSettings({ ...FALLBACK_SETTINGS, publicName: server.name, maxPlayers: server.maxPlayers || 32, defaultPort: server.port || "16261" })
 
     Promise.allSettled([
@@ -104,7 +107,7 @@ export function ServerConfigurationModal({ isOpen, server, remoteConnection = nu
 
   const filteredLuaSettings = useMemo(() => {
     return luaSettings.filter((setting) => {
-      const search = luaSearch.trim().toLowerCase()
+      const search = configSearch.trim().toLowerCase()
       if (!search) return true
 
       return (
@@ -118,49 +121,83 @@ export function ServerConfigurationModal({ isOpen, server, remoteConnection = nu
         )
       )
     })
-  }, [luaSettings, luaSearch])
+  }, [luaSettings, configSearch])
+
+  const filteredIniSettings = useMemo(() => {
+    return settings.settings.filter((setting) => {
+      const search = configSearch.trim().toLowerCase()
+      if (!search) return true
+
+      return (
+        setting.key.toLowerCase().includes(search) ||
+        setting.category.toLowerCase().includes(search) ||
+        setting.value.toLowerCase().includes(search) ||
+        setting.description.toLowerCase().includes(search) ||
+        String(setting.defaultValue ?? "").toLowerCase().includes(search)
+      )
+    })
+  }, [settings.settings, configSearch])
 
   const luaSections = useMemo(() => groupLuaSettings(filteredLuaSettings), [filteredLuaSettings])
-  const allSections = useMemo(() => Array.from(new Set(luaSettings.map(s => s.section))), [luaSettings])
-  const visibleSections = useMemo(
-    () => allSections.filter((section) => !luaSearch || luaSections.some(([s]) => s === section)),
-    [allSections, luaSearch, luaSections],
+  const iniCategories = useMemo(() => groupConfigSettings(filteredIniSettings), [filteredIniSettings])
+  const allLuaSections = useMemo(() => Array.from(new Set(luaSettings.map((setting) => setting.section))), [luaSettings])
+  const allIniCategories = useMemo(() => Array.from(new Set(settings.settings.map((setting) => setting.category))), [settings.settings])
+  const visibleLuaSections = useMemo(
+    () => allLuaSections.filter((section) => !configSearch || luaSections.some(([s]) => s === section)),
+    [allLuaSections, configSearch, luaSections],
+  )
+  const visibleIniCategories = useMemo(
+    () => allIniCategories.filter((category) => !configSearch || iniCategories.some(([current]) => current === category)),
+    [allIniCategories, configSearch, iniCategories],
   )
   const vanillaSections = useMemo(
-    () => visibleSections.filter((section) => VANILLA_SECTIONS.includes(section)),
-    [visibleSections],
+    () => visibleLuaSections.filter((section) => VANILLA_SECTIONS.includes(section)),
+    [visibleLuaSections],
   )
   const modSections = useMemo(
-    () => visibleSections.filter((section) => !VANILLA_SECTIONS.includes(section)),
-    [visibleSections],
+    () => visibleLuaSections.filter((section) => !VANILLA_SECTIONS.includes(section)),
+    [visibleLuaSections],
   )
 
   useEffect(() => {
-    if (luaSearch && luaSections.length > 0) {
-      if (!luaSections.find(([section]) => section === selectedSection)) {
-        setSelectedSection(null)
+    if (configSearch && luaSections.length > 0) {
+      if (!luaSections.find(([section]) => section === selectedLuaSection)) {
+        setSelectedLuaSection(null)
       }
     }
-  }, [luaSearch, luaSections, selectedSection])
+  }, [configSearch, luaSections, selectedLuaSection])
+
+  useEffect(() => {
+    if (configSearch && iniCategories.length > 0) {
+      if (!iniCategories.find(([category]) => category === selectedIniCategory)) {
+        setSelectedIniCategory(null)
+      }
+    }
+  }, [configSearch, iniCategories, selectedIniCategory])
 
   if (!isOpen || !server) return null
 
+  const normalizedIni = normalizeIniSettings(settings)
   const canSaveIni =
-    settings.publicName.trim().length > 0 &&
-    settings.maxPlayers >= 1 &&
-    settings.maxPlayers <= 100 &&
-    isValidPort(settings.defaultPort) &&
-    isValidPort(settings.udpPort) &&
-    settings.pingLimit >= 100 &&
-    settings.backupsCount >= 1 &&
-    settings.backupsCount <= 300 &&
-    settings.backupsPeriod >= 0 &&
-    settings.backupsPeriod <= 1500
+    normalizedIni.publicName.trim().length > 0 &&
+    normalizedIni.maxPlayers >= 1 &&
+    normalizedIni.maxPlayers <= 100 &&
+    isValidPort(normalizedIni.defaultPort) &&
+    isValidPort(normalizedIni.udpPort) &&
+    normalizedIni.pingLimit >= 100 &&
+    normalizedIni.backupsCount >= 1 &&
+    normalizedIni.backupsCount <= 300 &&
+    normalizedIni.backupsPeriod >= 0 &&
+    normalizedIni.backupsPeriod <= 1500 &&
+    normalizedIni.settings.every((setting) => isValidConfigSetting(setting))
   const canSaveLua = luaSettings.length > 0 && luaSettings.every((setting) => isValidLuaSetting(setting))
   const canSave = activeConfigTab === "server" ? canSaveIni : canSaveLua
 
-  const update = <K extends keyof ServerIniSettings>(key: K, value: ServerIniSettings[K]) => {
-    setSettings((current) => ({ ...current, [key]: value }))
+  const updateIniSetting = (key: string, value: string) => {
+    setSettings((current) => normalizeIniSettings({
+      ...current,
+      settings: current.settings.map((setting) => setting.key === key ? { ...setting, value } : setting),
+    }))
   }
 
   const updateLuaSetting = (path: string, value: string) => {
@@ -177,7 +214,7 @@ export function ServerConfigurationModal({ isOpen, server, remoteConnection = nu
 
     try {
       if (activeConfigTab === "server") {
-        await onSave(settings)
+        await onSave(normalizedIni)
       } else {
         const saved = await invokeTauri<ServerLuaSettings>(remoteConnection ? "update_remote_zomboid_server_lua_settings" : "update_zomboid_server_lua_settings", {
           ...(remoteConnection ? { connection: remoteConnection } : {}),
@@ -229,58 +266,63 @@ export function ServerConfigurationModal({ isOpen, server, remoteConnection = nu
         </div>
 
         <div className="relative flex flex-1 overflow-hidden">
-          {activeConfigTab === "sandbox" && (
-            <div className="w-72 shrink-0 overflow-y-auto border-r border-white/5 bg-[#1c2126]/50 p-4 custom-scrollbar">
-              <div className="mb-4 space-y-3 px-2">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
-                  <input
-                    value={luaSearch}
-                    onChange={(event) => setLuaSearch(event.target.value)}
-                    placeholder={t("serverConfig.searchSandbox")}
-                    className="w-full rounded-xl border border-white/5 bg-[#161a1d] py-3 pl-10 pr-3 text-sm focus:border-orange-500/50 focus:outline-none focus:ring-1 focus:ring-orange-500/20"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                {allSections.map((section) => {
-                  const hasResults = !luaSearch || luaSections.some(([s]) => s === section)
-                  if (!hasResults && luaSearch) return null
-                  
-                  const isVanilla = VANILLA_SECTIONS.includes(section)
-                  
-                  return (
-                    <button
-                      key={section}
-                      onClick={() => setSelectedSection(section)}
-                      className={`flex w-full items-center justify-between rounded-xl px-4 py-3.5 text-left transition-all group ${
-                        selectedSection === section
-                          ? "bg-orange-500/10 ring-1 ring-orange-500/20"
-                          : "hover:bg-white/5"
-                      }`}
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        {isVanilla ? (
-                          <Settings2 size={18} className={selectedSection === section ? "text-orange-400" : "text-gray-500"} />
-                        ) : (
-                          <Puzzle size={18} className={selectedSection === section ? "text-gray-400" : "text-gray-500/50"} />
-                        )}
-                        <span className={`truncate text-sm font-black uppercase italic tracking-tight ${
-                           selectedSection === section 
-                            ? "text-orange-400"
-                            : "text-gray-400 group-hover:text-gray-200"
-                        }`}>
-                          {section}
-                        </span>
-                      </div>
-                      {selectedSection === section && <ChevronRight size={16} className="text-orange-400" />}
-                    </button>
-                  )
-                })}
+          <div className="w-72 shrink-0 overflow-y-auto border-r border-white/5 bg-[#1c2126]/50 p-4 custom-scrollbar">
+            <div className="mb-4 space-y-3 px-2">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
+                <input
+                  value={configSearch}
+                  onChange={(event) => setConfigSearch(event.target.value)}
+                  placeholder={activeConfigTab === "server" ? t("serverConfig.searchServer") : t("serverConfig.searchSandbox")}
+                  className="w-full rounded-xl border border-white/5 bg-[#161a1d] py-3 pl-10 pr-3 text-sm text-gray-200 focus:border-orange-500/50 focus:outline-none focus:ring-1 focus:ring-orange-500/20"
+                />
               </div>
             </div>
-          )}
+
+            {activeConfigTab === "server" ? (
+              <div className="space-y-1">
+                {visibleIniCategories.map((category) => (
+                  <SidebarSectionButton
+                    key={category}
+                    label={`${category} (${settings.settings.filter((setting) => setting.category === category).length})`}
+                    icon={<Settings2 size={18} />}
+                    isSelected={selectedIniCategory === category}
+                    onClick={() => setSelectedIniCategory(category)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {vanillaSections.length > 0 && (
+                  <SidebarSectionGroup title={t("serverConfig.vanillaSections")}>
+                    {vanillaSections.map((section) => (
+                      <SidebarSectionButton
+                        key={section}
+                        label={`${section} (${luaSettings.filter((setting) => setting.section === section).length})`}
+                        icon={<Settings2 size={18} />}
+                        isSelected={selectedLuaSection === section}
+                        onClick={() => setSelectedLuaSection(section)}
+                      />
+                    ))}
+                  </SidebarSectionGroup>
+                )}
+                {modSections.length > 0 && (
+                  <SidebarSectionGroup title={t("serverConfig.modSections")}>
+                    {modSections.map((section) => (
+                      <SidebarSectionButton
+                        key={section}
+                        label={`${section} (${luaSettings.filter((setting) => setting.section === section).length})`}
+                        icon={<Puzzle size={18} />}
+                        isSelected={selectedLuaSection === section}
+                        onClick={() => setSelectedLuaSection(section)}
+                        mutedIcon
+                      />
+                    ))}
+                  </SidebarSectionGroup>
+                )}
+              </div>
+            )}
+          </div>
 
           <div className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-[#161a1d]">
             {isLoading && (
@@ -291,58 +333,27 @@ export function ServerConfigurationModal({ isOpen, server, remoteConnection = nu
             )}
 
             {activeConfigTab === "server" ? (
-              <div className="grid gap-6 lg:grid-cols-2">
-                <Section title={t("serverConfig.identity")} icon={<Server size={18} />}>
-                  <TextField label={t("serverConfig.publicName")} value={settings.publicName} onChange={(value) => update("publicName", value)} />
-                  <TextArea label={t("serverConfig.publicDescription")} value={settings.publicDescription} onChange={(value) => update("publicDescription", value)} />
-                  <TextField label={t("serverConfig.password")} value={settings.password} onChange={(value) => update("password", value)} icon={<Lock size={16} />} placeholder={t("serverConfig.passwordPlaceholder")} />
-                  <div className="grid grid-cols-2 gap-4">
-                    <Toggle label={t("serverConfig.isPublic")} checked={settings.isPublic} onChange={(value) => update("isPublic", value)} />
-                    <Toggle label={t("serverConfig.isOpen")} checked={settings.isOpen} onChange={(value) => update("isOpen", value)} />
+              <div className="space-y-6">
+                {!isLoading && settings.settings.length === 0 && (
+                  <div className="rounded-2xl border border-white/5 bg-[#1c2126] p-12 text-center">
+                    <Settings2 size={48} className="mx-auto mb-4 text-gray-700" />
+                    <p className="text-gray-400">{t("serverConfig.noServerSettings")}</p>
                   </div>
-                </Section>
+                )}
 
-                <Section title={t("serverConfig.network")} icon={<Hash size={18} />}>
-                  <div className="grid grid-cols-2 gap-4">
-                    <TextField label={t("serverConfig.defaultPort")} value={settings.defaultPort} onChange={(value) => update("defaultPort", value)} icon={<Hash size={14} />} />
-                    <TextField label={t("serverConfig.udpPort")} value={settings.udpPort} onChange={(value) => update("udpPort", value)} icon={<Hash size={14} />} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <NumberField label={t("serverConfig.maxPlayers")} value={settings.maxPlayers} min={1} max={100} onChange={(value) => update("maxPlayers", value)} icon={<Users size={14} />} />
-                    <NumberField label={t("serverConfig.pingLimit")} value={settings.pingLimit} min={100} max={2147483647} onChange={(value) => update("pingLimit", value)} />
-                  </div>
-                  <Toggle label={t("serverConfig.upnp")} checked={settings.upnp} onChange={(value) => update("upnp", value)} />
-                </Section>
-
-                <Section title={t("serverConfig.players")} icon={<Shield size={18} />}>
-                  <div className="grid grid-cols-2 gap-4">
-                    <Toggle label={t("serverConfig.pvp")} checked={settings.pvp} onChange={(value) => update("pvp", value)} />
-                    <Toggle label={t("serverConfig.safetySystem")} checked={settings.safetySystem} onChange={(value) => update("safetySystem", value)} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <Toggle label={t("serverConfig.pauseEmpty")} checked={settings.pauseEmpty} onChange={(value) => update("pauseEmpty", value)} />
-                    <Toggle label={t("serverConfig.globalChat")} checked={settings.globalChat} onChange={(value) => update("globalChat", value)} icon={<MessageSquareText size={14} />} />
-                  </div>
-                  <Toggle label={t("serverConfig.displayUserName")} checked={settings.displayUserName} onChange={(value) => update("displayUserName", value)} />
-                  <div className="grid grid-cols-2 gap-4">
-                    <Toggle label={t("serverConfig.voiceEnable")} checked={settings.voiceEnable} onChange={(value) => update("voiceEnable", value)} icon={<Volume2 size={14} />} />
-                    <Toggle label={t("serverConfig.steamVac")} checked={settings.steamVac} onChange={(value) => update("steamVac", value)} />
-                  </div>
-                </Section>
-
-                <Section title={t("serverConfig.world")} icon={<RotateCcw size={18} />}>
-                  <div className="grid grid-cols-2 gap-4">
-                    <NumberField label={t("serverConfig.saveWorldEveryMinutes")} value={settings.saveWorldEveryMinutes} min={0} max={2147483647} onChange={(value) => update("saveWorldEveryMinutes", value)} />
-                    <NumberField label={t("serverConfig.hoursForLootRespawn")} value={settings.hoursForLootRespawn} min={0} max={2147483647} onChange={(value) => update("hoursForLootRespawn", value)} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <Toggle label={t("serverConfig.playerSafehouse")} checked={settings.playerSafehouse} onChange={(value) => update("playerSafehouse", value)} />
-                    <Toggle label={t("serverConfig.adminSafehouse")} checked={settings.adminSafehouse} onChange={(value) => update("adminSafehouse", value)} />
-                  </div>
-                  <NumberField label={t("serverConfig.backupsCount")} value={settings.backupsCount} min={1} max={300} onChange={(value) => update("backupsCount", value)} />
-                  <Toggle label={t("serverConfig.backupsOnStart")} checked={settings.backupsOnStart} onChange={(value) => update("backupsOnStart", value)} />
-                  <NumberField label={t("serverConfig.backupsPeriod")} value={settings.backupsPeriod} min={0} max={1500} onChange={(value) => update("backupsPeriod", value)} />
-                </Section>
+                {iniCategories
+                  .filter(([category]) => !selectedIniCategory || category === selectedIniCategory || configSearch)
+                  .map(([category, items]) => (
+                    <ConfigSection key={category} title={category} count={items.length} icon={<Settings2 size={12} />}>
+                      {items.map((setting) => (
+                        <ConfigSettingField
+                          key={setting.key}
+                          setting={setting}
+                          onChange={(value) => updateIniSetting(setting.key, value)}
+                        />
+                      ))}
+                    </ConfigSection>
+                  ))}
               </div>
             ) : (
               <div className="space-y-6">
@@ -354,7 +365,7 @@ export function ServerConfigurationModal({ isOpen, server, remoteConnection = nu
                 )}
 
                 {luaSections
-                  .filter(([section]) => !selectedSection || section === selectedSection || luaSearch)
+                  .filter(([section]) => !selectedLuaSection || section === selectedLuaSection || configSearch)
                   .map(([section, items]) => {
                     const isVanilla = VANILLA_SECTIONS.includes(section)
                     return (
@@ -603,6 +614,117 @@ function DefaultBadge({ tone }: { tone: "muted" | "strong" }) {
     </span>
   )
 }
+
+function ConfigSection({ title, count, icon, children }: { title: string; count: number; icon: ReactNode; children: ReactNode }) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <div className="h-px flex-1 bg-gradient-to-r from-transparent via-white/5 to-transparent" />
+        <div className="flex items-center gap-2 text-[10px] font-black uppercase italic tracking-widest text-orange-500/50">
+          {icon}
+          {title}
+          <span className="rounded bg-white/5 px-1.5 py-0.5 text-[9px] text-gray-500">{count}</span>
+        </div>
+        <div className="h-px flex-1 bg-gradient-to-r from-transparent via-white/5 to-transparent" />
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function ConfigSettingField({ setting, onChange }: { setting: ServerConfigSetting; onChange: (value: string) => void }) {
+  const defaultValue = resolveConfigDefaultValue(setting)
+  const isDefault = defaultValue !== null && valuesMatch(setting.value, defaultValue, setting.valueKind)
+  const hasRange = setting.minValue || setting.maxValue
+
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-white/5 bg-[#1c2126] p-4 transition-all hover:border-white/10 hover:bg-[#1f252a]">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="break-all text-[10px] font-black uppercase tracking-wider text-gray-300" title={setting.key}>
+            {setting.key}
+          </div>
+          {setting.description && (
+            <p className="mt-1 line-clamp-3 whitespace-pre-line text-xs leading-relaxed text-gray-500">
+              {setting.description}
+            </p>
+          )}
+        </div>
+        {defaultValue !== null && !isDefault && (
+          <button
+            type="button"
+            onClick={() => onChange(defaultValue)}
+            className="flex shrink-0 items-center gap-1 rounded-md bg-white/5 px-2 py-1 text-[9px] font-black uppercase text-orange-400 transition-colors hover:bg-white/10"
+          >
+            <RotateCcw size={10} />
+            {i18n.t("serverConfig.resetToDefault")}
+          </button>
+        )}
+      </div>
+
+      {setting.valueKind === "boolean" ? (
+        <div className="flex items-center justify-between gap-4 py-1">
+          <div className="flex flex-col">
+            <span className="text-sm font-black uppercase italic text-gray-200">
+              {isTrueValue(setting.value) ? i18n.t("serverConfig.enabled") : i18n.t("serverConfig.disabled")}
+            </span>
+            {defaultValue !== null && (
+              <span className="text-[10px] font-medium text-gray-600">
+                {i18n.t("serverConfig.defaultValue")} {isTrueValue(defaultValue) ? i18n.t("serverConfig.enabled") : i18n.t("serverConfig.disabled")}
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => onChange(isTrueValue(setting.value) ? "false" : "true")}
+            className={`h-7 w-12 shrink-0 rounded-full p-1 transition-all ${isTrueValue(setting.value) ? "bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.3)]" : "bg-gray-700"}`}
+          >
+            <div className={`h-5 w-5 rounded-full bg-white transition-transform ${isTrueValue(setting.value) ? "translate-x-5" : ""}`} />
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          <input
+            type={setting.valueKind === "number" ? "number" : "text"}
+            min={setting.minValue ?? undefined}
+            max={setting.maxValue ?? undefined}
+            value={setting.value}
+            onChange={(event) => onChange(event.target.value)}
+            className={`w-full rounded-lg border bg-[#161a1d] px-4 py-3 text-sm font-medium text-gray-200 transition-all focus:border-orange-500/50 focus:outline-none focus:ring-1 focus:ring-orange-500/20 ${
+              isValidConfigSetting(setting) ? "border-white/5" : "border-red-500/50 focus:border-red-500/50 focus:ring-red-500/20"
+            }`}
+          />
+          <div className="flex flex-wrap gap-2">
+            {defaultValue !== null && (
+              <MetaPill label={i18n.t("serverConfig.defaultValue")} value={defaultValue} strong={isDefault} />
+            )}
+            {hasRange && (
+              <MetaPill
+                label={i18n.t("serverConfig.range")}
+                value={`${setting.minValue ?? "-"} - ${setting.maxValue ?? "-"}`}
+              />
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MetaPill({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ring-1 ${
+      strong
+        ? "bg-orange-500/10 text-orange-300 ring-orange-500/20"
+        : "bg-white/5 text-gray-500 ring-white/5"
+    }`}>
+      <span className="font-black uppercase tracking-wider">{label}</span> {value}
+    </span>
+  )
+}
+
 function LuaSettingField({ setting, onChange }: { setting: ServerLuaSetting; onChange: (value: string) => void }) {
   const resolvedDefaultValue = resolveDefaultSettingValue(setting)
   const isDefault = resolvedDefaultValue !== null ? isLuaSettingDefault(setting, resolvedDefaultValue) : setting.value === ""
@@ -851,6 +973,109 @@ function isValidLuaSetting(setting: ServerLuaSetting) {
   }
 
   return true
+}
+
+function isValidConfigSetting(setting: ServerConfigSetting) {
+  if (setting.valueKind === "number") {
+    const value = Number(setting.value)
+    if (setting.value.trim() === "" || !Number.isFinite(value)) {
+      return false
+    }
+
+    const min = setting.minValue ? Number(setting.minValue.replace(",", ".")) : null
+    const max = setting.maxValue ? Number(setting.maxValue.replace(",", ".")) : null
+
+    return (min === null || !Number.isFinite(min) || value >= min) && (max === null || !Number.isFinite(max) || value <= max)
+  }
+
+  if (setting.valueKind === "boolean") {
+    return ["true", "false", "1", "0", "yes", "no", "on", "off"].includes(setting.value.trim().toLowerCase())
+  }
+
+  return true
+}
+
+function normalizeIniSettings(settings: ServerIniSettings): ServerIniSettings {
+  const values = new Map(settings.settings.map((setting) => [setting.key, setting.value]))
+  const boolValue = (key: string, fallback: boolean) => {
+    const value = values.get(key)
+    if (value === undefined) return fallback
+    return isTrueValue(value)
+  }
+  const numberValue = (key: string, fallback: number) => {
+    const value = Number(values.get(key))
+    return Number.isFinite(value) ? value : fallback
+  }
+
+  return {
+    ...settings,
+    publicName: values.get("PublicName") ?? settings.publicName,
+    publicDescription: values.get("PublicDescription") ?? settings.publicDescription,
+    password: values.get("Password") ?? settings.password,
+    maxPlayers: numberValue("MaxPlayers", settings.maxPlayers),
+    defaultPort: values.get("DefaultPort") ?? settings.defaultPort,
+    udpPort: values.get("UDPPort") ?? settings.udpPort,
+    isPublic: boolValue("Public", settings.isPublic),
+    isOpen: boolValue("Open", settings.isOpen),
+    pvp: boolValue("PVP", settings.pvp),
+    pauseEmpty: boolValue("PauseEmpty", settings.pauseEmpty),
+    globalChat: boolValue("GlobalChat", settings.globalChat),
+    displayUserName: boolValue("DisplayUserName", settings.displayUserName),
+    safetySystem: boolValue("SafetySystem", settings.safetySystem),
+    voiceEnable: boolValue("VoiceEnable", settings.voiceEnable),
+    steamVac: boolValue("SteamVAC", settings.steamVac),
+    upnp: boolValue("UPnP", settings.upnp),
+    pingLimit: numberValue("PingLimit", settings.pingLimit),
+    saveWorldEveryMinutes: numberValue("SaveWorldEveryMinutes", settings.saveWorldEveryMinutes),
+    hoursForLootRespawn: numberValue("HoursForLootRespawn", settings.hoursForLootRespawn),
+    playerSafehouse: boolValue("PlayerSafehouse", settings.playerSafehouse),
+    adminSafehouse: boolValue("AdminSafehouse", settings.adminSafehouse),
+    backupsCount: numberValue("BackupsCount", settings.backupsCount),
+    backupsOnStart: boolValue("BackupsOnStart", settings.backupsOnStart),
+    backupsPeriod: numberValue("BackupsPeriod", settings.backupsPeriod),
+  }
+}
+
+function resolveConfigDefaultValue(setting: ServerConfigSetting) {
+  if (setting.defaultValue === undefined || setting.defaultValue === null) {
+    return null
+  }
+
+  if (setting.valueKind === "number") {
+    return normalizeLuaNumberDefault(setting.defaultValue)
+  }
+
+  if (setting.valueKind === "boolean") {
+    return isTrueValue(setting.defaultValue) ? "true" : "false"
+  }
+
+  return setting.defaultValue
+}
+
+function valuesMatch(value: string, defaultValue: string, valueKind: ServerConfigSetting["valueKind"]) {
+  if (valueKind === "number") {
+    return Number(value) === Number(defaultValue)
+  }
+
+  if (valueKind === "boolean") {
+    return isTrueValue(value) === isTrueValue(defaultValue)
+  }
+
+  return value === defaultValue
+}
+
+function isTrueValue(value: string) {
+  return ["true", "1", "yes", "on"].includes(value.trim().toLowerCase())
+}
+
+function groupConfigSettings(settings: ServerConfigSetting[]) {
+  const sections = new Map<string, ServerConfigSetting[]>()
+
+  for (const setting of settings) {
+    sections.set(setting.category, [...(sections.get(setting.category) ?? []), setting])
+  }
+
+  return Array.from(sections.entries())
 }
 
 function groupLuaSettings(settings: ServerLuaSetting[]) {

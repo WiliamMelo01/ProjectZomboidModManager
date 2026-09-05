@@ -53,6 +53,21 @@ pub(crate) struct ServerIniSettings {
     pub(crate) backups_count: u32,
     pub(crate) backups_on_start: bool,
     pub(crate) backups_period: u32,
+    #[serde(default)]
+    pub(crate) settings: Vec<ServerConfigSetting>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ServerConfigSetting {
+    pub(crate) key: String,
+    pub(crate) category: String,
+    pub(crate) value: String,
+    pub(crate) value_kind: String,
+    pub(crate) default_value: Option<String>,
+    pub(crate) min_value: Option<String>,
+    pub(crate) max_value: Option<String>,
+    pub(crate) description: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

@@ -1,7 +1,7 @@
 use crate::i18n::text;
 use crate::models::{
-    DeleteServerResult, ServerIniSettings, ServerLuaSetting, ServerLuaSettingOption,
-    ServerLuaSettings, ZomboidServer, BUILD_41, BUILD_42,
+    DeleteServerResult, ServerConfigSetting, ServerIniSettings, ServerLuaSetting,
+    ServerLuaSettingOption, ServerLuaSettings, ZomboidServer, BUILD_41, BUILD_42,
 };
 use crate::mods::{
     normalize_server_values, parse_server_mod_ids, resolve_server_workshop_ids,
@@ -558,11 +558,11 @@ fn read_zomboid_server_from_path(path: &Path) -> Result<ZomboidServer, String> {
     let mut game_build = read_zomboid_server_build(&file_stem)?;
     let configured_mods = read_ini_value(&content, "Mods").unwrap_or_default();
 
-    if game_build == BUILD_41 && (
-        configured_mods.starts_with('\\') || 
-        configured_mods.contains(";\\") || 
-        content.contains("AntiCheatProtectionType24=")
-    ) {
+    if game_build == BUILD_41
+        && (configured_mods.starts_with('\\')
+            || configured_mods.contains(";\\")
+            || content.contains("AntiCheatProtectionType24="))
+    {
         game_build = BUILD_42.to_string();
         let _ = write_zomboid_server_build(&file_stem, &game_build);
     }
@@ -904,16 +904,17 @@ pub(crate) fn update_zomboid_server_settings_impl(
     server_id: &str,
     settings: &ServerIniSettings,
 ) -> Result<ZomboidServer, String> {
+    let settings = normalized_server_ini_settings(settings);
     let public_name = settings.public_name.trim();
     if public_name.is_empty() {
         return Err(text("Enter a server name.", "Informe um nome para o servidor.").to_string());
     }
 
-    validate_server_ini_settings(settings)?;
+    validate_server_ini_settings(&settings)?;
     let canonical_server_path = canonical_zomboid_server_path(server_id)?;
 
     let content = read_text_lossy(&canonical_server_path)?;
-    let content = write_server_ini_settings(&content, settings);
+    let content = write_server_ini_settings(&content, &settings);
 
     fs::write(&canonical_server_path, content).map_err(|error| {
         format!(
@@ -1051,10 +1052,15 @@ fn read_server_ini_settings(content: &str) -> ServerIniSettings {
         backups_count: read_ini_u32(content, "BackupsCount", 5),
         backups_on_start: read_ini_bool(content, "BackupsOnStart", true),
         backups_period: read_ini_u32(content, "BackupsPeriod", 0),
+        settings: read_server_ini_config_settings(content),
     }
 }
 
 fn write_server_ini_settings(content: &str, settings: &ServerIniSettings) -> String {
+    if !settings.settings.is_empty() {
+        return write_server_ini_config_settings(content, &settings.settings);
+    }
+
     let values = [
         ("PublicName", settings.public_name.trim().to_string()),
         (
@@ -1120,6 +1126,306 @@ fn write_server_ini_settings(content: &str, settings: &ServerIniSettings) -> Str
         .fold(content.to_string(), |current, (key, value)| {
             replace_or_append_ini_value(&current, key, &value)
         })
+}
+
+fn normalized_server_ini_settings(settings: &ServerIniSettings) -> ServerIniSettings {
+    let mut normalized = settings.clone();
+
+    let legacy_values = [
+        ("PublicName", normalized.public_name.trim().to_string()),
+        (
+            "PublicDescription",
+            normalized.public_description.trim().to_string(),
+        ),
+        ("Password", normalized.password.trim().to_string()),
+        ("MaxPlayers", normalized.max_players.to_string()),
+        ("DefaultPort", normalized.default_port.trim().to_string()),
+        ("UDPPort", normalized.udp_port.trim().to_string()),
+        ("Public", bool_ini_value(normalized.is_public).to_string()),
+        ("Open", bool_ini_value(normalized.is_open).to_string()),
+        ("PVP", bool_ini_value(normalized.pvp).to_string()),
+        (
+            "PauseEmpty",
+            bool_ini_value(normalized.pause_empty).to_string(),
+        ),
+        (
+            "GlobalChat",
+            bool_ini_value(normalized.global_chat).to_string(),
+        ),
+        (
+            "DisplayUserName",
+            bool_ini_value(normalized.display_user_name).to_string(),
+        ),
+        (
+            "SafetySystem",
+            bool_ini_value(normalized.safety_system).to_string(),
+        ),
+        (
+            "VoiceEnable",
+            bool_ini_value(normalized.voice_enable).to_string(),
+        ),
+        ("SteamVAC", bool_ini_value(normalized.steam_vac).to_string()),
+        ("UPnP", bool_ini_value(normalized.upnp).to_string()),
+        ("PingLimit", normalized.ping_limit.to_string()),
+        (
+            "SaveWorldEveryMinutes",
+            normalized.save_world_every_minutes.to_string(),
+        ),
+        (
+            "HoursForLootRespawn",
+            normalized.hours_for_loot_respawn.to_string(),
+        ),
+        (
+            "PlayerSafehouse",
+            bool_ini_value(normalized.player_safehouse).to_string(),
+        ),
+        (
+            "AdminSafehouse",
+            bool_ini_value(normalized.admin_safehouse).to_string(),
+        ),
+        ("BackupsCount", normalized.backups_count.to_string()),
+        (
+            "BackupsOnStart",
+            bool_ini_value(normalized.backups_on_start).to_string(),
+        ),
+        ("BackupsPeriod", normalized.backups_period.to_string()),
+    ]
+    .into_iter()
+    .collect::<HashMap<_, _>>();
+
+    for setting in &mut normalized.settings {
+        if let Some(value) = legacy_values.get(setting.key.as_str()) {
+            setting.value = value.clone();
+        }
+    }
+
+    let existing_keys = normalized
+        .settings
+        .iter()
+        .map(|setting| setting.key.clone())
+        .collect::<HashSet<_>>();
+
+    for (key, value) in legacy_values {
+        if existing_keys.contains(key) {
+            continue;
+        }
+
+        let value_kind = infer_ini_value_kind(&value).to_string();
+
+        normalized.settings.push(ServerConfigSetting {
+            key: key.to_string(),
+            category: infer_server_ini_category(key, ""),
+            value,
+            value_kind,
+            default_value: None,
+            min_value: None,
+            max_value: None,
+            description: String::new(),
+        });
+    }
+
+    normalized
+}
+
+fn read_server_ini_config_settings(content: &str) -> Vec<ServerConfigSetting> {
+    let mut settings = Vec::new();
+    let mut comments = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        if let Some(comment) = trimmed.strip_prefix('#') {
+            comments.push(comment.trim().replace("\\n", "\n"));
+            continue;
+        }
+
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let Some((key, value)) = parse_ini_assignment(trimmed) else {
+            comments.clear();
+            continue;
+        };
+
+        let description = comments
+            .iter()
+            .filter(|comment| !comment.trim().is_empty())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        let value = value.to_string();
+
+        settings.push(ServerConfigSetting {
+            key: key.to_string(),
+            category: infer_server_ini_category(key, &description),
+            value_kind: infer_ini_value_kind(&value).to_string(),
+            default_value: extract_ini_comment_value(
+                &comments,
+                &["Padrao", "Padrão", "PadrÃ£o", "Padrï¿½o"],
+            ),
+            min_value: extract_ini_comment_value(
+                &comments,
+                &["Minimo", "Mínimo", "MÃ­nimo", "Mï¿½nimo"],
+            ),
+            max_value: extract_ini_comment_value(
+                &comments,
+                &["Maximo", "Máximo", "MÃ¡ximo", "Mï¿½ximo"],
+            ),
+            description,
+            value,
+        });
+        comments.clear();
+    }
+
+    settings
+}
+
+fn write_server_ini_config_settings(content: &str, settings: &[ServerConfigSetting]) -> String {
+    let values = settings
+        .iter()
+        .map(|setting| (setting.key.as_str(), setting.value.as_str()))
+        .collect::<HashMap<_, _>>();
+    let mut seen = HashSet::new();
+    let mut output = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        if let Some((key, _)) = parse_ini_assignment(trimmed) {
+            if let Some(value) = values.get(key) {
+                output.push(format!("{key}={value}"));
+                seen.insert(key.to_string());
+                continue;
+            }
+        }
+
+        output.push(line.to_string());
+    }
+
+    for setting in settings {
+        if !seen.contains(&setting.key) {
+            output.push(format!("{}={}", setting.key, setting.value));
+        }
+    }
+
+    let trailing_newline = if content.ends_with('\n') { "\n" } else { "" };
+    format!("{}{}", output.join("\n"), trailing_newline)
+}
+
+fn parse_ini_assignment(line: &str) -> Option<(&str, &str)> {
+    let (key, value) = line.split_once('=')?;
+    let key = key.trim();
+
+    if key.is_empty()
+        || !key
+            .chars()
+            .all(|char| char.is_ascii_alphanumeric() || char == '_' || char == '-')
+    {
+        return None;
+    }
+
+    Some((key, value.trim()))
+}
+
+fn infer_ini_value_kind(value: &str) -> &'static str {
+    if parse_ini_bool(value).is_some() {
+        return "boolean";
+    }
+
+    if value.trim().parse::<f64>().is_ok() {
+        return "number";
+    }
+
+    "string"
+}
+
+fn extract_ini_comment_value(comments: &[String], markers: &[&str]) -> Option<String> {
+    comments.iter().find_map(|comment| {
+        let marker_start = markers
+            .iter()
+            .filter_map(|marker| comment.find(marker))
+            .min()?;
+        let marker = &comment[marker_start..];
+        let (_, value) = marker.split_once('=')?;
+        let value = value.trim();
+        let next_marker = [" Min", " Mín", " MÃ", " Mï", " Max", " Máx", " Pad", "\n"]
+            .iter()
+            .filter_map(|next| value.find(next))
+            .filter(|index| *index > 0)
+            .min()
+            .unwrap_or(value.len());
+        let value = value[..next_marker].trim();
+
+        if value.is_empty() {
+            None
+        } else {
+            Some(value.to_string())
+        }
+    })
+}
+
+fn infer_server_ini_category(key: &str, description: &str) -> String {
+    let searchable = format!("{key} {description}").to_lowercase();
+
+    let category = if searchable.contains("mod") || searchable.contains("workshop") || key == "Map"
+    {
+        "Mods e mapa"
+    } else if searchable.contains("port")
+        || searchable.contains("ping")
+        || searchable.contains("upnp")
+        || searchable.contains("rcon")
+        || searchable.contains("server_browser")
+        || searchable.contains("queue")
+    {
+        "Rede"
+    } else if searchable.contains("discord") || searchable.contains("chat") {
+        "Chat"
+    } else if searchable.contains("safehouse") || searchable.contains("faction") {
+        "Bases e faccoes"
+    } else if searchable.contains("anti")
+        || searchable.contains("checksum")
+        || searchable.contains("vac")
+        || searchable.contains("kick")
+        || searchable.contains("ban")
+        || searchable.contains("password")
+    {
+        "Seguranca"
+    } else if searchable.contains("voice") || searchable.contains("voip") {
+        "Voz"
+    } else if searchable.contains("backup") {
+        "Backups"
+    } else if searchable.contains("loot")
+        || searchable.contains("respawn")
+        || searchable.contains("spawn")
+        || searchable.contains("world")
+        || searchable.contains("sleep")
+        || searchable.contains("fire")
+        || searchable.contains("vehicle")
+        || searchable.contains("blood")
+        || searchable.contains("corpse")
+    {
+        "Mundo"
+    } else if searchable.contains("player")
+        || searchable.contains("user")
+        || searchable.contains("account")
+        || searchable.contains("pvp")
+        || searchable.contains("safety")
+        || searchable.contains("coop")
+    {
+        "Jogadores"
+    } else if searchable.contains("public")
+        || searchable.contains("server")
+        || searchable.contains("welcome")
+    {
+        "Identidade"
+    } else if searchable.contains("log") || searchable.contains("command") {
+        "Logs e comandos"
+    } else {
+        "Outros"
+    };
+
+    category.to_string()
 }
 
 fn validate_server_ini_settings(settings: &ServerIniSettings) -> Result<(), String> {
@@ -1204,12 +1510,16 @@ fn read_ini_u32(content: &str, key: &str, fallback: u32) -> u32 {
 
 fn read_ini_bool(content: &str, key: &str, fallback: bool) -> bool {
     read_ini_value(content, key)
-        .and_then(|value| match value.trim().to_lowercase().as_str() {
-            "true" | "1" | "yes" | "on" => Some(true),
-            "false" | "0" | "no" | "off" => Some(false),
-            _ => None,
-        })
+        .and_then(|value| parse_ini_bool(&value))
         .unwrap_or(fallback)
+}
+
+fn parse_ini_bool(value: &str) -> Option<bool> {
+    match value.trim().to_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Some(true),
+        "false" | "0" | "no" | "off" => Some(false),
+        _ => None,
+    }
 }
 
 fn bool_ini_value(value: bool) -> &'static str {
@@ -1779,6 +2089,70 @@ mod tests {
         assert!(!settings.pvp);
         assert!(!settings.pause_empty);
         assert_eq!(settings.backups_count, 9);
+    }
+
+    #[test]
+    fn reads_all_editable_server_ini_values_with_metadata() {
+        let content = concat!(
+            "# Main browser name\n",
+            "PublicName=Read Me\n",
+            "\n",
+            "# Minimo = 0 Maximo = 65535 Padrao = 27015\n",
+            "RCONPort=27016\n",
+            "# Enable Discord bridge\n",
+            "DiscordEnable=false\n",
+        );
+
+        let settings = read_server_ini_settings(content);
+
+        assert_eq!(settings.settings.len(), 3);
+        let rcon = settings
+            .settings
+            .iter()
+            .find(|setting| setting.key == "RCONPort")
+            .expect("RCONPort should be parsed");
+
+        assert_eq!(rcon.value, "27016");
+        assert_eq!(rcon.value_kind, "number");
+        assert_eq!(rcon.min_value.as_deref(), Some("0"));
+        assert_eq!(rcon.max_value.as_deref(), Some("65535"));
+        assert_eq!(rcon.default_value.as_deref(), Some("27015"));
+
+        let discord = settings
+            .settings
+            .iter()
+            .find(|setting| setting.key == "DiscordEnable")
+            .expect("DiscordEnable should be parsed");
+
+        assert_eq!(discord.value_kind, "boolean");
+        assert_eq!(discord.category, "Chat");
+    }
+
+    #[test]
+    fn writes_generic_server_ini_values_without_reordering_file() {
+        let content = concat!(
+            "# Main browser name\n",
+            "PublicName=Read Me\n",
+            "# Enable Discord bridge\n",
+            "DiscordEnable=false\n",
+        );
+        let mut settings = read_server_ini_settings(content);
+
+        for setting in &mut settings.settings {
+            match setting.key.as_str() {
+                "PublicName" => setting.value = "New Name".to_string(),
+                "DiscordEnable" => setting.value = "true".to_string(),
+                _ => {}
+            }
+        }
+        settings.public_name = "New Name".to_string();
+        settings = normalized_server_ini_settings(&settings);
+
+        let updated = write_server_ini_settings(content, &settings);
+
+        assert!(updated.contains("# Main browser name\nPublicName=New Name"));
+        assert!(updated.contains("# Enable Discord bridge\nDiscordEnable=true"));
+        assert!(updated.contains("BackupsPeriod=0"));
     }
 
     #[test]

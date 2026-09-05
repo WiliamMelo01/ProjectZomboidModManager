@@ -40,6 +40,18 @@ export type ServerIniSettings = {
   backupsCount: number
   backupsOnStart: boolean
   backupsPeriod: number
+  settings: ServerConfigSetting[]
+}
+
+export type ServerConfigSetting = {
+  key: string
+  category: string
+  value: string
+  valueKind: "number" | "boolean" | "string"
+  defaultValue?: string | null
+  minValue?: string | null
+  maxValue?: string | null
+  description: string
 }
 
 export type ServerLuaSetting = {

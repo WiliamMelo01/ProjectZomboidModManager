@@ -9,6 +9,19 @@ improved, and fixed in each public release.
 
 - No changes recorded yet.
 
+## [0.6.3] - 2026-09-05
+
+Release v0.6.3 - Server Template Bundling & Local Workshop Management
+
+### Fixed
+- **Server Creation (MSI Bundling)**: Fixed "Pasta de exemplo do servidor nao encontrada nos resources" error caused by directory traversal encoding (`_up_`) in Windows MSI bundles. Configured explicit object mapping in `tauri.conf.json` and added runtime path fallback tolerance.
+
+### Changed
+- **Local vs Remote Workshop Items**: Local server setups now leave `WorkshopItems=` empty by default when installing or updating mods, preventing the game from needlessly trying to re-download local mods on every startup. Dedicated/remote server workspaces continue to automatically populate both `Mods=` and `WorkshopItems=`.
+
+### Added
+- **Fill Workshop IDs Button**: Added a 1-click "Preencher Workshop IDs" action in the Server Details view for local servers, allowing users to populate Workshop IDs into the `.ini` configuration whenever desired.
+
 ## [0.6.2] - 2026-07-29
 
 Release v0.6.2 - Sub-Mods & Upload QoL Patch

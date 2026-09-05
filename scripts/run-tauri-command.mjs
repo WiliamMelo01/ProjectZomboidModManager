@@ -16,6 +16,45 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 
 loadDotEnv(path.join(repoRoot, ".env"), env)
 
+// On Windows, ensure .cargo/bin and the Node.js bin directory are in PATH so
+// cargo and node can be found even when the process env does not inherit the
+// full user PATH (e.g. IDE terminals or restricted shells).
+if (process.platform === "win32") {
+  const sep = ";"
+  const extraPaths = []
+
+  // Add Node.js bin directory (parent of node.exe)
+  const nodeBin = path.dirname(process.execPath)
+  extraPaths.push(nodeBin)
+
+  // Add .cargo/bin
+  const userProfile = env.USERPROFILE || env.HOME || ""
+  if (userProfile) {
+    extraPaths.push(path.join(userProfile, ".cargo", "bin"))
+  }
+
+  // Add essential Windows system directories (ssh, scp, powershell, etc.)
+  const systemRoot = env.SystemRoot || env.SYSTEMROOT || "C:\\Windows"
+  extraPaths.push(path.join(systemRoot, "System32"))
+  extraPaths.push(path.join(systemRoot, "System32", "OpenSSH"))
+  extraPaths.push(path.join(systemRoot, "System32", "WindowsPowerShell", "v1.0"))
+  extraPaths.push(path.join(systemRoot))
+  extraPaths.push(path.join(systemRoot, "System32", "Wbem"))
+
+  // PowerShell 7+ (optional, may not be installed)
+  extraPaths.push("C:\\Program Files\\PowerShell\\7")
+
+  // Add Git (ships its own ssh.exe as fallback)
+  extraPaths.push("C:\\Program Files\\Git\\cmd")
+  extraPaths.push("C:\\Program Files\\Git\\usr\\bin")
+
+  for (const entry of extraPaths) {
+    if (!env.PATH?.split(sep).some((p) => p.toLowerCase() === entry.toLowerCase())) {
+      env.PATH = (env.PATH ? env.PATH + sep : "") + entry
+    }
+  }
+}
+
 if (process.platform === "linux") {
   for (const key of Object.keys(env)) {
     if (
@@ -51,7 +90,9 @@ function quoteWindowsCommandArg(value) {
   return `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/\\+$/g, '$&$&')}"`
 }
 
-const spawnCommand = process.platform === "win32" ? "cmd.exe" : commandPath
+const spawnCommand = process.platform === "win32"
+  ? (process.env.COMSPEC || "C:\\Windows\\System32\\cmd.exe")
+  : commandPath
 const spawnArgs = process.platform === "win32"
   ? ["/d", "/c", [commandPath, ...commandArgs].map(quoteWindowsCommandArg).join(" ")]
   : commandArgs

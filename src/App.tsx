@@ -222,6 +222,10 @@ function LocalWorkspaceApp({
     useState(false);
   const [isDeployLocalModalOpen, setIsDeployLocalModalOpen] = useState(false);
   const isRemoteWorkspace = remoteConnection !== null;
+  const remoteConnectionRef = useRef(remoteConnection);
+  useEffect(() => {
+    remoteConnectionRef.current = remoteConnection;
+  }, [remoteConnection]);
   const remoteSetupPromptedConnectionRef = useRef<string | null>(null);
   const workspaceCacheId = remoteConnection
     ? `remote:${[
@@ -601,14 +605,20 @@ function LocalWorkspaceApp({
   async function updateServerMods(
     server: ZomboidServer,
     activeModIds: string[],
+    explicitWorkshopIds?: string[],
   ) {
     setServersError(null);
-    const workshopIds = getWorkshopIdsForModIds(
-      activeModIds,
-      mods,
-      server.gameBuild,
-      workshopMappings,
-    );
+    const workshopIds =
+      explicitWorkshopIds !== undefined
+        ? explicitWorkshopIds
+        : isRemoteWorkspace
+        ? getWorkshopIdsForModIds(
+            activeModIds,
+            mods,
+            server.gameBuild,
+            workshopMappings,
+          )
+        : [];
 
     await invokeTauri<void>(
       isRemoteWorkspace && remoteConnection
@@ -780,12 +790,14 @@ function LocalWorkspaceApp({
         : findModForServerId(mods, modId, data.gameBuild);
       return resolved ? [resolved.id] : [];
     });
-    const workshopIds = getWorkshopIdsForModIds(
-      resolvedModIds,
-      mods,
-      data.gameBuild,
-      workshopMappings,
-    );
+    const workshopIds = isRemoteWorkspace
+      ? getWorkshopIdsForModIds(
+          resolvedModIds,
+          mods,
+          data.gameBuild,
+          workshopMappings,
+        )
+      : [];
     const createdServer = await invokeTauri<ZomboidServer>(
       isRemoteWorkspace && remoteConnection
         ? "create_remote_zomboid_server"
@@ -2151,12 +2163,10 @@ function LocalWorkspaceApp({
           <RemoteSteamCmdModal
             connection={remoteConnection}
             isOpen={isRemoteSteamCmdModalOpen}
-            onClose={() => setIsRemoteSteamCmdModalOpen(false)}
-            onComplete={(config) => {
+            onClose={() => {
               setIsRemoteSteamCmdModalOpen(false);
-              setRemoteWorkspaceConfig(config as any);
               void loadServers();
-              void loadLibrary();
+              void loadMods();
             }}
           />
           <RemoteTerminalModal

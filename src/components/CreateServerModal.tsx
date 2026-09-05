@@ -1,6 +1,8 @@
-import { Box, Check, ChevronLeft, ChevronRight, Copy, Plus, RotateCcw, Save, Server, Users, X } from "lucide-react"
-import { useMemo, useState } from "react"
+import { Box, Check, ChevronLeft, ChevronRight, Copy, Download, Plus, RotateCcw, Save, Server, Users, X } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { invokeTauri } from "@/lib/tauri"
+import { listen } from "@tauri-apps/api/event"
 
 import type { ZomboidMod } from "@/types/mod"
 import type { GameBuild, ZomboidServer } from "@/types/server"
@@ -26,11 +28,40 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
   const [selectedModIds, setSelectedModIds] = useState<Set<string>>(new Set())
   const [cloneSourceId, setCloneSourceId] = useState<string>("")
   const [isCreating, setIsCreating] = useState(false)
+  const [isServerExampleCached, setIsServerExampleCached] = useState(true)
+  const [isDownloadingTemplates, setIsDownloadingTemplates] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const compatibleAvailableMods = useMemo(
     () => availableMods.filter((mod) => supportsBuild(mod, gameBuild)),
     [availableMods, gameBuild],
   )
+
+  useEffect(() => {
+    if (!isOpen) return
+
+    invokeTauri<boolean>("is_server_example_cached")
+      .then((cached) => {
+        setIsServerExampleCached(cached)
+      })
+      .catch(() => {
+        setIsServerExampleCached(true)
+      })
+
+    const unlistenPromise = listen<string>("server_example_sync_status", (event) => {
+      if (event.payload === "downloading") {
+        setIsDownloadingTemplates(true)
+      } else if (event.payload === "ready") {
+        setIsDownloadingTemplates(false)
+        setIsServerExampleCached(true)
+      } else if (event.payload === "error") {
+        setIsDownloadingTemplates(false)
+      }
+    })
+
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten()).catch(() => {})
+    }
+  }, [isOpen])
 
   if (!isOpen) return null
 
@@ -283,6 +314,15 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
             </div>
           )}
 
+          {(!isServerExampleCached || isDownloadingTemplates) && (
+            <div className="mt-6 flex items-center gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-5 py-3.5 text-xs font-semibold text-amber-300 ring-1 ring-amber-500/10 animate-in fade-in duration-300">
+              <Download size={16} className="shrink-0 text-amber-400 animate-bounce" />
+              <div className="flex-1">
+                <p>{t("createServer.downloadingTemplates")}</p>
+              </div>
+            </div>
+          )}
+
           {error && (
             <div className="mt-6 rounded-2xl border border-red-500/20 bg-red-500/10 px-6 py-4 text-sm font-medium text-red-400 ring-1 ring-red-500/10">
               {error}
@@ -319,7 +359,13 @@ export function CreateServerModal({ isOpen, onClose, existingServers, availableM
               className="group relative flex items-center gap-2 overflow-hidden rounded-2xl bg-orange-500 px-10 py-3.5 font-black uppercase italic tracking-widest text-white shadow-[0_0_20px_rgba(249,115,22,0.3)] transition-all hover:bg-orange-600 hover:shadow-[0_0_25px_rgba(249,115,22,0.4)] disabled:bg-gray-800 disabled:text-gray-600 disabled:shadow-none active:scale-95"
             >
               {isCreating ? <RotateCcw size={18} className="animate-spin" /> : <Save size={18} className="transition-transform group-hover:scale-110" />}
-              <span>{isCreating ? t("createServer.creating") : t("createServer.create")}</span>
+              <span>
+                {isCreating
+                  ? !isServerExampleCached || isDownloadingTemplates
+                    ? t("createServer.downloadingAndCreating")
+                    : t("createServer.creating")
+                  : t("createServer.create")}
+              </span>
             </button>
           )}
         </div>

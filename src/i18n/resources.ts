@@ -240,6 +240,8 @@ export const resources = {
         create: "Create server",
         activeMods: "{{count}} active mod(s) · {{build}}",
         createError: "Could not create the server.",
+        downloadingTemplates: "Downloading server template files for the first time... Please wait.",
+        downloadingAndCreating: "Downloading templates & creating...",
       },
       serverConfig: {
         title: "Server setup",
@@ -910,7 +912,6 @@ export const resources = {
         modalPublicKeyCopy: "Copy",
         modalPublicKeyCopied: "Copied",
         helpSshIntro: "Configure only the Linux server side here. Windows VMs should be accessed by RDP and run this app locally inside the VM.",
-
       },
     },
   },
@@ -1156,6 +1157,8 @@ export const resources = {
         create: "Criar servidor",
         activeMods: "{{count}} mods ativos · {{build}}",
         createError: "Não foi possível criar o servidor.",
+        downloadingTemplates: "Baixando arquivos base do servidor pela primeira vez... Aguarde um instante.",
+        downloadingAndCreating: "Baixando bases e criando...",
       },
       serverConfig: {
         title: "Configuração do servidor",

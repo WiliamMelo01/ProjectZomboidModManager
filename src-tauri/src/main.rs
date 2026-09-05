@@ -7,7 +7,7 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
 };
-use tauri::{path::BaseDirectory, Manager};
+use tauri::{path::BaseDirectory, Emitter, Manager};
 #[cfg(windows)]
 use util::hide_command_window;
 
@@ -126,6 +126,17 @@ const SERVER_EXAMPLE_FILES: [(&str, &str); 3] = [
 fn download_file_from_url(url: &str, destination: &Path) -> Result<(), String> {
     #[cfg(windows)]
     {
+        let mut curl_cmd = Command::new("curl.exe");
+        if let Ok(output) = hide_command_window(&mut curl_cmd)
+            .args(["-fsSL", url, "-o"])
+            .arg(destination)
+            .output()
+        {
+            if output.status.success() {
+                return Ok(());
+            }
+        }
+
         let mut command = Command::new("powershell.exe");
         let output = hide_command_window(&mut command)
             .args([
@@ -186,6 +197,20 @@ pub(crate) fn ensure_server_example_cache_dir() -> Result<PathBuf, String> {
     }
 
     Ok(cache_dir)
+}
+
+#[tauri::command]
+fn is_server_example_cached() -> bool {
+    let Ok(cache_dir) = app_config_dir().map(|d| d.join("server-example")) else {
+        return false;
+    };
+    for (file_name, _) in SERVER_EXAMPLE_FILES {
+        let file_path = cache_dir.join(file_name);
+        if !file_path.is_file() || file_path.metadata().map(|m| m.len() == 0).unwrap_or(true) {
+            return false;
+        }
+    }
+    true
 }
 
 pub(crate) fn server_example_dir(_app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -682,9 +707,17 @@ fn main() {
                 eprintln!("Nao foi possivel preparar o pool SteamCMD gerenciado: {error}");
             }
 
-            std::thread::spawn(|| {
-                if let Err(error) = ensure_server_example_cache_dir() {
-                    eprintln!("Aviso: Nao foi possivel pre-baixar arquivos de exemplo do servidor: {error}");
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let _ = app_handle.emit("server_example_sync_status", "downloading");
+                match ensure_server_example_cache_dir() {
+                    Ok(_) => {
+                        let _ = app_handle.emit("server_example_sync_status", "ready");
+                    }
+                    Err(error) => {
+                        eprintln!("Aviso: Nao foi possivel pre-baixar arquivos de exemplo do servidor: {error}");
+                        let _ = app_handle.emit("server_example_sync_status", "error");
+                    }
                 }
             });
 
@@ -794,7 +827,8 @@ fn main() {
             sync_effective_language,
             open_steam_workshop,
             open_steam_workshop_external,
-            open_steam_workshop_steam_client
+            open_steam_workshop_steam_client,
+            is_server_example_cached
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
